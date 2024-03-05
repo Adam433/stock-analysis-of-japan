@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from utils.config_manager import ConfigManager
+from utils.stock_code_list import load_stock_codes
 
 def get_last_date_from_csv(file_path):
     """从CSV文件中读取最后一行的日期。"""
@@ -49,9 +50,7 @@ def update_stock_data(stock_codes, config_manager, save_path):
 def main():
     config_manager = ConfigManager(os.path.join('config.json'))
     save_path = os.path.join('data', 'raw')
-    xls_path = os.path.join('data', 'data_j.xls')
-    df = pd.read_excel(xls_path, sheet_name='Sheet1')
-    stock_codes = [f"{row['コード']}.T" for index, row in df.iterrows() if row['市場・商品区分'] != "ETF・ETN"]
+    stock_codes = load_stock_codes()
     # stock_codes_test = ["9600.T","7777.T"]
     update_stock_data(stock_codes, config_manager, save_path)
 
