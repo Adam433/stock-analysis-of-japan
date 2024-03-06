@@ -1,6 +1,10 @@
 import pandas as pd
 from utils.database import conn
 
+# =======================================================================
+# 交易日的250交易日涨幅存在且RPS为空时，计算RPS
+# =======================================================================
+
 def calculate_and_update_normalized_rankings():
     # 初始化游标，设置为字典类型返回结果以方便处理
     cursor = conn.cursor(dictionary=True)

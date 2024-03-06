@@ -5,6 +5,11 @@ import pandas as pd
 from utils.database import conn  # 导入数据库连接
 from utils.config_manager import ConfigManager  # 导入配置管理器
 
+# =======================================================================
+# 读取数据库股票代码的最新交易日，并以此作为开始日更新至日本本地时间的第二天。
+# 如果数据库没有对应的交易日数据，开始日在config中读取
+# =======================================================================
+
 # 初始化配置管理器
 config_manager = ConfigManager('config.json')  # 确保这里的路径是正确的
 
@@ -73,8 +78,7 @@ def update_stock_data_in_db(stock_codes):
                 if last_date_str:
                     df = df[df['date'] > last_date_str]
                 if not df.empty:
-                    # save_to_database(code, df)  # 使用原始股票代码保存到数据库
-                    print(df)
+                    save_to_database(code, df)  # 使用原始股票代码保存到数据库
                     print(f"数据更新完成：{code}")
             else:
                 failed_downloads.append(code)
