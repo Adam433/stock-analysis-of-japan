@@ -3,5 +3,7 @@
     "download_end_date": "2023-11-20",
     "update_date": "2024-03-03",
     "batch_size": 100,
-    "sleep_time": 6
+    "sleep_time": 6,
+    "growth_rate_threshold": 0.25,
+    "consecutive_years": 3
 }

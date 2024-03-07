@@ -6,7 +6,7 @@ from utils.database import conn  # 导入数据库连接
 from utils.config_manager import ConfigManager  # 导入配置管理器
 
 # =======================================================================
-# 读取数据库股票代码的最新交易日，并以此作为开始日更新至日本本地时间的第二天。
+# 读取数据库股票代码的最新交易日，并以此作为开始日，日本本地时间的第二天作为结束日，更新该时间段股票数据
 # 如果数据库没有对应的交易日数据，开始日在config中读取
 # =======================================================================
 
@@ -28,14 +28,23 @@ def get_last_date_from_db(stock_code):
     return None
 
 def save_to_database(stock_code, df):
-    """将数据保存到数据库，适用于MySQL，并处理NaN值为None（SQL中的NULL）。"""
+    """使用下载的数据覆盖数据库中的数据，适用于MySQL，并处理NaN值为None（SQL中的NULL）。"""
     try:
         cursor = conn.cursor()
-        insert_stock_price_sql = """INSERT INTO stock_price 
-                                    (stock_code, date, open, high, low, close, adj_close, volume) 
-                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
+        # 构建INSERT语句，遇到重复的(stock_code, date)时更新记录
+        insert_update_sql = """
+            INSERT INTO stock_price (stock_code, date, open, high, low, close, adj_close, volume)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+            open = VALUES(open),
+            high = VALUES(high),
+            low = VALUES(low),
+            close = VALUES(close),
+            adj_close = VALUES(adj_close),
+            volume = VALUES(volume);
+        """
         for index, row in df.iterrows():
-            cursor.execute(insert_stock_price_sql, (
+            cursor.execute(insert_update_sql, (
                 stock_code, 
                 row['date'], row['open'], row['high'], row['low'], 
                 row['close'], row['adj_close'], row['volume']
