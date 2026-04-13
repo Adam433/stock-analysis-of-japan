@@ -13,7 +13,7 @@ from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
 from stockanalyse_api.domain.screens.models import ScreenRun, ScreenRunResult
 from stockanalyse_api.services.factor_materialization import materialize_derived_indicator_facts
-from stockanalyse_api.services.screening import execute_screen_run, get_screen_run
+from stockanalyse_api.services.screening import execute_screen_run, get_latest_screen_run, get_screen_run
 from stockanalyse_api.services.strategy_config import get_active_strategy_configuration, save_strategy_configuration
 
 
@@ -129,6 +129,19 @@ class ScreeningTests(unittest.TestCase):
             get_active_strategy_configuration(session)
             with self.assertRaises(ValueError):
                 execute_screen_run(session)
+
+    def test_get_latest_screen_run_returns_most_recent_run(self) -> None:
+        self._seed_market_data()
+
+        with self.session_factory() as session:
+            first = execute_screen_run(session)
+            second = execute_screen_run(session)
+            latest = get_latest_screen_run(session)
+
+        self.assertEqual(first.id + 1, second.id)
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertEqual(latest.id, second.id)
 
 
 if __name__ == "__main__":

@@ -196,3 +196,12 @@ def get_screen_run(session, screen_run_id: int) -> ScreenRunSummary | None:
         },
         qualified_results=qualified_results,
     )
+
+
+def get_latest_screen_run(session) -> ScreenRunSummary | None:
+    screen_run_id = session.execute(
+        select(ScreenRun.id).order_by(ScreenRun.executed_at.desc(), ScreenRun.id.desc()).limit(1)
+    ).scalar_one_or_none()
+    if screen_run_id is None:
+        return None
+    return get_screen_run(session, screen_run_id)

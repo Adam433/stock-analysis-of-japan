@@ -17,26 +17,76 @@ type StrategyConfigurationResponse = {
   };
 };
 
+type ScreenRunResult = {
+  instrument_id: number;
+  symbol: string;
+  exchange: string;
+  trade_date: string;
+  best_rps_value: string | null;
+  rps_threshold: number;
+  high_proximity_ratio: string | null;
+  high_proximity_threshold_pct: string;
+  max_drawdown_from_high_pct: string | null;
+  rps_condition_passed: boolean;
+  high_proximity_condition_passed: boolean;
+};
+
+type ScreenRun = {
+  id: number;
+  strategy_configuration_id: number;
+  trade_date: string;
+  executed_at: string;
+  total_candidates: number;
+  qualified_count: number;
+  status: string;
+  parameter_set: {
+    id: number;
+    version: number;
+    rps_threshold: number;
+    high_proximity_threshold_pct: string;
+  };
+  qualified_results: ScreenRunResult[];
+};
+
 type StrategyConfigPanelProps = {
   apiBaseUrl: string;
   initialData: StrategyConfigurationResponse | null;
   initialError: string | null;
+  initialRun: ScreenRun | null;
+  initialRunError: string | null;
 };
 
 type SaveState = "idle" | "saving" | "saved" | "error";
+type RunState = "idle" | "running" | "ready" | "error";
+
+function formatTimestamp(value: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
 
 export function StrategyConfigPanel({
   apiBaseUrl,
   initialData,
   initialError,
+  initialRun,
+  initialRunError,
 }: StrategyConfigPanelProps) {
   const [rpsThreshold, setRpsThreshold] = useState(initialData?.configuration.rps_threshold ?? 90);
   const [highProximityThresholdPct, setHighProximityThresholdPct] = useState(
     initialData?.configuration.high_proximity_threshold_pct ?? "5.00",
   );
   const [activeVersion, setActiveVersion] = useState(initialData?.configuration.version ?? 0);
-  const [message, setMessage] = useState(initialError ?? "Edit the thresholds and save the set for the next screen run.");
+  const [message, setMessage] = useState(
+    initialError ?? "Edit the thresholds, save the set, and launch a screen run.",
+  );
   const [saveState, setSaveState] = useState<SaveState>(initialError ? "error" : "idle");
+  const [runState, setRunState] = useState<RunState>(initialRun ? "ready" : initialRunError ? "error" : "idle");
+  const [runMessage, setRunMessage] = useState(
+    initialRunError ?? "No screen run has been launched from this workflow yet.",
+  );
+  const [latestRun, setLatestRun] = useState<ScreenRun | null>(initialRun);
   const hasLoadedConfiguration = Boolean(initialData);
 
   useEffect(() => {
@@ -104,15 +154,43 @@ export function StrategyConfigPanel({
     }
   }
 
+  async function handleRunScreen() {
+    setRunState("running");
+    setRunMessage("Launching screen run against the latest derived facts...");
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/screen/runs`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json()) as { detail?: string };
+        throw new Error(payload.detail ?? `Run failed with ${response.status}`);
+      }
+
+      const payload = (await response.json()) as { screen_run: ScreenRun };
+      setLatestRun(payload.screen_run);
+      setRunState("ready");
+      setRunMessage(
+        `Run #${payload.screen_run.id} completed. ${payload.screen_run.qualified_count} qualified stock(s) out of ${payload.screen_run.total_candidates} candidates.`,
+      );
+    } catch (error) {
+      setRunState("error");
+      setRunMessage(
+        error instanceof Error ? error.message : "Unable to launch the screen run.",
+      );
+    }
+  }
+
   return (
     <section className="screen-panel">
       <div className="screen-panel__header">
         <p className="eyebrow">Strategy Configuration</p>
-        <h1>Create and refine the MVP parameter set.</h1>
+        <h1>Run the MVP screen and review the qualified list.</h1>
         <p className="hero-text">
-          This workflow owns the editable thresholds that later screening and
-          backtesting stories will consume. Each save produces a new active
-          version instead of mutating the old set in place.
+          This workflow now covers both parameter editing and the first result-list
+          surface. The list below is tied to the exact parameter set and run date
+          that produced it.
         </p>
       </div>
 
@@ -125,12 +203,12 @@ export function StrategyConfigPanel({
         <article className="screen-summary-card">
           <p className="status-label">RPS Rule</p>
           <h2>{hasLoadedConfiguration ? rpsThreshold : "Unavailable"}</h2>
-          <p className="status-copy">At least one supported RPS line will need to meet this threshold.</p>
+          <p className="status-copy">At least one supported RPS line must meet this threshold.</p>
         </article>
         <article className="screen-summary-card">
           <p className="status-label">52-Week High Rule</p>
           <h2>{hasLoadedConfiguration ? `${highProximityThresholdPct}%` : "Unavailable"}</h2>
-          <p className="status-copy">Maximum allowed distance below the 52-week high.</p>
+          <p className="status-copy">Maximum allowed drawdown from the rolling 52-week high.</p>
         </article>
       </div>
 
@@ -163,12 +241,102 @@ export function StrategyConfigPanel({
         </label>
 
         <div className="strategy-actions">
-          <button type="submit" className="strategy-button" disabled={saveState === "saving"}>
-            {saveState === "saving" ? "Saving..." : "Save Parameter Set"}
-          </button>
+          <div className="strategy-button-row">
+            <button type="submit" className="strategy-button" disabled={saveState === "saving"}>
+              {saveState === "saving" ? "Saving..." : "Save Parameter Set"}
+            </button>
+            <button
+              type="button"
+              className="strategy-button strategy-button--secondary"
+              disabled={!hasLoadedConfiguration || runState === "running"}
+              onClick={handleRunScreen}
+            >
+              {runState === "running" ? "Running..." : "Run Screen"}
+            </button>
+          </div>
           <p className={`strategy-message strategy-message--${saveState}`}>{message}</p>
+          <p className={`strategy-message strategy-message--${runState}`}>{runMessage}</p>
         </div>
       </form>
+
+      <section className="result-panel">
+        <div className="result-panel__header">
+          <p className="eyebrow">Result List</p>
+          <h2>Qualified stocks with immediate context.</h2>
+          <p className="status-copy">
+            {latestRun
+              ? `Run #${latestRun.id} executed ${formatTimestamp(latestRun.executed_at)} with parameter set v${latestRun.parameter_set.version}.`
+              : "Launch a screen run to populate the result list."}
+          </p>
+        </div>
+
+        {latestRun ? (
+          <>
+            <div className="run-metadata-grid">
+              <article className="run-metadata-card">
+                <p className="status-label">Run Date</p>
+                <h3>{latestRun.trade_date}</h3>
+              </article>
+              <article className="run-metadata-card">
+                <p className="status-label">Qualified</p>
+                <h3>{latestRun.qualified_count}</h3>
+              </article>
+              <article className="run-metadata-card">
+                <p className="status-label">Candidates</p>
+                <h3>{latestRun.total_candidates}</h3>
+              </article>
+            </div>
+
+            {latestRun.qualified_results.length ? (
+              <div className="result-list">
+                {latestRun.qualified_results.map((result) => (
+                  <article key={`${latestRun.id}-${result.instrument_id}`} className="result-card">
+                    <div className="result-card__title">
+                      <div>
+                        <p className="status-label">{result.exchange}</p>
+                        <h3>{result.symbol}</h3>
+                      </div>
+                      <p className="result-pass-flag">Qualified</p>
+                    </div>
+
+                    <div className="result-summary-grid">
+                      <div>
+                        <dt>Best RPS</dt>
+                        <dd>
+                          {result.best_rps_value} vs threshold {result.rps_threshold}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Drawdown From High</dt>
+                        <dd>
+                          {result.max_drawdown_from_high_pct}% vs limit {result.high_proximity_threshold_pct}%
+                        </dd>
+                      </div>
+                    </div>
+
+                    <ul className="signal-list">
+                      <li>
+                        RPS condition: {result.rps_condition_passed ? "passed" : "failed"}
+                      </li>
+                      <li>
+                        52-week-high proximity:{" "}
+                        {result.high_proximity_condition_passed ? "passed" : "failed"}
+                      </li>
+                      <li>High proximity ratio: {result.high_proximity_ratio}</li>
+                    </ul>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="empty-state">
+                This run completed with no qualified stocks for the current parameter set.
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="empty-state">No persisted screen run is available yet.</p>
+        )}
+      </section>
     </section>
   );
 }
