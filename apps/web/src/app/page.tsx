@@ -111,6 +111,8 @@ export default async function HomePage() {
             <span>Data Health</span>
             <span>/</span>
             <Link href="/screen">Screen Configuration</Link>
+            <span>/</span>
+            <Link href="/watchlist">Watchlist</Link>
           </p>
           <h1>Operational trust view for Japan equity data.</h1>
           <p className="hero-text">

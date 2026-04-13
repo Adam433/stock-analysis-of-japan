@@ -15,6 +15,9 @@ type WatchlistToggleButtonProps = {
   symbol: string;
   className?: string;
   initialIsInWatchlist?: boolean;
+  initialNote?: string | null;
+  initialObservationReason?: string | null;
+  initialAddedDate?: string | null;
   loadOnMount?: boolean;
   onToggleComplete?: (nextValue: boolean) => void;
 };
@@ -27,20 +30,35 @@ export function WatchlistToggleButton({
   symbol,
   className,
   initialIsInWatchlist = false,
+  initialNote = null,
+  initialObservationReason = null,
+  initialAddedDate = null,
   loadOnMount = true,
   onToggleComplete,
 }: WatchlistToggleButtonProps) {
   const [isInWatchlist, setIsInWatchlist] = useState(initialIsInWatchlist);
   const [toggleState, setToggleState] = useState<ToggleState>("idle");
   const [message, setMessage] = useState<string | null>(null);
-  const [note, setNote] = useState("");
-  const [observationReason, setObservationReason] = useState("");
-  const [addedDate, setAddedDate] = useState<string | null>(null);
+  const [note, setNote] = useState(initialNote ?? "");
+  const [observationReason, setObservationReason] = useState(initialObservationReason ?? "");
+  const [addedDate, setAddedDate] = useState<string | null>(initialAddedDate);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
 
   useEffect(() => {
     setIsInWatchlist(initialIsInWatchlist);
   }, [initialIsInWatchlist]);
+
+  useEffect(() => {
+    setNote(initialNote ?? "");
+  }, [initialNote]);
+
+  useEffect(() => {
+    setObservationReason(initialObservationReason ?? "");
+  }, [initialObservationReason]);
+
+  useEffect(() => {
+    setAddedDate(initialAddedDate);
+  }, [initialAddedDate]);
 
   useEffect(() => {
     if (!loadOnMount) {
