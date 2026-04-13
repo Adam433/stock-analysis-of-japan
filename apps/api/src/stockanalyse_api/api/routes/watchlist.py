@@ -4,13 +4,25 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from stockanalyse_api.db.session import SessionLocal
-from stockanalyse_api.services.watchlist import add_watchlist_entry, list_watchlist_entries, remove_watchlist_entry
+from stockanalyse_api.services.watchlist import (
+    add_watchlist_entry,
+    list_watchlist_entries,
+    remove_watchlist_entry,
+    update_watchlist_entry,
+)
 
 router = APIRouter(prefix="/watchlist", tags=["watchlist"])
 
 
 class WatchlistCreateRequest(BaseModel):
     instrument_id: int
+    note: str | None = None
+    observation_reason: str | None = None
+
+
+class WatchlistUpdateRequest(BaseModel):
+    note: str | None = None
+    observation_reason: str | None = None
 
 
 @router.get("")
@@ -24,8 +36,31 @@ def read_watchlist() -> dict[str, object]:
 def create_watchlist_entry(payload: WatchlistCreateRequest) -> dict[str, object]:
     try:
         with SessionLocal() as session:
-            entry = add_watchlist_entry(session, payload.instrument_id)
+            entry = add_watchlist_entry(
+                session,
+                payload.instrument_id,
+                note=payload.note,
+                observation_reason=payload.observation_reason,
+            )
     except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return {"entry": entry.to_dict()}
+
+
+@router.put("/{instrument_id}")
+def put_watchlist_entry(instrument_id: int, payload: WatchlistUpdateRequest) -> dict[str, object]:
+    try:
+        with SessionLocal() as session:
+            entry = update_watchlist_entry(
+                session,
+                instrument_id,
+                note=payload.note,
+                observation_reason=payload.observation_reason,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return {"entry": entry.to_dict()}

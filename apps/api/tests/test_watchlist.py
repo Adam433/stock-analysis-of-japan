@@ -7,7 +7,12 @@ from sqlalchemy.orm import sessionmaker
 
 from stockanalyse_api.db.base import Base
 from stockanalyse_api.domain.instruments.models import Instrument
-from stockanalyse_api.services.watchlist import add_watchlist_entry, list_watchlist_entries, remove_watchlist_entry
+from stockanalyse_api.services.watchlist import (
+    add_watchlist_entry,
+    list_watchlist_entries,
+    remove_watchlist_entry,
+    update_watchlist_entry,
+)
 
 
 class WatchlistTests(unittest.TestCase):
@@ -36,23 +41,48 @@ class WatchlistTests(unittest.TestCase):
         instrument_id = self._seed_instrument()
 
         with self.session_factory() as session:
-            entry = add_watchlist_entry(session, instrument_id)
+            entry = add_watchlist_entry(
+                session,
+                instrument_id,
+                note="Tight base after earnings.",
+                observation_reason="Watch for breakout confirmation",
+            )
             entries = list_watchlist_entries(session)
 
         self.assertEqual(entry.instrument_id, instrument_id)
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0].symbol, "7203")
+        self.assertEqual(entries[0].note, "Tight base after earnings.")
+        self.assertEqual(entries[0].observation_reason, "Watch for breakout confirmation")
+        self.assertRegex(entries[0].added_date, r"^\d{4}-\d{2}-\d{2}$")
 
     def test_add_watchlist_entry_is_idempotent_for_same_instrument(self) -> None:
         instrument_id = self._seed_instrument()
 
         with self.session_factory() as session:
-            first = add_watchlist_entry(session, instrument_id)
-            second = add_watchlist_entry(session, instrument_id)
+            first = add_watchlist_entry(session, instrument_id, note="Initial note")
+            second = add_watchlist_entry(session, instrument_id, note="Revised note")
             entries = list_watchlist_entries(session)
 
         self.assertEqual(first.id, second.id)
         self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].note, "Revised note")
+
+    def test_update_watchlist_entry_persists_note_and_reason(self) -> None:
+        instrument_id = self._seed_instrument()
+
+        with self.session_factory() as session:
+            original = add_watchlist_entry(session, instrument_id)
+            updated = update_watchlist_entry(
+                session,
+                instrument_id,
+                note="Needs volume follow-through",
+                observation_reason="Wait for weekly close near highs",
+            )
+
+        self.assertEqual(original.id, updated.id)
+        self.assertEqual(updated.note, "Needs volume follow-through")
+        self.assertEqual(updated.observation_reason, "Wait for weekly close near highs")
 
     def test_remove_watchlist_entry_deletes_existing_binding(self) -> None:
         instrument_id = self._seed_instrument()

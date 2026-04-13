@@ -248,6 +248,17 @@ a {
   font: inherit;
 }
 
+.strategy-field textarea {
+  width: 100%;
+  border: 1px solid rgba(27, 24, 20, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 14px 16px;
+  color: var(--foreground);
+  font: inherit;
+  resize: vertical;
+}
+
 .strategy-field small {
   color: var(--muted);
 }
@@ -545,6 +556,32 @@ a {
 .watchlist-toggle {
   display: grid;
   gap: 10px;
+}
+
+.watchlist-toggle__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.watchlist-link-button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  padding: 10px 4px;
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
+}
+
+.watchlist-editor {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 20px;
+  padding: 16px;
 }
 
 .error-callout {
