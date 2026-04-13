@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, String, Text
+from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from stockanalyse_api.db.base import Base, TimestampMixin
@@ -30,4 +30,11 @@ class BacktestRun(TimestampMixin, Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="running", server_default="running")
+    trade_dates_evaluated: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    total_candidates_evaluated: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    qualifying_observations: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    unique_qualified_instruments: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    first_qualified_trade_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    last_qualified_trade_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    result_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

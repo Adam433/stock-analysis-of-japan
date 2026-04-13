@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
+from hashlib import sha256
 
 from sqlalchemy import select
 
 from stockanalyse_api.domain.backtests.models import BacktestRun
+from stockanalyse_api.domain.indicators.models import DerivedIndicatorDaily
+from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.screens.models import StrategyConfiguration
+from stockanalyse_api.services.screening import evaluate_indicator_snapshot
 from stockanalyse_api.services.strategy_config import get_active_strategy_configuration
 
 
@@ -20,6 +24,7 @@ class BacktestRunSummary:
     started_at: str
     completed_at: str | None
     error_message: str | None
+    result_summary: dict[str, object]
     parameter_set: dict[str, object]
 
     def to_dict(self) -> dict[str, object]:
@@ -36,6 +41,19 @@ def _serialize(run: BacktestRun, configuration: StrategyConfiguration) -> Backte
         started_at=run.started_at.isoformat(),
         completed_at=run.completed_at.isoformat() if run.completed_at is not None else None,
         error_message=run.error_message,
+        result_summary={
+            "trade_dates_evaluated": run.trade_dates_evaluated,
+            "total_candidates_evaluated": run.total_candidates_evaluated,
+            "qualifying_observations": run.qualifying_observations,
+            "unique_qualified_instruments": run.unique_qualified_instruments,
+            "first_qualified_trade_date": (
+                run.first_qualified_trade_date.isoformat() if run.first_qualified_trade_date is not None else None
+            ),
+            "last_qualified_trade_date": (
+                run.last_qualified_trade_date.isoformat() if run.last_qualified_trade_date is not None else None
+            ),
+            "result_checksum": run.result_checksum,
+        },
         parameter_set={
             "id": configuration.id,
             "version": configuration.version,
@@ -87,3 +105,65 @@ def get_latest_backtest_run(session) -> BacktestRunSummary | None:
     if run_id is None:
         return None
     return get_backtest_run(session, run_id)
+
+
+def execute_backtest_run(session, run_id: int) -> BacktestRunSummary:
+    run = session.get(BacktestRun, run_id)
+    if run is None:
+        raise LookupError("Backtest run not found.")
+
+    configuration = session.get(StrategyConfiguration, run.strategy_configuration_id)
+    if configuration is None:
+        raise ValueError("Strategy configuration not found for backtest run.")
+
+    indicators = session.execute(
+        select(DerivedIndicatorDaily, Instrument)
+        .join(Instrument, Instrument.id == DerivedIndicatorDaily.instrument_id)
+        .where(
+            DerivedIndicatorDaily.trade_date >= run.start_date,
+            DerivedIndicatorDaily.trade_date <= run.end_date,
+        )
+        .order_by(DerivedIndicatorDaily.trade_date.asc(), Instrument.symbol.asc())
+    ).all()
+
+    if not indicators:
+        run.status = "failed"
+        run.error_message = "No derived indicator facts are available for the requested backtest range."
+        run.completed_at = datetime.now(UTC)
+        session.commit()
+        raise ValueError(run.error_message)
+
+    trade_dates: set[date] = set()
+    unique_qualified_instruments: set[int] = set()
+    qualifying_trade_dates: list[date] = []
+    qualifying_tuples: list[str] = []
+    total_candidates_evaluated = 0
+    qualifying_observations = 0
+
+    for indicator_row, instrument in indicators:
+        trade_dates.add(indicator_row.trade_date)
+        total_candidates_evaluated += 1
+        evaluation = evaluate_indicator_snapshot(indicator_row, configuration)
+        if evaluation["passed"]:
+            qualifying_observations += 1
+            unique_qualified_instruments.add(instrument.id)
+            qualifying_trade_dates.append(indicator_row.trade_date)
+            qualifying_tuples.append(
+                f"{indicator_row.trade_date.isoformat()}:{instrument.symbol}:{evaluation['best_rps_value']}:{evaluation['high_proximity_ratio']}"
+            )
+
+    checksum = sha256("|".join(qualifying_tuples).encode("utf-8")).hexdigest()
+    run.trade_dates_evaluated = len(trade_dates)
+    run.total_candidates_evaluated = total_candidates_evaluated
+    run.qualifying_observations = qualifying_observations
+    run.unique_qualified_instruments = len(unique_qualified_instruments)
+    run.first_qualified_trade_date = min(qualifying_trade_dates) if qualifying_trade_dates else None
+    run.last_qualified_trade_date = max(qualifying_trade_dates) if qualifying_trade_dates else None
+    run.result_checksum = checksum
+    run.status = "completed"
+    run.error_message = None
+    run.completed_at = datetime.now(UTC)
+    session.commit()
+    session.refresh(run)
+
+    return _serialize(run, configuration)

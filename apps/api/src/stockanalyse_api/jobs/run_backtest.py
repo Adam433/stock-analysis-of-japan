@@ -4,7 +4,7 @@ import argparse
 from datetime import date
 
 from stockanalyse_api.db.session import SessionLocal
-from stockanalyse_api.services.backtesting import launch_backtest_run
+from stockanalyse_api.services.backtesting import execute_backtest_run, launch_backtest_run
 
 
 def main() -> None:
@@ -14,11 +14,12 @@ def main() -> None:
     args = parser.parse_args()
 
     with SessionLocal() as session:
-        result = launch_backtest_run(
+        launched = launch_backtest_run(
             session,
             start_date=date.fromisoformat(args.start_date),
             end_date=date.fromisoformat(args.end_date),
         )
+        result = execute_backtest_run(session, launched.id)
 
     print(result.to_dict())
 

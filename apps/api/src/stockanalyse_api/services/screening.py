@@ -47,6 +47,33 @@ def _active_configuration(session) -> StrategyConfiguration:
     return configuration
 
 
+def evaluate_indicator_snapshot(indicator_row: DerivedIndicatorDaily, configuration: StrategyConfiguration) -> dict[str, object]:
+    rps_values = [
+        value for value in (indicator_row.rps_50, indicator_row.rps_120, indicator_row.rps_250) if value is not None
+    ]
+    best_rps_value = max(rps_values) if rps_values else None
+    rps_condition_passed = best_rps_value is not None and best_rps_value >= configuration.rps_threshold
+
+    proximity_limit = Decimal("1") - (configuration.high_proximity_threshold_pct / Decimal("100"))
+    high_proximity_ratio = indicator_row.high_proximity_ratio
+    high_proximity_condition_passed = (
+        high_proximity_ratio is not None and high_proximity_ratio >= proximity_limit
+    )
+
+    max_drawdown_from_high_pct = None
+    if high_proximity_ratio is not None:
+        max_drawdown_from_high_pct = _quantize((Decimal("1") - high_proximity_ratio) * Decimal("100"), "0.01")
+
+    return {
+        "best_rps_value": best_rps_value,
+        "rps_condition_passed": rps_condition_passed,
+        "high_proximity_ratio": high_proximity_ratio,
+        "high_proximity_condition_passed": high_proximity_condition_passed,
+        "max_drawdown_from_high_pct": max_drawdown_from_high_pct,
+        "passed": rps_condition_passed and high_proximity_condition_passed,
+    }
+
+
 def execute_screen_run(session) -> ScreenRunSummary:
     configuration = _active_configuration(session)
     trade_date = _latest_trade_date(session)
@@ -75,22 +102,14 @@ def execute_screen_run(session) -> ScreenRunSummary:
 
     qualified_results: list[dict[str, object]] = []
     qualified_count = 0
-    proximity_limit = Decimal("1") - (configuration.high_proximity_threshold_pct / Decimal("100"))
-
     for indicator_row, instrument in indicators:
-        rps_values = [value for value in (indicator_row.rps_50, indicator_row.rps_120, indicator_row.rps_250) if value is not None]
-        best_rps_value = max(rps_values) if rps_values else None
-        rps_condition_passed = best_rps_value is not None and best_rps_value >= configuration.rps_threshold
-
-        high_proximity_ratio = indicator_row.high_proximity_ratio
-        high_proximity_condition_passed = (
-            high_proximity_ratio is not None and high_proximity_ratio >= proximity_limit
-        )
-        max_drawdown_from_high_pct = None
-        if high_proximity_ratio is not None:
-            max_drawdown_from_high_pct = _quantize((Decimal("1") - high_proximity_ratio) * Decimal("100"), "0.01")
-
-        passed = rps_condition_passed and high_proximity_condition_passed
+        evaluation = evaluate_indicator_snapshot(indicator_row, configuration)
+        best_rps_value = evaluation["best_rps_value"]
+        rps_condition_passed = evaluation["rps_condition_passed"]
+        high_proximity_ratio = evaluation["high_proximity_ratio"]
+        high_proximity_condition_passed = evaluation["high_proximity_condition_passed"]
+        max_drawdown_from_high_pct = evaluation["max_drawdown_from_high_pct"]
+        passed = evaluation["passed"]
         if passed:
             qualified_count += 1
 

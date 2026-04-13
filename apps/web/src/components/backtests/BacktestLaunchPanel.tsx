@@ -11,6 +11,15 @@ type BacktestRun = {
   started_at: string;
   completed_at: string | null;
   error_message: string | null;
+  result_summary: {
+    trade_dates_evaluated: number;
+    total_candidates_evaluated: number;
+    qualifying_observations: number;
+    unique_qualified_instruments: number;
+    first_qualified_trade_date: string | null;
+    last_qualified_trade_date: string | null;
+    result_checksum: string | null;
+  };
   parameter_set: {
     id: number;
     version: number;
@@ -47,7 +56,7 @@ export function BacktestLaunchPanel({
   const [message, setMessage] = useState(
     initialError ?? "Select a historical range and launch a persisted backtest run.",
   );
-  const [launchState, setLaunchState] = useState<"idle" | "launching" | "ready" | "error">(
+  const [launchState, setLaunchState] = useState<"idle" | "launching" | "executing" | "ready" | "error">(
     initialError ? "error" : initialRun ? "ready" : "idle",
   );
 
@@ -86,6 +95,38 @@ export function BacktestLaunchPanel({
     } catch (error) {
       setLaunchState("error");
       setMessage(error instanceof Error ? error.message : "Unable to launch backtest run.");
+    }
+  }
+
+  async function handleExecuteLatestRun() {
+    if (!latestRun) {
+      setLaunchState("error");
+      setMessage("Launch a backtest run before executing it.");
+      return;
+    }
+
+    setLaunchState("executing");
+    setMessage(`Executing backtest run #${latestRun.id} from stored derived facts...`);
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/backtests/runs/${latestRun.id}/execute`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json()) as { detail?: string };
+        throw new Error(payload.detail ?? `Request failed with ${response.status}`);
+      }
+
+      const payload = (await response.json()) as { backtest_run: BacktestRun };
+      setLatestRun(payload.backtest_run);
+      setLaunchState("ready");
+      setMessage(
+        `Backtest run #${payload.backtest_run.id} completed with checksum ${payload.backtest_run.result_summary.result_checksum ?? "unavailable"}.`,
+      );
+    } catch (error) {
+      setLaunchState("error");
+      setMessage(error instanceof Error ? error.message : "Unable to execute backtest run.");
     }
   }
 
@@ -146,6 +187,14 @@ export function BacktestLaunchPanel({
             <button type="submit" className="strategy-button" disabled={launchState === "launching"}>
               {launchState === "launching" ? "Launching..." : "Launch Backtest"}
             </button>
+            <button
+              type="button"
+              className="strategy-button strategy-button--secondary"
+              disabled={!latestRun || launchState === "executing" || launchState === "launching"}
+              onClick={handleExecuteLatestRun}
+            >
+              {launchState === "executing" ? "Executing..." : "Execute Latest Run"}
+            </button>
           </div>
           <p className={`strategy-message strategy-message--${launchState === "error" ? "error" : "ready"}`}>
             {message}
@@ -177,6 +226,42 @@ export function BacktestLaunchPanel({
           </div>
         ) : (
           <p className="empty-state">No persisted backtest run is available yet.</p>
+        )}
+
+        {latestRun?.status === "completed" ? (
+          <div className="run-metadata-grid backtest-summary-grid">
+            <article className="run-metadata-card">
+              <p className="status-label">Trade Dates</p>
+              <h3>{latestRun.result_summary.trade_dates_evaluated}</h3>
+            </article>
+            <article className="run-metadata-card">
+              <p className="status-label">Qualified Snapshots</p>
+              <h3>{latestRun.result_summary.qualifying_observations}</h3>
+            </article>
+            <article className="run-metadata-card">
+              <p className="status-label">Qualified Instruments</p>
+              <h3>{latestRun.result_summary.unique_qualified_instruments}</h3>
+            </article>
+            <article className="run-metadata-card">
+              <p className="status-label">First / Last Qualified</p>
+              <h3>
+                {latestRun.result_summary.first_qualified_trade_date ?? "-"} /{" "}
+                {latestRun.result_summary.last_qualified_trade_date ?? "-"}
+              </h3>
+            </article>
+            <article className="run-metadata-card">
+              <p className="status-label">Checksum</p>
+              <h3>{latestRun.result_summary.result_checksum ?? "Unavailable"}</h3>
+            </article>
+            <article className="run-metadata-card">
+              <p className="status-label">Candidates Evaluated</p>
+              <h3>{latestRun.result_summary.total_candidates_evaluated}</h3>
+            </article>
+          </div>
+        ) : (
+          <p className="empty-state">
+            Execute a persisted run to materialize a reproducible backtest summary from stored inputs.
+          </p>
         )}
       </section>
     </section>

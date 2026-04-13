@@ -6,7 +6,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from stockanalyse_api.db.session import SessionLocal
-from stockanalyse_api.services.backtesting import get_backtest_run, get_latest_backtest_run, launch_backtest_run
+from stockanalyse_api.services.backtesting import (
+    execute_backtest_run,
+    get_backtest_run,
+    get_latest_backtest_run,
+    launch_backtest_run,
+)
 
 router = APIRouter(prefix="/backtests", tags=["backtests"])
 
@@ -41,5 +46,18 @@ def read_backtest_run(run_id: int) -> dict[str, object]:
 
     if run is None:
         raise HTTPException(status_code=404, detail="Backtest run not found.")
+
+    return {"backtest_run": run.to_dict()}
+
+
+@router.post("/runs/{run_id}/execute")
+def run_backtest(run_id: int) -> dict[str, object]:
+    try:
+        with SessionLocal() as session:
+            run = execute_backtest_run(session, run_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return {"backtest_run": run.to_dict()}
