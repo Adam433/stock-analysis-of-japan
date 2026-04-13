@@ -1,0 +1,44 @@
+{
+  "daily_bars": [
+    {
+      "symbol": "7203.T",
+      "exchange": "TSE",
+      "trade_date": "2026-04-10",
+      "open": "2785.0",
+      "high": "2810.5",
+      "low": "2774.0",
+      "close": "2801.0",
+      "adj_close": "2801.0",
+      "volume": 25100400,
+      "instrument_name": "Toyota Motor Corp",
+      "currency": "JPY"
+    },
+    {
+      "symbol": "7203.T",
+      "exchange": "TSE",
+      "trade_date": "2026-04-11",
+      "open": null,
+      "high": null,
+      "low": null,
+      "close": null,
+      "adj_close": null,
+      "volume": null,
+      "data_status": "unavailable",
+      "instrument_name": "Toyota Motor Corp",
+      "currency": "JPY"
+    },
+    {
+      "symbol": "6758.T",
+      "exchange": "TSE",
+      "trade_date": "2026-04-10",
+      "open": "13590.0",
+      "high": "13680.0",
+      "low": "13520.0",
+      "close": "13610.0",
+      "adj_close": null,
+      "volume": 5401200,
+      "instrument_name": "Sony Group Corp",
+      "currency": "JPY"
+    }
+  ]
+}

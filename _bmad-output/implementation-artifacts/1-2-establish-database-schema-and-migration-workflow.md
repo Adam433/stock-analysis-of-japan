@@ -1,6 +1,6 @@
 # Story 1.2: Establish Database Schema and Migration Workflow
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -120,6 +120,7 @@ GPT-5.4
 - Added `Instrument` and `MarketDataDaily` models only; deferred all other tables.
 - Added Alembic environment files and an initial baseline migration.
 - Applied the migration successfully and verified the expected tables in `data/stockanalyse.db`.
+- Enabled SQLite foreign key enforcement at connection time so schema behavior matches the migration intent.
 
 ### File List
 

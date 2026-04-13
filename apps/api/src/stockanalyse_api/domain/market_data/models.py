@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Date, ForeignKey, Numeric, UniqueConstraint
+from sqlalchemy import BigInteger, Date, ForeignKey, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from stockanalyse_api.db.base import Base, TimestampMixin
@@ -31,5 +31,7 @@ class MarketDataDaily(TimestampMixin, Base):
     close: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     adj_close: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    data_source: Mapped[str] = mapped_column(String(32), default="unknown", server_default="unknown")
+    data_status: Mapped[str] = mapped_column(String(16), default="complete", server_default="complete")
 
     instrument = relationship("Instrument", back_populates="daily_market_data")
