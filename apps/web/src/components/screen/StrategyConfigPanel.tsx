@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
 
 type StrategyConfiguration = {
   id: number;
@@ -294,7 +295,14 @@ export function StrategyConfigPanel({
                     <div className="result-card__title">
                       <div>
                         <p className="status-label">{result.exchange}</p>
-                        <h3>{result.symbol}</h3>
+                        <h3>
+                          <Link
+                            href={`/stocks/${result.instrument_id}?screen_run_id=${latestRun.id}`}
+                            className="result-link"
+                          >
+                            {result.symbol}
+                          </Link>
+                        </h3>
                       </div>
                       <p className="result-pass-flag">Qualified</p>
                     </div>
