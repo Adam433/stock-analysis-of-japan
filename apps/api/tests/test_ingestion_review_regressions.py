@@ -69,7 +69,17 @@ class IngestionReviewRegressionTests(unittest.TestCase):
         with self.session_factory() as session:
             result = refresh_market_data(session, DuplicateBarProvider(), ["7203"])
 
-        self.assertEqual(result, {"inserted": 1, "updated": 1})
+        self.assertEqual(
+            result,
+            {
+                "processed": 2,
+                "inserted": 1,
+                "updated": 1,
+                "partial_rows": 0,
+                "unavailable_rows": 0,
+                "latest_trade_date": "2026-04-11",
+            },
+        )
 
         with self.session_factory() as session:
             bars = session.execute(select(MarketDataDaily)).scalars().all()

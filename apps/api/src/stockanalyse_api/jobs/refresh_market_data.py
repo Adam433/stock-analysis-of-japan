@@ -5,7 +5,7 @@ from pathlib import Path
 
 from stockanalyse_api.db.session import SessionLocal
 from stockanalyse_api.services.ingestion.providers.static_provider import StaticFixtureProvider
-from stockanalyse_api.services.ingestion.refresh_service import refresh_market_data
+from stockanalyse_api.services.ingestion.refresh_service import execute_market_data_refresh
 
 APP_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_FIXTURE_PATH = Path("tests/fixtures/japan_equity_eod_fixture.json")
@@ -39,7 +39,7 @@ def main() -> None:
         raise ValueError(f"Unsupported provider: {args.provider}")
 
     with SessionLocal() as session:
-        result = refresh_market_data(session, provider, args.symbols)
+        result = execute_market_data_refresh(session, provider, args.symbols)
 
     print(result)
 
