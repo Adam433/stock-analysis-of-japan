@@ -66,6 +66,14 @@ function formatNumber(value: string | null, digits = 2): string {
   return Number(value).toFixed(digits);
 }
 
+function formatPercent(value: string | null, digits = 2): string {
+  if (!value) {
+    return "Unavailable";
+  }
+
+  return `${Number(value).toFixed(digits)}%`;
+}
+
 function formatTimestamp(value: string): string {
   return new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
@@ -160,6 +168,20 @@ function buildRpsLines(detail: StockDetailPayload) {
 export function StockDetailView({ detail }: StockDetailViewProps) {
   const candleGeometry = buildCandleGeometry(detail.candlesticks);
   const rpsLines = buildRpsLines(detail);
+  const bestRpsValue = detail.rule_breakdown.rps_condition.best_rps_value;
+  const maxDrawdown = detail.rule_breakdown.high_proximity_condition.max_drawdown_from_high_pct;
+  const highProximityRatio = detail.rule_breakdown.high_proximity_condition.high_proximity_ratio;
+  const qualificationSummary = detail.rule_breakdown.passed
+    ? `Qualified because best RPS ${formatNumber(bestRpsValue)} cleared the ${
+        detail.rule_breakdown.rps_condition.threshold
+      } threshold and the stock stayed within ${formatPercent(maxDrawdown)} of its 52-week high.`
+    : `Not qualified because ${
+        detail.rule_breakdown.rps_condition.passed ? "RPS passed" : "RPS missed"
+      } and ${
+        detail.rule_breakdown.high_proximity_condition.passed
+          ? "52-week-high proximity passed."
+          : "52-week-high proximity missed."
+      }`;
 
   return (
     <section className="stock-detail-shell">
@@ -280,6 +302,113 @@ export function StockDetailView({ detail }: StockDetailViewProps) {
               </p>
             </article>
           ))}
+        </div>
+      </section>
+
+      <section className="chart-panel">
+        <div className="chart-panel__header">
+          <p className="eyebrow">Rule Breakdown</p>
+          <h2>Exact qualifying values from the originating screen run.</h2>
+          <p className="hero-text">
+            {qualificationSummary} This section mirrors the stored rule outcome so the reason for
+            qualification stays visible inside the stock analysis flow.
+          </p>
+        </div>
+
+        <div className="explainability-grid">
+          <article className="explainability-card">
+            <div className="explainability-card__header">
+              <div>
+                <p className="status-label">Condition 1</p>
+                <h3>RPS strength</h3>
+              </div>
+              <p
+                className={`explainability-flag ${
+                  detail.rule_breakdown.rps_condition.passed
+                    ? "explainability-flag--pass"
+                    : "explainability-flag--fail"
+                }`}
+              >
+                {detail.rule_breakdown.rps_condition.passed ? "PASS" : "FAIL"}
+              </p>
+            </div>
+
+            <dl className="detail-list explainability-list">
+              <div>
+                <dt>Threshold</dt>
+                <dd>{detail.rule_breakdown.rps_condition.threshold}</dd>
+              </div>
+              <div>
+                <dt>RPS 50</dt>
+                <dd>{formatNumber(detail.rule_breakdown.rps_condition.rps_50)}</dd>
+              </div>
+              <div>
+                <dt>RPS 120</dt>
+                <dd>{formatNumber(detail.rule_breakdown.rps_condition.rps_120)}</dd>
+              </div>
+              <div>
+                <dt>RPS 250</dt>
+                <dd>{formatNumber(detail.rule_breakdown.rps_condition.rps_250)}</dd>
+              </div>
+              <div>
+                <dt>Best RPS used for qualification</dt>
+                <dd>{formatNumber(bestRpsValue)}</dd>
+              </div>
+              <div>
+                <dt>Decision</dt>
+                <dd>{detail.rule_breakdown.rps_condition.passed ? "Best RPS met threshold" : "Best RPS below threshold"}</dd>
+              </div>
+            </dl>
+          </article>
+
+          <article className="explainability-card">
+            <div className="explainability-card__header">
+              <div>
+                <p className="status-label">Condition 2</p>
+                <h3>52-week-high proximity</h3>
+              </div>
+              <p
+                className={`explainability-flag ${
+                  detail.rule_breakdown.high_proximity_condition.passed
+                    ? "explainability-flag--pass"
+                    : "explainability-flag--fail"
+                }`}
+              >
+                {detail.rule_breakdown.high_proximity_condition.passed ? "PASS" : "FAIL"}
+              </p>
+            </div>
+
+            <dl className="detail-list explainability-list">
+              <div>
+                <dt>Allowed drawdown</dt>
+                <dd>{formatPercent(detail.rule_breakdown.high_proximity_condition.threshold_pct)}</dd>
+              </div>
+              <div>
+                <dt>Observed drawdown</dt>
+                <dd>{formatPercent(maxDrawdown)}</dd>
+              </div>
+              <div>
+                <dt>High proximity ratio</dt>
+                <dd>{formatNumber(highProximityRatio, 4)}</dd>
+              </div>
+              <div>
+                <dt>52-week high</dt>
+                <dd>{formatNumber(detail.latest_indicator_snapshot.fifty_two_week_high)}</dd>
+              </div>
+              <div>
+                <dt>Latest adjusted close</dt>
+                <dd>{formatNumber(detail.candlesticks.at(-1)?.adj_close ?? null)}</dd>
+              </div>
+              <div>
+                <dt>Decision</dt>
+                <dd>
+                  {detail.rule_breakdown.high_proximity_condition.passed
+                    ? "Price stayed close enough to the 52-week high"
+                    : "Price drifted too far below the 52-week high"}
+                </dd>
+              </div>
+            </dl>
+          </article>
         </div>
       </section>
     </section>

@@ -462,6 +462,53 @@ a {
   font-size: 1.6rem;
 }
 
+.explainability-grid {
+  display: grid;
+  gap: 16px;
+  margin-top: 22px;
+}
+
+.explainability-card {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.78);
+  border-radius: 24px;
+  padding: 20px;
+}
+
+.explainability-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+
+.explainability-card h3 {
+  margin: 10px 0 0;
+  font-size: 1.6rem;
+}
+
+.explainability-flag {
+  margin: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  letter-spacing: 0.16em;
+}
+
+.explainability-flag--pass {
+  background: var(--good-bg);
+  color: var(--good-fg);
+}
+
+.explainability-flag--fail {
+  background: var(--bad-bg);
+  color: var(--bad-fg);
+}
+
+.explainability-list {
+  margin-top: 18px;
+}
+
 .detail-list {
   display: grid;
   gap: 14px;
@@ -530,6 +577,10 @@ a {
   .stock-detail-badges,
   .detail-snapshot-grid,
   .rps-legend {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .explainability-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
