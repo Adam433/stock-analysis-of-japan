@@ -107,6 +107,20 @@ def get_latest_backtest_run(session) -> BacktestRunSummary | None:
     return get_backtest_run(session, run_id)
 
 
+def list_backtest_runs(session) -> list[BacktestRunSummary]:
+    runs = session.execute(
+        select(BacktestRun).order_by(BacktestRun.started_at.desc(), BacktestRun.id.desc())
+    ).scalars().all()
+
+    summaries: list[BacktestRunSummary] = []
+    for run in runs:
+        configuration = session.get(StrategyConfiguration, run.strategy_configuration_id)
+        if configuration is None:
+            continue
+        summaries.append(_serialize(run, configuration))
+    return summaries
+
+
 def execute_backtest_run(session, run_id: int) -> BacktestRunSummary:
     run = session.get(BacktestRun, run_id)
     if run is None:

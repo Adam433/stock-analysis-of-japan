@@ -10,6 +10,7 @@ from stockanalyse_api.services.backtesting import (
     execute_backtest_run,
     get_backtest_run,
     get_latest_backtest_run,
+    list_backtest_runs,
     launch_backtest_run,
 )
 
@@ -37,6 +38,13 @@ def read_latest_backtest_run() -> dict[str, object]:
     with SessionLocal() as session:
         run = get_latest_backtest_run(session)
     return {"backtest_run": run.to_dict() if run is not None else None}
+
+
+@router.get("/runs")
+def read_backtest_runs() -> dict[str, object]:
+    with SessionLocal() as session:
+        runs = list_backtest_runs(session)
+    return {"backtest_runs": [run.to_dict() for run in runs]}
 
 
 @router.get("/runs/{run_id}")

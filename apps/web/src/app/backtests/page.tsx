@@ -33,8 +33,33 @@ async function loadLatestBacktestRun(): Promise<{ data: BacktestRun; error: stri
   }
 }
 
+async function loadBacktestRuns(): Promise<{ data: NonNullable<Parameters<typeof BacktestLaunchPanel>[0]["initialRuns"]>; error: string | null }> {
+  try {
+    const response = await fetch(`${apiBaseUrl}/backtests/runs`, {
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      return {
+        data: [],
+        error: `Unable to load backtest runs (${response.status}).`,
+      };
+    }
+
+    const payload = (await response.json()) as { backtest_runs: NonNullable<Parameters<typeof BacktestLaunchPanel>[0]["initialRuns"]> };
+    return { data: payload.backtest_runs, error: null };
+  } catch {
+    return {
+      data: [],
+      error: "Backtest run list is unreachable. Comparison will work once backend connectivity is restored.",
+    };
+  }
+}
+
 export default async function BacktestsPage() {
-  const { data, error } = await loadLatestBacktestRun();
+  const [{ data, error }, { data: runs, error: runsError }] = await Promise.all([
+    loadLatestBacktestRun(),
+    loadBacktestRuns(),
+  ]);
 
   return (
     <main className="dashboard-shell">
@@ -47,7 +72,12 @@ export default async function BacktestsPage() {
         <span>/</span>
         <span>Backtests</span>
       </nav>
-      <BacktestLaunchPanel apiBaseUrl={apiBaseUrl} initialRun={data} initialError={error} />
+      <BacktestLaunchPanel
+        apiBaseUrl={apiBaseUrl}
+        initialRun={data}
+        initialRuns={runs}
+        initialError={error ?? runsError}
+      />
     </main>
   );
 }

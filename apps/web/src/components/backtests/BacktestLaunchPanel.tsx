@@ -31,6 +31,7 @@ type BacktestRun = {
 type BacktestLaunchPanelProps = {
   apiBaseUrl: string;
   initialRun: BacktestRun | null;
+  initialRuns: BacktestRun[];
   initialError: string | null;
 };
 
@@ -48,11 +49,13 @@ function formatTimestamp(value: string | null): string {
 export function BacktestLaunchPanel({
   apiBaseUrl,
   initialRun,
+  initialRuns,
   initialError,
 }: BacktestLaunchPanelProps) {
   const [startDate, setStartDate] = useState("2024-01-01");
   const [endDate, setEndDate] = useState("2024-12-31");
   const [latestRun, setLatestRun] = useState<BacktestRun | null>(initialRun);
+  const [runs, setRuns] = useState<BacktestRun[]>(initialRuns);
   const [message, setMessage] = useState(
     initialError ?? "Select a historical range and launch a persisted backtest run.",
   );
@@ -88,6 +91,7 @@ export function BacktestLaunchPanel({
 
       const payload = (await response.json()) as { backtest_run: BacktestRun };
       setLatestRun(payload.backtest_run);
+      setRuns((current) => [payload.backtest_run, ...current.filter((run) => run.id !== payload.backtest_run.id)]);
       setLaunchState("ready");
       setMessage(
         `Backtest run #${payload.backtest_run.id} is persisted and currently ${payload.backtest_run.status}.`,
@@ -120,6 +124,7 @@ export function BacktestLaunchPanel({
 
       const payload = (await response.json()) as { backtest_run: BacktestRun };
       setLatestRun(payload.backtest_run);
+      setRuns((current) => [payload.backtest_run, ...current.filter((run) => run.id !== payload.backtest_run.id)]);
       setLaunchState("ready");
       setMessage(
         `Backtest run #${payload.backtest_run.id} completed with checksum ${payload.backtest_run.result_summary.result_checksum ?? "unavailable"}.`,
@@ -261,6 +266,113 @@ export function BacktestLaunchPanel({
         ) : (
           <p className="empty-state">
             Execute a persisted run to materialize a reproducible backtest summary from stored inputs.
+          </p>
+        )}
+      </section>
+
+      <section className="result-panel">
+        <div className="result-panel__header">
+          <p className="eyebrow">Result Review</p>
+          <h2>Completed runs and strategy-adjustment comparison.</h2>
+          <p className="status-copy">
+            Review run-linked outputs and compare parameter versions, ranges, and persisted summary changes
+            without leaving the backtests workflow.
+          </p>
+        </div>
+
+        {runs.filter((run) => run.status === "completed").length ? (
+          <>
+            <div className="run-metadata-grid backtest-summary-grid">
+              {runs
+                .filter((run) => run.status === "completed")
+                .slice(0, 2)
+                .map((run) => (
+                  <article key={`compare-${run.id}`} className="run-metadata-card">
+                    <p className="status-label">Run #{run.id}</p>
+                    <h3>v{run.parameter_set.version}</h3>
+                    <p className="status-copy">
+                      Range {run.start_date} to {run.end_date}
+                    </p>
+                    <p className="status-copy">
+                      Qualified snapshots {run.result_summary.qualifying_observations} | Instruments{" "}
+                      {run.result_summary.unique_qualified_instruments}
+                    </p>
+                    <p className="status-copy">
+                      RPS {run.parameter_set.rps_threshold} / High proximity{" "}
+                      {run.parameter_set.high_proximity_threshold_pct}%
+                    </p>
+                  </article>
+                ))}
+            </div>
+
+            <div className="result-list">
+              {runs
+                .filter((run) => run.status === "completed")
+                .map((run, index, completedRuns) => {
+                  const previousRun = completedRuns[index + 1] ?? null;
+                  const qualifyingDelta = previousRun
+                    ? run.result_summary.qualifying_observations - previousRun.result_summary.qualifying_observations
+                    : null;
+                  const instrumentDelta = previousRun
+                    ? run.result_summary.unique_qualified_instruments -
+                      previousRun.result_summary.unique_qualified_instruments
+                    : null;
+
+                  return (
+                    <article key={run.id} className="result-card">
+                      <div className="result-card__title">
+                        <div>
+                          <p className="status-label">Completed Backtest</p>
+                          <h3>Run #{run.id}</h3>
+                        </div>
+                        <p className="result-pass-flag">v{run.parameter_set.version}</p>
+                      </div>
+
+                      <div className="result-summary-grid">
+                        <div>
+                          <dt>Range</dt>
+                          <dd>
+                            {run.start_date} to {run.end_date}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Qualified snapshots</dt>
+                          <dd>{run.result_summary.qualifying_observations}</dd>
+                        </div>
+                        <div>
+                          <dt>Qualified instruments</dt>
+                          <dd>{run.result_summary.unique_qualified_instruments}</dd>
+                        </div>
+                        <div>
+                          <dt>Checksum</dt>
+                          <dd>{run.result_summary.result_checksum ?? "Unavailable"}</dd>
+                        </div>
+                      </div>
+
+                      <ul className="signal-list">
+                        <li>
+                          Parameter set: RPS {run.parameter_set.rps_threshold} / high proximity{" "}
+                          {run.parameter_set.high_proximity_threshold_pct}%
+                        </li>
+                        <li>
+                          Qualified date span: {run.result_summary.first_qualified_trade_date ?? "-"} to{" "}
+                          {run.result_summary.last_qualified_trade_date ?? "-"}
+                        </li>
+                        <li>
+                          Compared with previous completed run: qualified snapshot delta{" "}
+                          {qualifyingDelta === null ? "n/a" : qualifyingDelta >= 0 ? `+${qualifyingDelta}` : qualifyingDelta}
+                          , instrument delta{" "}
+                          {instrumentDelta === null ? "n/a" : instrumentDelta >= 0 ? `+${instrumentDelta}` : instrumentDelta}
+                        </li>
+                      </ul>
+                    </article>
+                  );
+                })}
+            </div>
+          </>
+        ) : (
+          <p className="empty-state">
+            Execute one or more backtest runs to unlock completed-result review and cross-run comparison.
           </p>
         )}
       </section>
