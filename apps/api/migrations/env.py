@@ -12,6 +12,7 @@ from stockanalyse_api.domain.indicators import models as indicator_models  # noq
 from stockanalyse_api.domain.market_data import models as market_data_models  # noqa: F401
 from stockanalyse_api.domain.operations import models as operations_models  # noqa: F401
 from stockanalyse_api.domain.screens import models as screen_models  # noqa: F401
+from stockanalyse_api.domain.watchlists import models as watchlist_models  # noqa: F401
 
 config = context.config
 

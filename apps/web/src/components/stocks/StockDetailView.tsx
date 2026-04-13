@@ -1,5 +1,7 @@
 "use client";
 
+import { WatchlistToggleButton } from "@/components/watchlist/WatchlistToggleButton";
+
 type Candlestick = {
   trade_date: string;
   open: string | null;
@@ -55,6 +57,7 @@ type StockDetailPayload = {
 };
 
 type StockDetailViewProps = {
+  apiBaseUrl: string;
   detail: StockDetailPayload;
 };
 
@@ -165,7 +168,7 @@ function buildRpsLines(detail: StockDetailPayload) {
   });
 }
 
-export function StockDetailView({ detail }: StockDetailViewProps) {
+export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
   const candleGeometry = buildCandleGeometry(detail.candlesticks);
   const rpsLines = buildRpsLines(detail);
   const bestRpsValue = detail.rule_breakdown.rps_condition.best_rps_value;
@@ -207,6 +210,15 @@ export function StockDetailView({ detail }: StockDetailViewProps) {
             <p className="status-label">Parameter Set</p>
             <h2>v{detail.screen_run.strategy_configuration_version ?? "?"}</h2>
             <p className="status-copy">Trade date {detail.screen_run.trade_date}</p>
+          </div>
+          <div className="screen-summary-card">
+            <p className="status-label">Watchlist</p>
+            <h2>Research Flow</h2>
+            <WatchlistToggleButton
+              apiBaseUrl={apiBaseUrl}
+              instrumentId={detail.instrument.id}
+              symbol={detail.instrument.symbol}
+            />
           </div>
         </div>
       </div>

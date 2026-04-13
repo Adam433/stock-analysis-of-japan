@@ -7,6 +7,7 @@ from stockanalyse_api.api.routes import health_router
 from stockanalyse_api.api.routes import screening_router
 from stockanalyse_api.api.routes import stocks_router
 from stockanalyse_api.api.routes import strategy_config_router
+from stockanalyse_api.api.routes import watchlist_router
 
 
 def create_app() -> FastAPI:
@@ -20,13 +21,14 @@ def create_app() -> FastAPI:
             "http://localhost:3001",
         ],
         allow_credentials=False,
-        allow_methods=["GET", "PUT", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
     app.include_router(health_router)
     app.include_router(strategy_config_router)
     app.include_router(screening_router)
     app.include_router(stocks_router)
+    app.include_router(watchlist_router)
     return app
 
 

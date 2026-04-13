@@ -72,7 +72,7 @@ export default async function StockDetailPage({
       </nav>
 
       {data ? (
-        <StockDetailView detail={data} />
+        <StockDetailView apiBaseUrl={apiBaseUrl} detail={data} />
       ) : (
         <section className="screen-panel">
           <p className="eyebrow">Stock Detail</p>

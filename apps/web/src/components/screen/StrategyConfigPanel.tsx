@@ -3,6 +3,8 @@
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 
+import { WatchlistToggleButton } from "@/components/watchlist/WatchlistToggleButton";
+
 type StrategyConfiguration = {
   id: number;
   version: number;
@@ -74,6 +76,7 @@ export function StrategyConfigPanel({
   initialRun,
   initialRunError,
 }: StrategyConfigPanelProps) {
+  const [watchlistInstrumentIds, setWatchlistInstrumentIds] = useState<number[]>([]);
   const [rpsThreshold, setRpsThreshold] = useState(initialData?.configuration.rps_threshold ?? 90);
   const [highProximityThresholdPct, setHighProximityThresholdPct] = useState(
     initialData?.configuration.high_proximity_threshold_pct ?? "5.00",
@@ -97,6 +100,36 @@ export function StrategyConfigPanel({
       setActiveVersion(initialData.configuration.version);
     }
   }, [initialData]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadWatchlist() {
+      try {
+        const response = await fetch(`${apiBaseUrl}/watchlist`);
+        if (!response.ok) {
+          throw new Error();
+        }
+
+        const payload = (await response.json()) as {
+          entries: Array<{ instrument_id: number }>;
+        };
+        if (!cancelled) {
+          setWatchlistInstrumentIds(payload.entries.map((entry) => entry.instrument_id));
+        }
+      } catch {
+        if (!cancelled) {
+          setWatchlistInstrumentIds([]);
+        }
+      }
+    }
+
+    void loadWatchlist();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrl]);
 
   function validateInputs(): string | null {
     if (Number.isNaN(rpsThreshold) || rpsThreshold < 0 || rpsThreshold > 100) {
@@ -304,7 +337,24 @@ export function StrategyConfigPanel({
                           </Link>
                         </h3>
                       </div>
-                      <p className="result-pass-flag">Qualified</p>
+                      <div className="result-card__actions">
+                        <p className="result-pass-flag">Qualified</p>
+                        <WatchlistToggleButton
+                          apiBaseUrl={apiBaseUrl}
+                          instrumentId={result.instrument_id}
+                          symbol={result.symbol}
+                          className="strategy-button strategy-button--secondary"
+                          initialIsInWatchlist={watchlistInstrumentIds.includes(result.instrument_id)}
+                          loadOnMount={false}
+                          onToggleComplete={(nextValue) =>
+                            setWatchlistInstrumentIds((current) =>
+                              nextValue
+                                ? [...current, result.instrument_id]
+                                : current.filter((instrumentId) => instrumentId !== result.instrument_id),
+                            )
+                          }
+                        />
+                      </div>
                     </div>
 
                     <div className="result-summary-grid">

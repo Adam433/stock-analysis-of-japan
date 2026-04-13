@@ -344,6 +344,12 @@ a {
   align-items: start;
 }
 
+.result-card__actions {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
 .result-pass-flag {
   margin: 0;
   border-radius: 999px;
@@ -534,6 +540,11 @@ a {
 
 .signal-list {
   padding-left: 18px;
+}
+
+.watchlist-toggle {
+  display: grid;
+  gap: 10px;
 }
 
 .error-callout {
