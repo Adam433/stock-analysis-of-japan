@@ -27,37 +27,37 @@ export function WorkflowTrustBanner({
 }: WorkflowTrustBannerProps) {
   const toneClass = bannerTone(health, error);
   const explicitState = error
-    ? "connection issue"
+    ? "连接异常"
     : !health
-      ? "unavailable"
+      ? "不可用"
       : health.coverage_status === "failed"
-        ? "failed refresh"
+        ? "刷新失败"
         : health.freshness_state === "stale"
-          ? "stale data"
+          ? "数据陈旧"
           : health.coverage_status === "partial"
-            ? "partial coverage"
-            : "trusted for routine review";
+            ? "数据部分缺失"
+            : "可用于日常研究";
 
   return (
     <section className={`workflow-banner ${toneClass}`} aria-live="polite">
       <div>
-        <p className="status-label">Trust State</p>
-        <h2>{workflowLabel}: {explicitState}</h2>
+        <p className="status-label">信任状态</p>
+        <h2>{workflowLabel}：{explicitState}</h2>
       </div>
       <div className="workflow-banner__copy">
         {error || !health ? (
           <p className="status-copy">
-            {error ?? "Data-health context is unavailable, so this workflow should not be treated as normal success."}
+            {error ?? "数据健康信息暂不可用，此工作流不应按正常成功对待。"}
           </p>
         ) : (
           <>
             <p className="status-copy">
-              Freshness {health.freshness_state}, coverage {health.coverage_status}, latest trade date{" "}
-              {health.latest_trade_date ?? "unavailable"}.
+              新鲜度 {health.freshness_state}，覆盖度 {health.coverage_status}，最新交易日{" "}
+              {health.latest_trade_date ?? "暂无"}。
             </p>
             <p className="status-copy">
-              Partial rows {health.partial_rows}, unavailable rows {health.unavailable_rows}, last refresh{" "}
-              {health.last_refresh?.status ?? "missing"}.
+              部分行 {health.partial_rows}，不可用行 {health.unavailable_rows}，最近一次刷新{" "}
+              {health.last_refresh?.status ?? "缺失"}。
             </p>
           </>
         )}

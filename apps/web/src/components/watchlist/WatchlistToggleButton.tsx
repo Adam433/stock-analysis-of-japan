@@ -71,7 +71,7 @@ export function WatchlistToggleButton({
       try {
         const response = await fetch(`${apiBaseUrl}/watchlist`, { cache: "no-store" });
         if (!response.ok) {
-          throw new Error(`Unable to load watchlist (${response.status}).`);
+          throw new Error(`无法加载观察列表（${response.status}）。`);
         }
 
         const payload = (await response.json()) as { entries: WatchlistEntry[] };
@@ -86,7 +86,7 @@ export function WatchlistToggleButton({
       } catch (error) {
         if (!cancelled) {
           setToggleState("error");
-          setMessage(error instanceof Error ? error.message : "Unable to load watchlist state.");
+          setMessage(error instanceof Error ? error.message : "无法加载观察列表状态。");
         }
       }
     }
@@ -109,7 +109,7 @@ export function WatchlistToggleButton({
       try {
         const response = await fetch(`${apiBaseUrl}/watchlist`, { cache: "no-store" });
         if (!response.ok) {
-          throw new Error(`Unable to load watchlist (${response.status}).`);
+          throw new Error(`无法加载观察列表（${response.status}）。`);
         }
 
         const payload = (await response.json()) as { entries: WatchlistEntry[] };
@@ -120,7 +120,7 @@ export function WatchlistToggleButton({
           setAddedDate(entry.added_date);
         }
       } catch {
-        // Keep the editor usable even if prefill fails.
+        // 即便预填失败也保持编辑器可用。
       }
     }
 
@@ -133,7 +133,7 @@ export function WatchlistToggleButton({
 
   async function handleToggle() {
     setToggleState("saving");
-    setMessage(isInWatchlist ? `Removing ${symbol} from the watchlist...` : `Adding ${symbol} to the watchlist...`);
+    setMessage(isInWatchlist ? `正在将 ${symbol} 从观察列表移除……` : `正在将 ${symbol} 加入观察列表……`);
 
     try {
       const response = await fetch(
@@ -153,7 +153,7 @@ export function WatchlistToggleButton({
 
       if (!response.ok) {
         const payload = (await response.json()) as { detail?: string };
-        throw new Error(payload.detail ?? `Request failed with ${response.status}`);
+        throw new Error(payload.detail ?? `请求失败（${response.status}）`);
       }
 
       const nextValue = !isInWatchlist;
@@ -172,19 +172,19 @@ export function WatchlistToggleButton({
 
       setMessage(
         isInWatchlist
-          ? `${symbol} removed from the watchlist.`
-          : `${symbol} added to the watchlist with its saved research context.`,
+          ? `${symbol} 已从观察列表移除。`
+          : `${symbol} 已加入观察列表，研究备注一并保留。`,
       );
     } catch (error) {
       setToggleState("error");
-      setMessage(error instanceof Error ? error.message : "Unable to update watchlist.");
+      setMessage(error instanceof Error ? error.message : "无法更新观察列表。");
     }
   }
 
   async function handleSaveContext(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setToggleState("saving");
-    setMessage(`Saving watchlist context for ${symbol}...`);
+    setMessage(`正在保存 ${symbol} 的观察列表备注……`);
 
     try {
       const response = await fetch(`${apiBaseUrl}/watchlist/${instrumentId}`, {
@@ -197,7 +197,7 @@ export function WatchlistToggleButton({
       });
       if (!response.ok) {
         const payload = (await response.json()) as { detail?: string };
-        throw new Error(payload.detail ?? `Request failed with ${response.status}`);
+        throw new Error(payload.detail ?? `请求失败（${response.status}）`);
       }
 
       const payload = (await response.json()) as { entry: WatchlistEntry };
@@ -205,10 +205,10 @@ export function WatchlistToggleButton({
       setNote(payload.entry.note ?? "");
       setObservationReason(payload.entry.observation_reason ?? "");
       setToggleState("idle");
-      setMessage(`${symbol} watchlist note and observation reason saved.`);
+      setMessage(`${symbol} 的观察备注与观察原因已保存。`);
     } catch (error) {
       setToggleState("error");
-      setMessage(error instanceof Error ? error.message : "Unable to save watchlist context.");
+      setMessage(error instanceof Error ? error.message : "无法保存观察列表备注。");
     }
   }
 
@@ -222,49 +222,49 @@ export function WatchlistToggleButton({
           onClick={handleToggle}
         >
           {toggleState === "saving"
-            ? "Updating..."
+            ? "更新中……"
             : isInWatchlist
-              ? "Remove From Watchlist"
-              : "Add To Watchlist"}
+              ? "从观察列表移除"
+              : "加入观察列表"}
         </button>
         <button
           type="button"
           className="watchlist-link-button"
           onClick={() => setIsEditorOpen((current) => !current)}
         >
-          {isEditorOpen ? "Hide Research Context" : "Edit Research Context"}
+          {isEditorOpen ? "隐藏研究备注" : "编辑研究备注"}
         </button>
       </div>
 
       {isEditorOpen ? (
         <form className="watchlist-editor" onSubmit={handleSaveContext}>
           <label className="strategy-field">
-            <span>Observation reason</span>
+            <span>观察原因</span>
             <input
               name="observation_reason"
               type="text"
               value={observationReason}
               onChange={(event) => setObservationReason(event.target.value)}
-              placeholder="Why this stock matters"
+              placeholder="为何关注这只股票"
             />
           </label>
           <label className="strategy-field">
-            <span>Research note</span>
+            <span>研究备注</span>
             <textarea
               name="note"
               value={note}
               onChange={(event) => setNote(event.target.value)}
-              placeholder="Capture the setup, risk, or next check."
+              placeholder="记录交易结构、风险点或下一步检查事项。"
               rows={4}
             />
           </label>
-          {addedDate ? <p className="status-copy">Added to watchlist on {addedDate}.</p> : null}
+          {addedDate ? <p className="status-copy">加入观察列表日期：{addedDate}。</p> : null}
           <button
             type="submit"
             className="strategy-button strategy-button--secondary"
             disabled={!isInWatchlist || toggleState === "saving"}
           >
-            Save Watchlist Context
+            保存观察备注
           </button>
         </form>
       ) : null}

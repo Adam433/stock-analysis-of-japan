@@ -20,7 +20,7 @@ async function loadStockDetail(
   if (!screenRunId) {
     return {
       data: null,
-      error: "screen_run_id is required to keep stock detail aligned with the originating result set.",
+      error: "缺少 screen_run_id，无法将个股详情与对应的筛选结果对齐。",
     };
   }
 
@@ -33,7 +33,7 @@ async function loadStockDetail(
     if (!response.ok) {
       return {
         data: null,
-        error: `Unable to load stock detail (${response.status}).`,
+        error: `无法加载个股详情（${response.status}）。`,
       };
     }
 
@@ -42,7 +42,7 @@ async function loadStockDetail(
   } catch {
     return {
       data: null,
-      error: "Stock detail API is unreachable. Check backend availability and API base URL.",
+      error: "个股详情接口不可达，请检查后端服务与 API 地址。",
     };
   }
 }
@@ -67,24 +67,24 @@ export default async function StockDetailPage({
   return (
     <main className="dashboard-shell">
       <nav className="top-nav">
-        <Link href="/">Data Health</Link>
+        <Link href="/">数据健康</Link>
         <span>/</span>
-        <Link href="/screen">Screen</Link>
+        <Link href="/screen">策略配置</Link>
         <span>/</span>
-        <Link href="/watchlist">Watchlist</Link>
+        <Link href="/watchlist">观察列表</Link>
         <span>/</span>
-        <Link href="/backtests">Backtests</Link>
+        <Link href="/backtests">回测</Link>
         <span>/</span>
-        <span>Stock Detail</span>
+        <span>个股详情</span>
       </nav>
-      <WorkflowTrustBanner workflowLabel="Stock detail workflow" health={health} error={healthError} />
+      <WorkflowTrustBanner workflowLabel="个股详情工作流" health={health} error={healthError} />
 
       {data ? (
         <StockDetailView apiBaseUrl={apiBaseUrl} detail={data} />
       ) : (
         <section className="screen-panel">
-          <p className="eyebrow">Stock Detail</p>
-          <h1>Detail payload unavailable.</h1>
+          <p className="eyebrow">个股详情</p>
+          <h1>详情数据暂不可用。</h1>
           <p className="hero-text">{error}</p>
         </section>
       )}

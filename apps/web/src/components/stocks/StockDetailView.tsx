@@ -63,7 +63,7 @@ type StockDetailViewProps = {
 
 function formatNumber(value: string | null, digits = 2): string {
   if (!value) {
-    return "Unavailable";
+    return "不可用";
   }
 
   return Number(value).toFixed(digits);
@@ -71,14 +71,14 @@ function formatNumber(value: string | null, digits = 2): string {
 
 function formatPercent(value: string | null, digits = 2): string {
   if (!value) {
-    return "Unavailable";
+    return "不可用";
   }
 
   return `${Number(value).toFixed(digits)}%`;
 }
 
 function formatTimestamp(value: string): string {
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat("zh-CN", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
@@ -175,45 +175,44 @@ export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
   const maxDrawdown = detail.rule_breakdown.high_proximity_condition.max_drawdown_from_high_pct;
   const highProximityRatio = detail.rule_breakdown.high_proximity_condition.high_proximity_ratio;
   const qualificationSummary = detail.rule_breakdown.passed
-    ? `Qualified because best RPS ${formatNumber(bestRpsValue)} cleared the ${
+    ? `入选：最佳 RPS ${formatNumber(bestRpsValue)} 已突破 ${
         detail.rule_breakdown.rps_condition.threshold
-      } threshold and the stock stayed within ${formatPercent(maxDrawdown)} of its 52-week high.`
-    : `Not qualified because ${
-        detail.rule_breakdown.rps_condition.passed ? "RPS passed" : "RPS missed"
-      } and ${
+      } 阈值，且价格距 52 周高点回撤在 ${formatPercent(maxDrawdown)} 以内。`
+    : `未入选：${
+        detail.rule_breakdown.rps_condition.passed ? "RPS 通过" : "RPS 未通过"
+      }，${
         detail.rule_breakdown.high_proximity_condition.passed
-          ? "52-week-high proximity passed."
-          : "52-week-high proximity missed."
+          ? "距 52 周高点通过。"
+          : "距 52 周高点未通过。"
       }`;
 
   return (
     <section className="stock-detail-shell">
       <div className="stock-detail-hero">
         <div>
-          <p className="eyebrow">Stock Detail</p>
+          <p className="eyebrow">个股详情</p>
           <h1>
             {detail.instrument.symbol} <span>{detail.instrument.exchange}</span>
           </h1>
           <p className="hero-text">
-            {detail.instrument.name ?? "Unnamed instrument"} is shown using the
-            same stored market data, derived facts, and screen-run result that
-            produced the qualification.
+            {detail.instrument.name ?? "未命名标的"} 使用了与入选判断完全相同的
+            已存行情、派生指标与筛选结果。
           </p>
         </div>
         <div className="stock-detail-badges">
           <div className="screen-summary-card">
-            <p className="status-label">Run</p>
+            <p className="status-label">筛选任务</p>
             <h2>#{detail.screen_run.id}</h2>
             <p className="status-copy">{formatTimestamp(detail.screen_run.executed_at)}</p>
           </div>
           <div className="screen-summary-card">
-            <p className="status-label">Parameter Set</p>
+            <p className="status-label">参数集</p>
             <h2>v{detail.screen_run.strategy_configuration_version ?? "?"}</h2>
-            <p className="status-copy">Trade date {detail.screen_run.trade_date}</p>
+            <p className="status-copy">交易日 {detail.screen_run.trade_date}</p>
           </div>
           <div className="screen-summary-card">
-            <p className="status-label">Watchlist</p>
-            <h2>Research Flow</h2>
+            <p className="status-label">观察列表</p>
+            <h2>研究流</h2>
             <WatchlistToggleButton
               apiBaseUrl={apiBaseUrl}
               instrumentId={detail.instrument.id}
@@ -225,37 +224,37 @@ export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
 
       <div className="detail-snapshot-grid">
         <article className="run-metadata-card">
-          <p className="status-label">Best RPS</p>
-          <h3>{detail.rule_breakdown.rps_condition.best_rps_value ?? "Unavailable"}</h3>
+          <p className="status-label">最佳 RPS</p>
+          <h3>{detail.rule_breakdown.rps_condition.best_rps_value ?? "不可用"}</h3>
           <p className="status-copy">
-            Threshold {detail.rule_breakdown.rps_condition.threshold} and{" "}
-            {detail.rule_breakdown.rps_condition.passed ? "passed" : "did not pass"}.
+            阈值 {detail.rule_breakdown.rps_condition.threshold}，
+            {detail.rule_breakdown.rps_condition.passed ? "已通过" : "未通过"}。
           </p>
         </article>
         <article className="run-metadata-card">
-          <p className="status-label">52-Week High Drawdown</p>
-          <h3>{detail.rule_breakdown.high_proximity_condition.max_drawdown_from_high_pct ?? "Unavailable"}%</h3>
+          <p className="status-label">距 52 周高点回撤</p>
+          <h3>{detail.rule_breakdown.high_proximity_condition.max_drawdown_from_high_pct ?? "不可用"}%</h3>
           <p className="status-copy">
-            Allowed drawdown {detail.rule_breakdown.high_proximity_condition.threshold_pct}%.
+            允许回撤 {detail.rule_breakdown.high_proximity_condition.threshold_pct}%。
           </p>
         </article>
         <article className="run-metadata-card">
-          <p className="status-label">Qualification</p>
-          <h3>{detail.rule_breakdown.passed ? "Qualified" : "Not qualified"}</h3>
+          <p className="status-label">入选结论</p>
+          <h3>{detail.rule_breakdown.passed ? "已入选" : "未入选"}</h3>
           <p className="status-copy">
-            RPS {detail.rule_breakdown.rps_condition.passed ? "passed" : "failed"} / proximity{" "}
-            {detail.rule_breakdown.high_proximity_condition.passed ? "passed" : "failed"}.
+            RPS {detail.rule_breakdown.rps_condition.passed ? "通过" : "未通过"} / 距高点{" "}
+            {detail.rule_breakdown.high_proximity_condition.passed ? "通过" : "未通过"}。
           </p>
         </article>
       </div>
 
       <section className="chart-panel">
         <div className="chart-panel__header">
-          <p className="eyebrow">Candlestick</p>
-          <h2>Price action from stored daily bars.</h2>
+          <p className="eyebrow">K 线</p>
+          <h2>来自已存日频行情的价格走势。</h2>
         </div>
         <div className="chart-frame">
-          <svg viewBox="0 0 760 260" className="candlestick-chart" role="img" aria-label="Candlestick chart">
+          <svg viewBox="0 0 760 260" className="candlestick-chart" role="img" aria-label="K 线图">
             {candleGeometry.map((candle) => (
               <g key={candle.trade_date}>
                 <line
@@ -282,14 +281,14 @@ export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
 
       <section className="chart-panel">
         <div className="chart-panel__header">
-          <p className="eyebrow">RPS Panel</p>
-          <h2>50 / 120 / 250-day RPS context with threshold states.</h2>
+          <p className="eyebrow">RPS 面板</p>
+          <h2>50 / 120 / 250 日 RPS 及阈值对比。</h2>
         </div>
         <div className="chart-frame">
-          <svg viewBox="0 0 760 180" className="rps-chart" role="img" aria-label="RPS panel">
+          <svg viewBox="0 0 760 180" className="rps-chart" role="img" aria-label="RPS 面板">
             <line x1="0" x2="760" y1="18" y2="18" stroke="#c96b2c" strokeDasharray="6 6" strokeWidth="1.5" />
             <text x="12" y="14" className="chart-label">
-              Threshold {detail.rule_breakdown.rps_condition.threshold}
+              阈值 {detail.rule_breakdown.rps_condition.threshold}
             </text>
             {rpsLines.map((line) => (
               <polyline
@@ -307,10 +306,10 @@ export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
           {rpsLines.map((line) => (
             <article key={line.key} className="legend-card">
               <p className="status-label">{line.label}</p>
-              <h3>{line.latestValue !== null ? formatNumber(String(line.latestValue)) : "Unavailable"}</h3>
+              <h3>{line.latestValue !== null ? formatNumber(String(line.latestValue)) : "不可用"}</h3>
               <p className="status-copy">
-                {line.meetsThreshold ? "Meets threshold" : "Below threshold"}.
-                Line style is unique, so the state is not color-only.
+                {line.meetsThreshold ? "达到阈值" : "未达到阈值"}。
+                线型不同，避免仅以颜色传达状态。
               </p>
             </article>
           ))}
@@ -319,11 +318,11 @@ export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
 
       <section className="chart-panel">
         <div className="chart-panel__header">
-          <p className="eyebrow">Rule Breakdown</p>
-          <h2>Exact qualifying values from the originating screen run.</h2>
+          <p className="eyebrow">规则拆解</p>
+          <h2>来自原始筛选任务的精确入选值。</h2>
           <p className="hero-text">
-            {qualificationSummary} This section mirrors the stored rule outcome so the reason for
-            qualification stays visible inside the stock analysis flow.
+            {qualificationSummary} 本区块镜像已存的规则判断，使入选原因在个股
+            分析流程中始终可见。
           </p>
         </div>
 
@@ -331,8 +330,8 @@ export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
           <article className="explainability-card">
             <div className="explainability-card__header">
               <div>
-                <p className="status-label">Condition 1</p>
-                <h3>RPS strength</h3>
+                <p className="status-label">条件 1</p>
+                <h3>RPS 强度</h3>
               </div>
               <p
                 className={`explainability-flag ${
@@ -341,13 +340,13 @@ export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
                     : "explainability-flag--fail"
                 }`}
               >
-                {detail.rule_breakdown.rps_condition.passed ? "PASS" : "FAIL"}
+                {detail.rule_breakdown.rps_condition.passed ? "通过" : "未通过"}
               </p>
             </div>
 
             <dl className="detail-list explainability-list">
               <div>
-                <dt>Threshold</dt>
+                <dt>阈值</dt>
                 <dd>{detail.rule_breakdown.rps_condition.threshold}</dd>
               </div>
               <div>
@@ -363,12 +362,12 @@ export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
                 <dd>{formatNumber(detail.rule_breakdown.rps_condition.rps_250)}</dd>
               </div>
               <div>
-                <dt>Best RPS used for qualification</dt>
+                <dt>用于判定的最佳 RPS</dt>
                 <dd>{formatNumber(bestRpsValue)}</dd>
               </div>
               <div>
-                <dt>Decision</dt>
-                <dd>{detail.rule_breakdown.rps_condition.passed ? "Best RPS met threshold" : "Best RPS below threshold"}</dd>
+                <dt>判定</dt>
+                <dd>{detail.rule_breakdown.rps_condition.passed ? "最佳 RPS 达到阈值" : "最佳 RPS 低于阈值"}</dd>
               </div>
             </dl>
           </article>
@@ -376,8 +375,8 @@ export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
           <article className="explainability-card">
             <div className="explainability-card__header">
               <div>
-                <p className="status-label">Condition 2</p>
-                <h3>52-week-high proximity</h3>
+                <p className="status-label">条件 2</p>
+                <h3>距 52 周高点</h3>
               </div>
               <p
                 className={`explainability-flag ${
@@ -386,37 +385,37 @@ export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
                     : "explainability-flag--fail"
                 }`}
               >
-                {detail.rule_breakdown.high_proximity_condition.passed ? "PASS" : "FAIL"}
+                {detail.rule_breakdown.high_proximity_condition.passed ? "通过" : "未通过"}
               </p>
             </div>
 
             <dl className="detail-list explainability-list">
               <div>
-                <dt>Allowed drawdown</dt>
+                <dt>允许回撤</dt>
                 <dd>{formatPercent(detail.rule_breakdown.high_proximity_condition.threshold_pct)}</dd>
               </div>
               <div>
-                <dt>Observed drawdown</dt>
+                <dt>实际回撤</dt>
                 <dd>{formatPercent(maxDrawdown)}</dd>
               </div>
               <div>
-                <dt>High proximity ratio</dt>
+                <dt>距高点比率</dt>
                 <dd>{formatNumber(highProximityRatio, 4)}</dd>
               </div>
               <div>
-                <dt>52-week high</dt>
+                <dt>52 周高点</dt>
                 <dd>{formatNumber(detail.latest_indicator_snapshot.fifty_two_week_high)}</dd>
               </div>
               <div>
-                <dt>Latest adjusted close</dt>
+                <dt>最新复权收盘</dt>
                 <dd>{formatNumber(detail.candlesticks.at(-1)?.adj_close ?? null)}</dd>
               </div>
               <div>
-                <dt>Decision</dt>
+                <dt>判定</dt>
                 <dd>
                   {detail.rule_breakdown.high_proximity_condition.passed
-                    ? "Price stayed close enough to the 52-week high"
-                    : "Price drifted too far below the 52-week high"}
+                    ? "价格距 52 周高点在允许范围内"
+                    : "价格距 52 周高点已超出允许范围"}
                 </dd>
               </div>
             </dl>

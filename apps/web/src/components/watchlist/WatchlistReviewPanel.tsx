@@ -33,30 +33,29 @@ export function WatchlistReviewPanel({
   return (
     <section className="screen-panel">
       <div className="screen-panel__header">
-        <p className="eyebrow">Watchlist Review</p>
-        <h1>Revisit saved candidates with their research context.</h1>
+        <p className="eyebrow">观察列表复盘</p>
+        <h1>带着研究备注回看已保存的候选。</h1>
         <p className="hero-text">
-          This view turns the watchlist into a daily review surface. Saved symbols, notes,
-          observation reasons, and added dates stay visible together instead of being scattered
-          across earlier screening sessions.
+          此视图把观察列表变成每日复盘界面。已保存的代码、备注、观察原因与
+          加入日期集中呈现，而不是散落在先前的筛选会话中。
         </p>
       </div>
 
       <div className="screen-summary-grid">
         <article className="screen-summary-card">
-          <p className="status-label">Entries</p>
+          <p className="status-label">条目数</p>
           <h2>{entries.length}</h2>
-          <p className="status-copy">Persisted watchlist securities currently available for review.</p>
+          <p className="status-copy">当前可复盘的持久化观察列表标的数。</p>
         </article>
         <article className="screen-summary-card">
-          <p className="status-label">Research Context</p>
+          <p className="status-label">含研究备注</p>
           <h2>{entries.filter((entry) => entry.note || entry.observation_reason).length}</h2>
-          <p className="status-copy">Entries already carrying note or observation-reason context.</p>
+          <p className="status-copy">已填写备注或观察原因的条目数。</p>
         </article>
         <article className="screen-summary-card">
-          <p className="status-label">Workflow</p>
-          <h2>Review</h2>
-          <p className="status-copy">Open details, edit context, or prune the list from one page.</p>
+          <p className="status-label">工作流</p>
+          <h2>复盘</h2>
+          <p className="status-copy">可在同一页面查看详情、编辑备注或移除条目。</p>
         </article>
       </div>
 
@@ -70,27 +69,27 @@ export function WatchlistReviewPanel({
                 <div>
                   <p className="status-label">{entry.exchange}</p>
                   <h3>{entry.symbol}</h3>
-                  <p className="status-copy">{entry.name ?? "Unnamed instrument"}</p>
+                  <p className="status-copy">{entry.name ?? "未命名标的"}</p>
                 </div>
                 <div className="result-card__actions">
                   <Link href={`/screen`} className="watchlist-link-button">
-                    Back to screen
+                    返回筛选
                   </Link>
                 </div>
               </div>
 
               <dl className="detail-list watchlist-detail-list">
                 <div>
-                  <dt>Added date</dt>
+                  <dt>加入日期</dt>
                   <dd>{entry.added_date}</dd>
                 </div>
                 <div>
-                  <dt>Observation reason</dt>
-                  <dd>{entry.observation_reason ?? "Not captured yet"}</dd>
+                  <dt>观察原因</dt>
+                  <dd>{entry.observation_reason ?? "尚未填写"}</dd>
                 </div>
                 <div>
-                  <dt>Research note</dt>
-                  <dd>{entry.note ?? "No note saved yet"}</dd>
+                  <dt>研究备注</dt>
+                  <dd>{entry.note ?? "尚未保存备注"}</dd>
                 </div>
               </dl>
 
@@ -116,7 +115,7 @@ export function WatchlistReviewPanel({
         </div>
       ) : (
         <p className="empty-state">
-          No watchlist entries are stored yet. Add candidates from the screen result list or stock detail workflow.
+          尚未保存任何观察列表条目。可在筛选结果列表或个股详情中添加候选。
         </p>
       )}
     </section>

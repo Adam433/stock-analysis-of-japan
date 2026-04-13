@@ -70,7 +70,7 @@ async function loadStrategyConfiguration(): Promise<LoadStrategyConfigurationRes
     if (!response.ok) {
       return {
         data: null,
-        error: `Unable to load strategy configuration (${response.status}).`,
+        error: `无法加载策略配置（${response.status}）。`,
       };
     }
 
@@ -81,7 +81,7 @@ async function loadStrategyConfiguration(): Promise<LoadStrategyConfigurationRes
   } catch {
     return {
       data: null,
-      error: "Strategy configuration API is unreachable. Check backend availability and API base URL.",
+      error: "策略配置接口不可达，请检查后端服务与 API 地址。",
     };
   }
 }
@@ -95,7 +95,7 @@ async function loadLatestScreenRun(): Promise<LoadLatestRunResult> {
     if (!response.ok) {
       return {
         data: null,
-        error: `Unable to load the latest screen run (${response.status}).`,
+        error: `无法加载最近一次筛选结果（${response.status}）。`,
       };
     }
 
@@ -107,7 +107,7 @@ async function loadLatestScreenRun(): Promise<LoadLatestRunResult> {
   } catch {
     return {
       data: null,
-      error: "Latest screen run API is unreachable. Launch will still work once backend connectivity is restored.",
+      error: "最近筛选结果接口不可达，后端恢复后即可正常启动筛选。",
     };
   }
 }
@@ -122,15 +122,15 @@ export default async function ScreenConfigurationPage() {
   return (
     <main className="dashboard-shell">
       <nav className="top-nav">
-        <Link href="/">Data Health</Link>
+        <Link href="/">数据健康</Link>
         <span>/</span>
-        <span>Screen Configuration</span>
+        <span>策略配置</span>
         <span>/</span>
-        <Link href="/watchlist">Watchlist</Link>
+        <Link href="/watchlist">观察列表</Link>
         <span>/</span>
-        <Link href="/backtests">Backtests</Link>
+        <Link href="/backtests">回测</Link>
       </nav>
-      <WorkflowTrustBanner workflowLabel="Screen workflow" health={health} error={healthError} />
+      <WorkflowTrustBanner workflowLabel="筛选工作流" health={health} error={healthError} />
       <StrategyConfigPanel
         apiBaseUrl={apiBaseUrl}
         initialData={data}

@@ -37,10 +37,10 @@ type BacktestLaunchPanelProps = {
 
 function formatTimestamp(value: string | null): string {
   if (!value) {
-    return "Not completed yet";
+    return "尚未完成";
   }
 
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat("zh-CN", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
@@ -57,7 +57,7 @@ export function BacktestLaunchPanel({
   const [latestRun, setLatestRun] = useState<BacktestRun | null>(initialRun);
   const [runs, setRuns] = useState<BacktestRun[]>(initialRuns);
   const [message, setMessage] = useState(
-    initialError ?? "Select a historical range and launch a persisted backtest run.",
+    initialError ?? "选择一个历史区间，启动持久化的回测任务。",
   );
   const [launchState, setLaunchState] = useState<"idle" | "launching" | "executing" | "ready" | "error">(
     initialError ? "error" : initialRun ? "ready" : "idle",
@@ -67,12 +67,12 @@ export function BacktestLaunchPanel({
     event.preventDefault();
     if (startDate > endDate) {
       setLaunchState("error");
-      setMessage("Start date must be on or before end date.");
+      setMessage("开始日期必须早于或等于结束日期。");
       return;
     }
 
     setLaunchState("launching");
-    setMessage("Launching backtest run and persisting run context...");
+    setMessage("正在启动回测并持久化运行上下文……");
 
     try {
       const response = await fetch(`${apiBaseUrl}/backtests/runs`, {
@@ -86,7 +86,7 @@ export function BacktestLaunchPanel({
 
       if (!response.ok) {
         const payload = (await response.json()) as { detail?: string };
-        throw new Error(payload.detail ?? `Request failed with ${response.status}`);
+        throw new Error(payload.detail ?? `请求失败（${response.status}）`);
       }
 
       const payload = (await response.json()) as { backtest_run: BacktestRun };
@@ -94,23 +94,23 @@ export function BacktestLaunchPanel({
       setRuns((current) => [payload.backtest_run, ...current.filter((run) => run.id !== payload.backtest_run.id)]);
       setLaunchState("ready");
       setMessage(
-        `Backtest run #${payload.backtest_run.id} is persisted and currently ${payload.backtest_run.status}.`,
+        `回测 #${payload.backtest_run.id} 已持久化，当前状态为 ${payload.backtest_run.status}。`,
       );
     } catch (error) {
       setLaunchState("error");
-      setMessage(error instanceof Error ? error.message : "Unable to launch backtest run.");
+      setMessage(error instanceof Error ? error.message : "无法启动回测任务。");
     }
   }
 
   async function handleExecuteLatestRun() {
     if (!latestRun) {
       setLaunchState("error");
-      setMessage("Launch a backtest run before executing it.");
+      setMessage("请先启动一个回测任务再执行。");
       return;
     }
 
     setLaunchState("executing");
-    setMessage(`Executing backtest run #${latestRun.id} from stored derived facts...`);
+    setMessage(`正在基于已存派生指标执行回测 #${latestRun.id}……`);
 
     try {
       const response = await fetch(`${apiBaseUrl}/backtests/runs/${latestRun.id}/execute`, {
@@ -119,7 +119,7 @@ export function BacktestLaunchPanel({
 
       if (!response.ok) {
         const payload = (await response.json()) as { detail?: string };
-        throw new Error(payload.detail ?? `Request failed with ${response.status}`);
+        throw new Error(payload.detail ?? `请求失败（${response.status}）`);
       }
 
       const payload = (await response.json()) as { backtest_run: BacktestRun };
@@ -127,72 +127,72 @@ export function BacktestLaunchPanel({
       setRuns((current) => [payload.backtest_run, ...current.filter((run) => run.id !== payload.backtest_run.id)]);
       setLaunchState("ready");
       setMessage(
-        `Backtest run #${payload.backtest_run.id} completed with checksum ${payload.backtest_run.result_summary.result_checksum ?? "unavailable"}.`,
+        `回测 #${payload.backtest_run.id} 已完成，校验和 ${payload.backtest_run.result_summary.result_checksum ?? "不可用"}。`,
       );
     } catch (error) {
       setLaunchState("error");
-      setMessage(error instanceof Error ? error.message : "Unable to execute backtest run.");
+      setMessage(error instanceof Error ? error.message : "无法执行回测任务。");
     }
   }
 
   return (
     <section className="screen-panel">
       <div className="screen-panel__header">
-        <p className="eyebrow">Backtest Launch</p>
-        <h1>Persist a historical backtest run before execution begins.</h1>
+        <p className="eyebrow">回测启动</p>
+        <h1>执行前先持久化一次历史回测记录。</h1>
         <p className="hero-text">
-          Story 5.1 establishes the backtest run record, associates it with the active parameter
-          set, and surfaces an explicit in-progress state for longer-running work.
+          Story 5.1 建立回测运行记录，将其关联到当前参数集，并为耗时较长的任务
+          明确展现“执行中”状态。
         </p>
       </div>
 
       <div className="screen-summary-grid">
         <article className="screen-summary-card">
-          <p className="status-label">Latest Run</p>
-          <h2>{latestRun ? `#${latestRun.id}` : "Unavailable"}</h2>
-          <p className="status-copy">Persisted backtest run identifier for future result retrieval.</p>
+          <p className="status-label">最新任务</p>
+          <h2>{latestRun ? `#${latestRun.id}` : "不可用"}</h2>
+          <p className="status-copy">已持久化的回测标识，便于后续结果检索。</p>
         </article>
         <article className="screen-summary-card">
-          <p className="status-label">Status</p>
-          <h2>{latestRun?.status ?? "No run"}</h2>
-          <p className="status-copy">Backtest launch state remains explicit instead of implying instant completion.</p>
+          <p className="status-label">状态</p>
+          <h2>{latestRun?.status ?? "无记录"}</h2>
+          <p className="status-copy">回测启动状态显式呈现，避免暗示瞬时完成。</p>
         </article>
         <article className="screen-summary-card">
-          <p className="status-label">Parameter Set</p>
-          <h2>{latestRun ? `v${latestRun.parameter_set.version}` : "Unavailable"}</h2>
-          <p className="status-copy">Every backtest run stays linked to the exact active strategy configuration.</p>
+          <p className="status-label">参数集</p>
+          <h2>{latestRun ? `v${latestRun.parameter_set.version}` : "不可用"}</h2>
+          <p className="status-copy">每个回测任务都绑定到精确的策略配置版本。</p>
         </article>
       </div>
 
       <form className="strategy-form" onSubmit={handleSubmit}>
         <label className="strategy-field">
-          <span>Start date</span>
+          <span>开始日期</span>
           <input
             name="start_date"
             type="date"
             value={startDate}
-            aria-invalid={launchState === "error" && message.includes("Start date")}
+            aria-invalid={launchState === "error" && message.includes("开始日期")}
             onChange={(event) => setStartDate(event.target.value)}
           />
-          <small>Beginning of the historical range for this run.</small>
+          <small>此次回测的历史区间起点。</small>
         </label>
 
         <label className="strategy-field">
-          <span>End date</span>
+          <span>结束日期</span>
           <input
             name="end_date"
             type="date"
             value={endDate}
-            aria-invalid={launchState === "error" && message.includes("Start date")}
+            aria-invalid={launchState === "error" && message.includes("开始日期")}
             onChange={(event) => setEndDate(event.target.value)}
           />
-          <small>End of the historical range for this run.</small>
+          <small>此次回测的历史区间终点。</small>
         </label>
 
         <div className="strategy-actions">
           <div className="strategy-button-row">
             <button type="submit" className="strategy-button" disabled={launchState === "launching"}>
-              {launchState === "launching" ? "Launching..." : "Launch Backtest"}
+              {launchState === "launching" ? "启动中……" : "启动回测"}
             </button>
             <button
               type="button"
@@ -200,7 +200,7 @@ export function BacktestLaunchPanel({
               disabled={!latestRun || launchState === "executing" || launchState === "launching"}
               onClick={handleExecuteLatestRun}
             >
-              {launchState === "executing" ? "Executing..." : "Execute Latest Run"}
+              {launchState === "executing" ? "执行中……" : "执行最新任务"}
             </button>
           </div>
           <p
@@ -214,74 +214,74 @@ export function BacktestLaunchPanel({
 
       <section className="result-panel">
         <div className="result-panel__header">
-          <p className="eyebrow">Run Context</p>
-          <h2>Most recent persisted backtest run.</h2>
+          <p className="eyebrow">运行上下文</p>
+          <h2>最近一次持久化的回测任务。</h2>
         </div>
         {latestRun ? (
           <div className="run-metadata-grid">
             <article className="run-metadata-card">
-              <p className="status-label">Range</p>
+              <p className="status-label">区间</p>
               <h3>
-                {latestRun.start_date} to {latestRun.end_date}
+                {latestRun.start_date} 至 {latestRun.end_date}
               </h3>
             </article>
             <article className="run-metadata-card">
-              <p className="status-label">Started</p>
+              <p className="status-label">开始时间</p>
               <h3>{formatTimestamp(latestRun.started_at)}</h3>
             </article>
             <article className="run-metadata-card">
-              <p className="status-label">Completed</p>
+              <p className="status-label">完成时间</p>
               <h3>{formatTimestamp(latestRun.completed_at)}</h3>
             </article>
           </div>
         ) : (
-          <p className="empty-state">No persisted backtest run is available yet.</p>
+          <p className="empty-state">暂无持久化的回测记录。</p>
         )}
 
         {latestRun?.status === "completed" ? (
           <div className="run-metadata-grid backtest-summary-grid">
             <article className="run-metadata-card">
-              <p className="status-label">Trade Dates</p>
+              <p className="status-label">交易日数</p>
               <h3>{latestRun.result_summary.trade_dates_evaluated}</h3>
             </article>
             <article className="run-metadata-card">
-              <p className="status-label">Qualified Snapshots</p>
+              <p className="status-label">入选快照数</p>
               <h3>{latestRun.result_summary.qualifying_observations}</h3>
             </article>
             <article className="run-metadata-card">
-              <p className="status-label">Qualified Instruments</p>
+              <p className="status-label">入选标的数</p>
               <h3>{latestRun.result_summary.unique_qualified_instruments}</h3>
             </article>
             <article className="run-metadata-card">
-              <p className="status-label">First / Last Qualified</p>
+              <p className="status-label">首个 / 最后入选日</p>
               <h3>
                 {latestRun.result_summary.first_qualified_trade_date ?? "-"} /{" "}
                 {latestRun.result_summary.last_qualified_trade_date ?? "-"}
               </h3>
             </article>
             <article className="run-metadata-card">
-              <p className="status-label">Checksum</p>
-              <h3>{latestRun.result_summary.result_checksum ?? "Unavailable"}</h3>
+              <p className="status-label">校验和</p>
+              <h3>{latestRun.result_summary.result_checksum ?? "不可用"}</h3>
             </article>
             <article className="run-metadata-card">
-              <p className="status-label">Candidates Evaluated</p>
+              <p className="status-label">评估候选数</p>
               <h3>{latestRun.result_summary.total_candidates_evaluated}</h3>
             </article>
           </div>
         ) : (
           <p className="empty-state">
-            Execute a persisted run to materialize a reproducible backtest summary from stored inputs.
+            执行已持久化的任务以基于已存输入生成可复现的回测摘要。
           </p>
         )}
       </section>
 
       <section className="result-panel">
         <div className="result-panel__header">
-          <p className="eyebrow">Result Review</p>
-          <h2>Completed runs and strategy-adjustment comparison.</h2>
+          <p className="eyebrow">结果复盘</p>
+          <h2>已完成任务及策略调整对比。</h2>
           <p className="status-copy">
-            Review run-linked outputs and compare parameter versions, ranges, and persisted summary changes
-            without leaving the backtests workflow.
+            无需离开回测工作流，即可回顾已绑定到任务的产出并对比参数版本、区间
+            与持久化摘要的差异。
           </p>
         </div>
 
@@ -293,17 +293,17 @@ export function BacktestLaunchPanel({
                 .slice(0, 2)
                 .map((run) => (
                   <article key={`compare-${run.id}`} className="run-metadata-card">
-                    <p className="status-label">Run #{run.id}</p>
+                    <p className="status-label">任务 #{run.id}</p>
                     <h3>v{run.parameter_set.version}</h3>
                     <p className="status-copy">
-                      Range {run.start_date} to {run.end_date}
+                      区间 {run.start_date} 至 {run.end_date}
                     </p>
                     <p className="status-copy">
-                      Qualified snapshots {run.result_summary.qualifying_observations} | Instruments{" "}
+                      入选快照 {run.result_summary.qualifying_observations} ｜ 标的{" "}
                       {run.result_summary.unique_qualified_instruments}
                     </p>
                     <p className="status-copy">
-                      RPS {run.parameter_set.rps_threshold} / High proximity{" "}
+                      RPS {run.parameter_set.rps_threshold} / 距高点{" "}
                       {run.parameter_set.high_proximity_threshold_pct}%
                     </p>
                   </article>
@@ -327,47 +327,47 @@ export function BacktestLaunchPanel({
                     <article key={run.id} className="result-card">
                       <div className="result-card__title">
                         <div>
-                          <p className="status-label">Completed Backtest</p>
-                          <h3>Run #{run.id}</h3>
+                          <p className="status-label">已完成回测</p>
+                          <h3>任务 #{run.id}</h3>
                         </div>
                         <p className="result-pass-flag">v{run.parameter_set.version}</p>
                       </div>
 
                       <div className="result-summary-grid">
                         <div>
-                          <dt>Range</dt>
+                          <dt>区间</dt>
                           <dd>
-                            {run.start_date} to {run.end_date}
+                            {run.start_date} 至 {run.end_date}
                           </dd>
                         </div>
                         <div>
-                          <dt>Qualified snapshots</dt>
+                          <dt>入选快照数</dt>
                           <dd>{run.result_summary.qualifying_observations}</dd>
                         </div>
                         <div>
-                          <dt>Qualified instruments</dt>
+                          <dt>入选标的数</dt>
                           <dd>{run.result_summary.unique_qualified_instruments}</dd>
                         </div>
                         <div>
-                          <dt>Checksum</dt>
-                          <dd>{run.result_summary.result_checksum ?? "Unavailable"}</dd>
+                          <dt>校验和</dt>
+                          <dd>{run.result_summary.result_checksum ?? "不可用"}</dd>
                         </div>
                       </div>
 
                       <ul className="signal-list">
                         <li>
-                          Parameter set: RPS {run.parameter_set.rps_threshold} / high proximity{" "}
+                          参数集：RPS {run.parameter_set.rps_threshold} / 距高点{" "}
                           {run.parameter_set.high_proximity_threshold_pct}%
                         </li>
                         <li>
-                          Qualified date span: {run.result_summary.first_qualified_trade_date ?? "-"} to{" "}
+                          入选日期跨度：{run.result_summary.first_qualified_trade_date ?? "-"} 至{" "}
                           {run.result_summary.last_qualified_trade_date ?? "-"}
                         </li>
                         <li>
-                          Compared with previous completed run: qualified snapshot delta{" "}
-                          {qualifyingDelta === null ? "n/a" : qualifyingDelta >= 0 ? `+${qualifyingDelta}` : qualifyingDelta}
-                          , instrument delta{" "}
-                          {instrumentDelta === null ? "n/a" : instrumentDelta >= 0 ? `+${instrumentDelta}` : instrumentDelta}
+                          与上一次已完成任务相比：入选快照差{" "}
+                          {qualifyingDelta === null ? "无可比" : qualifyingDelta >= 0 ? `+${qualifyingDelta}` : qualifyingDelta}
+                          ，标的差{" "}
+                          {instrumentDelta === null ? "无可比" : instrumentDelta >= 0 ? `+${instrumentDelta}` : instrumentDelta}
                         </li>
                       </ul>
                     </article>
@@ -377,7 +377,7 @@ export function BacktestLaunchPanel({
           </>
         ) : (
           <p className="empty-state">
-            Execute one or more backtest runs to unlock completed-result review and cross-run comparison.
+            执行一个或多个回测任务后，即可查看已完成结果并进行跨任务对比。
           </p>
         )}
       </section>

@@ -19,7 +19,7 @@ async function loadLatestBacktestRun(): Promise<{ data: BacktestRun; error: stri
     if (!response.ok) {
       return {
         data: null,
-        error: `Unable to load the latest backtest run (${response.status}).`,
+        error: `无法加载最近一次回测记录（${response.status}）。`,
       };
     }
 
@@ -28,7 +28,7 @@ async function loadLatestBacktestRun(): Promise<{ data: BacktestRun; error: stri
   } catch {
     return {
       data: null,
-      error: "Backtest API is unreachable. Launch will work once backend connectivity is restored.",
+      error: "回测接口不可达，后端恢复后即可启动新的回测。",
     };
   }
 }
@@ -41,7 +41,7 @@ async function loadBacktestRuns(): Promise<{ data: NonNullable<Parameters<typeof
     if (!response.ok) {
       return {
         data: [],
-        error: `Unable to load backtest runs (${response.status}).`,
+        error: `无法加载回测记录列表（${response.status}）。`,
       };
     }
 
@@ -50,7 +50,7 @@ async function loadBacktestRuns(): Promise<{ data: NonNullable<Parameters<typeof
   } catch {
     return {
       data: [],
-      error: "Backtest run list is unreachable. Comparison will work once backend connectivity is restored.",
+      error: "回测记录列表接口不可达，后端恢复后即可查看对比。",
     };
   }
 }
@@ -65,15 +65,15 @@ export default async function BacktestsPage() {
   return (
     <main className="dashboard-shell">
       <nav className="top-nav">
-        <Link href="/">Data Health</Link>
+        <Link href="/">数据健康</Link>
         <span>/</span>
-        <Link href="/screen">Screen Configuration</Link>
+        <Link href="/screen">策略配置</Link>
         <span>/</span>
-        <Link href="/watchlist">Watchlist</Link>
+        <Link href="/watchlist">观察列表</Link>
         <span>/</span>
-        <span>Backtests</span>
+        <span>回测</span>
       </nav>
-      <WorkflowTrustBanner workflowLabel="Backtest workflow" health={health} error={healthError} />
+      <WorkflowTrustBanner workflowLabel="回测工作流" health={health} error={healthError} />
       <BacktestLaunchPanel
         apiBaseUrl={apiBaseUrl}
         initialRun={data}

@@ -27,7 +27,7 @@ async function loadWatchlist(): Promise<{ entries: WatchlistEntry[]; error: stri
     if (!response.ok) {
       return {
         entries: [],
-        error: `Unable to load watchlist (${response.status}).`,
+        error: `无法加载观察列表（${response.status}）。`,
       };
     }
 
@@ -36,7 +36,7 @@ async function loadWatchlist(): Promise<{ entries: WatchlistEntry[]; error: stri
   } catch {
     return {
       entries: [],
-      error: "Watchlist API is unreachable. Check backend availability and API base URL.",
+      error: "观察列表接口不可达，请检查后端服务与 API 地址。",
     };
   }
 }
@@ -50,15 +50,15 @@ export default async function WatchlistPage() {
   return (
     <main className="dashboard-shell">
       <nav className="top-nav">
-        <Link href="/">Data Health</Link>
+        <Link href="/">数据健康</Link>
         <span>/</span>
-        <Link href="/screen">Screen Configuration</Link>
+        <Link href="/screen">策略配置</Link>
         <span>/</span>
-        <span>Watchlist</span>
+        <span>观察列表</span>
         <span>/</span>
-        <Link href="/backtests">Backtests</Link>
+        <Link href="/backtests">回测</Link>
       </nav>
-      <WorkflowTrustBanner workflowLabel="Watchlist workflow" health={health} error={healthError} />
+      <WorkflowTrustBanner workflowLabel="观察列表工作流" health={health} error={healthError} />
       <WatchlistReviewPanel apiBaseUrl={apiBaseUrl} initialEntries={entries} initialError={error} />
     </main>
   );
