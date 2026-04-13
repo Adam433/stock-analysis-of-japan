@@ -152,6 +152,7 @@ GPT-5.4
 - `python3 apps/api/src/stockanalyse_api/main.py` verified the backend scaffold entrypoint.
 - `npm install`, `npm run lint`, and `npm run build` were executed in `apps/web` to verify the frontend shell.
 - Next.js build succeeded with `next build --webpack`; Turbopack build was avoided in the verification script because the sandbox previously blocked Turbopack child-process behavior.
+- Post-review follow-up: switched root workspace execution to npm, pinned frontend dependency versions, and removed stale legacy tests.
 
 ### Completion Notes List
 
@@ -163,6 +164,7 @@ GPT-5.4
 - Scaffolded `apps/api` as a `uv`-compatible packaged Python application with `src/stockanalyse_api` layout and reserved backend module boundaries.
 - Reserved shared `packages/contracts` and `scripts/*` directories to match the approved architecture.
 - Verified frontend lint/build and backend bootstrap entrypoint successfully.
+- Post-review fixes applied: reproducible dependency versions, tracked workspace lockfile strategy, and removed obsolete top-level tests.
 
 ### File List
 
@@ -207,7 +209,9 @@ GPT-5.4
 - scripts/dev/.gitkeep
 - scripts/data/.gitkeep
 - scripts/maintenance/.gitkeep
+- package-lock.json
 
 ### Change Log
 
 - 2026-04-13: Implemented Story 1.1 monorepo scaffolding for `apps/web` and `apps/api`, added workspace files, reserved shared directories, and completed smoke verification.
+- 2026-04-13: Applied review follow-up fixes to pin frontend dependency versions, align root scripts with npm workspaces, and remove legacy test artifacts.
