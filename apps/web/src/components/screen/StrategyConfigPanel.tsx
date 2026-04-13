@@ -255,6 +255,7 @@ export function StrategyConfigPanel({
             min={0}
             max={100}
             value={rpsThreshold}
+            aria-invalid={saveState === "error" && message.includes("RPS threshold")}
             onChange={(event) => setRpsThreshold(Number(event.target.value))}
           />
           <small>Integer from 0 to 100.</small>
@@ -269,6 +270,7 @@ export function StrategyConfigPanel({
             max={100}
             step="0.01"
             value={highProximityThresholdPct}
+            aria-invalid={saveState === "error" && message.includes("52-week-high proximity threshold")}
             onChange={(event) => setHighProximityThresholdPct(event.target.value)}
           />
           <small>Percentage distance below the 52-week high, from 0.00 to 100.00.</small>
@@ -288,8 +290,8 @@ export function StrategyConfigPanel({
               {runState === "running" ? "Running..." : "Run Screen"}
             </button>
           </div>
-          <p className={`strategy-message strategy-message--${saveState}`}>{message}</p>
-          <p className={`strategy-message strategy-message--${runState}`}>{runMessage}</p>
+          <p className={`strategy-message strategy-message--${saveState}`} role={saveState === "error" ? "alert" : "status"}>{message}</p>
+          <p className={`strategy-message strategy-message--${runState}`} role={runState === "error" ? "alert" : "status"}>{runMessage}</p>
         </div>
       </form>
 

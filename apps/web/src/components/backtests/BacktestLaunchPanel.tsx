@@ -171,6 +171,7 @@ export function BacktestLaunchPanel({
             name="start_date"
             type="date"
             value={startDate}
+            aria-invalid={launchState === "error" && message.includes("Start date")}
             onChange={(event) => setStartDate(event.target.value)}
           />
           <small>Beginning of the historical range for this run.</small>
@@ -182,6 +183,7 @@ export function BacktestLaunchPanel({
             name="end_date"
             type="date"
             value={endDate}
+            aria-invalid={launchState === "error" && message.includes("Start date")}
             onChange={(event) => setEndDate(event.target.value)}
           />
           <small>End of the historical range for this run.</small>
@@ -201,7 +203,10 @@ export function BacktestLaunchPanel({
               {launchState === "executing" ? "Executing..." : "Execute Latest Run"}
             </button>
           </div>
-          <p className={`strategy-message strategy-message--${launchState === "error" ? "error" : "ready"}`}>
+          <p
+            className={`strategy-message strategy-message--${launchState === "error" ? "error" : "ready"}`}
+            role={launchState === "error" ? "alert" : "status"}
+          >
             {message}
           </p>
         </div>

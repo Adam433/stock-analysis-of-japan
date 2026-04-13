@@ -1,6 +1,8 @@
 import Link from "next/link";
 
+import { WorkflowTrustBanner } from "@/components/shared/WorkflowTrustBanner";
 import { StockDetailView } from "@/components/stocks/StockDetailView";
+import { loadMarketDataHealth } from "@/lib/marketDataHealth";
 
 type StockDetailResponse = {
   stock_detail: Parameters<typeof StockDetailView>[0]["detail"];
@@ -56,10 +58,13 @@ export default async function StockDetailPage({
 }) {
   const resolvedParams = await params;
   const resolvedSearchParams = await searchParams;
-  const { data, error } = await loadStockDetail(
-    resolvedParams.instrumentId,
-    resolvedSearchParams.screen_run_id,
-  );
+  const [{ data, error }, { health, error: healthError }] = await Promise.all([
+    loadStockDetail(
+      resolvedParams.instrumentId,
+      resolvedSearchParams.screen_run_id,
+    ),
+    loadMarketDataHealth(apiBaseUrl),
+  ]);
 
   return (
     <main className="dashboard-shell">
@@ -74,6 +79,7 @@ export default async function StockDetailPage({
         <span>/</span>
         <span>Stock Detail</span>
       </nav>
+      <WorkflowTrustBanner workflowLabel="Stock detail workflow" health={health} error={healthError} />
 
       {data ? (
         <StockDetailView apiBaseUrl={apiBaseUrl} detail={data} />

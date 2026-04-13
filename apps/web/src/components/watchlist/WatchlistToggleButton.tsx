@@ -270,7 +270,10 @@ export function WatchlistToggleButton({
       ) : null}
 
       {message ? (
-        <p className={`strategy-message strategy-message--${toggleState === "error" ? "error" : "ready"}`}>
+        <p
+          className={`strategy-message strategy-message--${toggleState === "error" ? "error" : "ready"}`}
+          role={toggleState === "error" ? "alert" : "status"}
+        >
           {message}
         </p>
       ) : null}

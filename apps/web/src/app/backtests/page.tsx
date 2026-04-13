@@ -1,6 +1,8 @@
 import Link from "next/link";
 
+import { WorkflowTrustBanner } from "@/components/shared/WorkflowTrustBanner";
 import { BacktestLaunchPanel } from "@/components/backtests/BacktestLaunchPanel";
+import { loadMarketDataHealth } from "@/lib/marketDataHealth";
 
 type BacktestRun = Parameters<typeof BacktestLaunchPanel>[0]["initialRun"];
 
@@ -56,9 +58,10 @@ async function loadBacktestRuns(): Promise<{ data: NonNullable<Parameters<typeof
 }
 
 export default async function BacktestsPage() {
-  const [{ data, error }, { data: runs, error: runsError }] = await Promise.all([
+  const [{ data, error }, { data: runs, error: runsError }, { health, error: healthError }] = await Promise.all([
     loadLatestBacktestRun(),
     loadBacktestRuns(),
+    loadMarketDataHealth(apiBaseUrl),
   ]);
 
   return (
@@ -72,6 +75,7 @@ export default async function BacktestsPage() {
         <span>/</span>
         <span>Backtests</span>
       </nav>
+      <WorkflowTrustBanner workflowLabel="Backtest workflow" health={health} error={healthError} />
       <BacktestLaunchPanel
         apiBaseUrl={apiBaseUrl}
         initialRun={data}

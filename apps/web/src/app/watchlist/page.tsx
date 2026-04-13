@@ -1,6 +1,8 @@
 import Link from "next/link";
 
+import { WorkflowTrustBanner } from "@/components/shared/WorkflowTrustBanner";
 import { WatchlistReviewPanel } from "@/components/watchlist/WatchlistReviewPanel";
+import { loadMarketDataHealth } from "@/lib/marketDataHealth";
 
 type WatchlistEntry = {
   id: number;
@@ -42,7 +44,10 @@ async function loadWatchlist(): Promise<{ entries: WatchlistEntry[]; error: stri
 }
 
 export default async function WatchlistPage() {
-  const { entries, error } = await loadWatchlist();
+  const [{ entries, error }, { health, error: healthError }] = await Promise.all([
+    loadWatchlist(),
+    loadMarketDataHealth(apiBaseUrl),
+  ]);
 
   return (
     <main className="dashboard-shell">
@@ -55,6 +60,7 @@ export default async function WatchlistPage() {
         <span>/</span>
         <Link href="/backtests">Backtests</Link>
       </nav>
+      <WorkflowTrustBanner workflowLabel="Watchlist workflow" health={health} error={healthError} />
       <WatchlistReviewPanel apiBaseUrl={apiBaseUrl} initialEntries={entries} initialError={error} />
     </main>
   );

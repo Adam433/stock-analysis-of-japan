@@ -1,6 +1,8 @@
 import Link from "next/link";
 
+import { WorkflowTrustBanner } from "@/components/shared/WorkflowTrustBanner";
 import { StrategyConfigPanel } from "@/components/screen/StrategyConfigPanel";
+import { loadMarketDataHealth } from "@/lib/marketDataHealth";
 
 type StrategyConfigurationResponse = {
   configuration: {
@@ -113,9 +115,10 @@ async function loadLatestScreenRun(): Promise<LoadLatestRunResult> {
 }
 
 export default async function ScreenConfigurationPage() {
-  const [{ data, error }, { data: latestRun, error: latestRunError }] = await Promise.all([
+  const [{ data, error }, { data: latestRun, error: latestRunError }, { health, error: healthError }] = await Promise.all([
     loadStrategyConfiguration(),
     loadLatestScreenRun(),
+    loadMarketDataHealth(apiBaseUrl),
   ]);
 
   return (
@@ -129,6 +132,7 @@ export default async function ScreenConfigurationPage() {
         <span>/</span>
         <Link href="/backtests">Backtests</Link>
       </nav>
+      <WorkflowTrustBanner workflowLabel="Screen workflow" health={health} error={healthError} />
       <StrategyConfigPanel
         apiBaseUrl={apiBaseUrl}
         initialData={data}
