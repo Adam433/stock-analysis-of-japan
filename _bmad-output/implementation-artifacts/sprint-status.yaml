@@ -1,0 +1,74 @@
+# generated: 2026-04-13T00:00:00+09:00
+# last_updated: 2026-04-13T21:45:00+09:00
+# project: stockAnalyse
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: /Users/adam/Documents/GitHub/stockAnalyse/_bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog -> in-progress: Automatically when first story is created
+#   - in-progress -> done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in implementation-artifacts
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+
+generated: 2026-04-13T00:00:00+09:00
+last_updated: 2026-04-13T21:45:00+09:00
+project: stockAnalyse
+project_key: NOKEY
+tracking_system: file-system
+story_location: /Users/adam/Documents/GitHub/stockAnalyse/_bmad-output/implementation-artifacts
+
+development_status:
+  epic-1: in-progress
+  1-1-initialize-monorepo-application-shells: review
+  1-2-establish-database-schema-and-migration-workflow: backlog
+  1-3-ingest-and-normalize-japan-equity-end-of-day-data: backlog
+  1-4-expose-data-freshness-and-refresh-status: backlog
+  epic-1-retrospective: optional
+  epic-2: backlog
+  2-1-create-strategy-configuration-workflow: backlog
+  2-2-materialize-rps-and-52-week-high-derived-facts: backlog
+  2-3-execute-screen-runs-and-persist-results: backlog
+  2-4-display-screen-result-list-with-qualification-summary: backlog
+  epic-2-retrospective: optional
+  epic-3: backlog
+  3-1-serve-stock-detail-and-chart-data-from-stored-facts: backlog
+  3-2-build-stock-detail-page-with-candlestick-and-rps-panels: backlog
+  3-3-show-rule-breakdown-and-exact-qualifying-values: backlog
+  epic-3-retrospective: optional
+  epic-4: backlog
+  4-1-add-and-remove-qualified-stocks-from-the-watchlist: backlog
+  4-2-persist-watchlist-notes-observation-reasons-and-added-dates: backlog
+  4-3-view-and-review-the-watchlist: backlog
+  epic-4-retrospective: optional
+  epic-5: backlog
+  5-1-launch-and-persist-backtest-runs: backlog
+  5-2-execute-reproducible-backtests-from-stored-inputs: backlog
+  5-3-review-backtest-results-and-compare-strategy-adjustments: backlog
+  epic-5-retrospective: optional
+  epic-6: backlog
+  6-1-enforce-trust-accessibility-and-error-state-standards: backlog
+  6-2-preserve-security-and-future-extension-boundaries: backlog
+  epic-6-retrospective: optional

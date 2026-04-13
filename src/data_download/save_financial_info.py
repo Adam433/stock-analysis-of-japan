@@ -11,7 +11,7 @@ def fetch_all_stock_codes():
             cursor.execute(query)
             stock_codes_tuples = cursor.fetchall()
             stock_codes = [code[0] for code in stock_codes_tuples]  # 提取每个元组的第一个元素
-            stock_codes =["6966"]
+            # stock_codes =["2224"]
         return stock_codes
     except Exception as e:
         print(f"从数据库检索股票代码时发生错误: {e}")
@@ -59,6 +59,11 @@ def save_financial_data_to_db(stock_code, financials):
 
         # 遍历每个日期（列）
         for report_date, value in row.items():
+
+            # 如果 value 是 NaN，则跳过
+            if pd.isna(value):
+                continue
+
             # 直接从Timestamp转换为date，无需转换为字符串
             if isinstance(report_date, pd.Timestamp):
                 report_date = report_date.date()

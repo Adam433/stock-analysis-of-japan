@@ -144,5 +144,21 @@ cython_debug/
 #stockData
 data/
 
+.agents
+.claude
+_bmad
+
 #config.ini
 *.ini
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+
+# Local package managers
+pnpm-lock.yaml
+package-lock.json
+
+# App-specific environments
+apps/*/.venv/

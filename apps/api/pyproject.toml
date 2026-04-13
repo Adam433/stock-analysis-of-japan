@@ -1,0 +1,17 @@
+[project]
+name = "stockanalyse-api"
+version = "0.1.0"
+description = "Backend service for stockAnalyse"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stockanalyse_api"]
