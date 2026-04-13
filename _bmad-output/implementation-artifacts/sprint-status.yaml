@@ -1,5 +1,5 @@
 # generated: 2026-04-13T00:00:00+09:00
-# last_updated: 2026-04-14T03:18:00+09:00
+# last_updated: 2026-04-14T03:43:00+09:00
 # project: stockAnalyse
 # project_key: NOKEY
 # tracking_system: file-system
@@ -34,7 +34,7 @@
 # - Developer typically creates next story after previous one is 'done' to incorporate learnings
 
 generated: 2026-04-13T00:00:00+09:00
-last_updated: 2026-04-14T03:18:00+09:00
+last_updated: 2026-04-14T03:43:00+09:00
 project: stockAnalyse
 project_key: NOKEY
 tracking_system: file-system
@@ -62,9 +62,9 @@ development_status:
   4-1-add-and-remove-qualified-stocks-from-the-watchlist: done
   4-2-persist-watchlist-notes-observation-reasons-and-added-dates: done
   4-3-view-and-review-the-watchlist: done
-  epic-4-retrospective: optional
-  epic-5: backlog
-  5-1-launch-and-persist-backtest-runs: backlog
+  epic-4-retrospective: done
+  epic-5: in-progress
+  5-1-launch-and-persist-backtest-runs: done
   5-2-execute-reproducible-backtests-from-stored-inputs: backlog
   5-3-review-backtest-results-and-compare-strategy-adjustments: backlog
   epic-5-retrospective: optional

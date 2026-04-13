@@ -7,6 +7,7 @@ from sqlalchemy import engine_from_config, pool
 
 from stockanalyse_api.config.settings import get_database_url
 from stockanalyse_api.db.base import Base
+from stockanalyse_api.domain.backtests import models as backtest_models  # noqa: F401
 from stockanalyse_api.domain.instruments import models as instrument_models  # noqa: F401
 from stockanalyse_api.domain.indicators import models as indicator_models  # noqa: F401
 from stockanalyse_api.domain.market_data import models as market_data_models  # noqa: F401

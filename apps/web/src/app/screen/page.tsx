@@ -126,6 +126,8 @@ export default async function ScreenConfigurationPage() {
         <span>Screen Configuration</span>
         <span>/</span>
         <Link href="/watchlist">Watchlist</Link>
+        <span>/</span>
+        <Link href="/backtests">Backtests</Link>
       </nav>
       <StrategyConfigPanel
         apiBaseUrl={apiBaseUrl}

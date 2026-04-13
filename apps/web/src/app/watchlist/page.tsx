@@ -52,6 +52,8 @@ export default async function WatchlistPage() {
         <Link href="/screen">Screen Configuration</Link>
         <span>/</span>
         <span>Watchlist</span>
+        <span>/</span>
+        <Link href="/backtests">Backtests</Link>
       </nav>
       <WatchlistReviewPanel apiBaseUrl={apiBaseUrl} initialEntries={entries} initialError={error} />
     </main>

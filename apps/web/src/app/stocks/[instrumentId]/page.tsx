@@ -70,6 +70,8 @@ export default async function StockDetailPage({
         <span>/</span>
         <Link href="/watchlist">Watchlist</Link>
         <span>/</span>
+        <Link href="/backtests">Backtests</Link>
+        <span>/</span>
         <span>Stock Detail</span>
       </nav>
 
