@@ -10,6 +10,8 @@ from stockanalyse_api.services.ingestion.provider_models import ProviderDailyBar
 
 class StaticFixtureProvider:
     provider_name = "static_fixture"
+    market_scope = "jp_equities_eod"
+    credential_boundary = "backend_only"
 
     def __init__(self, fixture_path: Path) -> None:
         self.fixture_path = fixture_path

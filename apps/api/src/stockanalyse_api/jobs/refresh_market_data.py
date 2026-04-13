@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from stockanalyse_api.db.session import SessionLocal
-from stockanalyse_api.services.ingestion.providers.static_provider import StaticFixtureProvider
+from stockanalyse_api.services.ingestion.providers.registry import build_ingestion_provider
 from stockanalyse_api.services.ingestion.refresh_service import execute_market_data_refresh
 
 APP_ROOT = Path(__file__).resolve().parents[3]
@@ -33,10 +33,10 @@ def resolve_fixture_path(fixture: str) -> Path:
 def main() -> None:
     args = build_parser().parse_args()
 
-    if args.provider == "static_fixture":
-        provider = StaticFixtureProvider(resolve_fixture_path(args.fixture))
-    else:
-        raise ValueError(f"Unsupported provider: {args.provider}")
+    provider = build_ingestion_provider(
+        args.provider,
+        fixture_path=resolve_fixture_path(args.fixture),
+    )
 
     with SessionLocal() as session:
         result = execute_market_data_refresh(session, provider, args.symbols)

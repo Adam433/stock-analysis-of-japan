@@ -7,9 +7,7 @@ import { loadMarketDataHealth } from "@/lib/marketDataHealth";
 type BacktestRun = Parameters<typeof BacktestLaunchPanel>[0]["initialRun"];
 
 const apiBaseUrl =
-  process.env.STOCKANALYSE_API_BASE_URL ??
-  process.env.NEXT_PUBLIC_STOCKANALYSE_API_BASE_URL ??
-  "http://127.0.0.1:8000";
+  process.env.STOCKANALYSE_API_BASE_URL ?? "http://127.0.0.1:8000";
 
 export const dynamic = "force-dynamic";
 
