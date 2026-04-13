@@ -3,10 +3,12 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Date, ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint, Date, ForeignKey, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from stockanalyse_api.db.base import Base, TimestampMixin
+
+DATA_STATUS_VALUES = ("complete", "partial", "unavailable")
 
 
 class MarketDataDaily(TimestampMixin, Base):
@@ -16,6 +18,10 @@ class MarketDataDaily(TimestampMixin, Base):
             "instrument_id",
             "trade_date",
             name="uq_market_data_daily_instrument_id_trade_date",
+        ),
+        CheckConstraint(
+            f"data_status IN {DATA_STATUS_VALUES}",
+            name="market_data_daily_data_status",
         ),
     )
 

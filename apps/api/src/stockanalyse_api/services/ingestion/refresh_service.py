@@ -38,25 +38,33 @@ def _get_or_create_instrument(session, bar: ProviderDailyBar) -> Instrument:
 def refresh_market_data(session, provider: EodMarketDataProvider, symbols: list[str]) -> dict[str, int]:
     inserted = 0
     updated = 0
+    rows_by_key: dict[tuple[int, object], MarketDataDaily] = {}
 
     for raw_bar in provider.fetch_daily_bars(symbols):
         normalized = normalize_daily_bar(raw_bar)
         instrument = _get_or_create_instrument(session, normalized.bar)
+        row_key = (instrument.id, normalized.bar.trade_date)
 
-        row = session.execute(
-            select(MarketDataDaily).where(
-                MarketDataDaily.instrument_id == instrument.id,
-                MarketDataDaily.trade_date == normalized.bar.trade_date,
-            )
-        ).scalar_one_or_none()
-
+        row = rows_by_key.get(row_key)
         if row is None:
-            row = MarketDataDaily(
-                instrument_id=instrument.id,
-                trade_date=normalized.bar.trade_date,
-            )
-            session.add(row)
-            inserted += 1
+            row = session.execute(
+                select(MarketDataDaily).where(
+                    MarketDataDaily.instrument_id == instrument.id,
+                    MarketDataDaily.trade_date == normalized.bar.trade_date,
+                )
+            ).scalar_one_or_none()
+
+            if row is None:
+                row = MarketDataDaily(
+                    instrument_id=instrument.id,
+                    trade_date=normalized.bar.trade_date,
+                )
+                session.add(row)
+                inserted += 1
+            else:
+                updated += 1
+
+            rows_by_key[row_key] = row
         else:
             updated += 1
 

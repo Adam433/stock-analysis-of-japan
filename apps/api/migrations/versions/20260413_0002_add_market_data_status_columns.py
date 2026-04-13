@@ -10,6 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+DATA_STATUS_VALUES = ("complete", "partial", "unavailable")
+
 
 revision = "20260413_0002"
 down_revision = "20260413_0001"
@@ -25,9 +27,14 @@ def upgrade() -> None:
         batch_op.add_column(
             sa.Column("data_status", sa.String(length=16), nullable=False, server_default="complete")
         )
+        batch_op.create_check_constraint(
+            "market_data_daily_data_status",
+            f"data_status IN {DATA_STATUS_VALUES}",
+        )
 
 
 def downgrade() -> None:
     with op.batch_alter_table("market_data_daily") as batch_op:
+        batch_op.drop_constraint("market_data_daily_data_status", type_="check")
         batch_op.drop_column("data_status")
         batch_op.drop_column("data_source")

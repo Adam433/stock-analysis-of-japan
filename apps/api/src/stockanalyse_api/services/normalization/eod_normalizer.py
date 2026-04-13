@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from stockanalyse_api.domain.market_data.models import DATA_STATUS_VALUES
 from stockanalyse_api.services.ingestion.provider_models import ProviderDailyBar, ProviderInstrument
 
 
-VALID_DATA_STATUSES = {"complete", "partial", "unavailable"}
+VALID_DATA_STATUSES = set(DATA_STATUS_VALUES)
 
 
 @dataclass(slots=True)
