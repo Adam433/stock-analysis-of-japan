@@ -1,5 +1,5 @@
 # generated: 2026-04-13T00:00:00+09:00
-# last_updated: 2026-04-14T00:42:00+09:00
+# last_updated: 2026-04-14T01:02:00+09:00
 # project: stockAnalyse
 # project_key: NOKEY
 # tracking_system: file-system
@@ -34,7 +34,7 @@
 # - Developer typically creates next story after previous one is 'done' to incorporate learnings
 
 generated: 2026-04-13T00:00:00+09:00
-last_updated: 2026-04-14T00:42:00+09:00
+last_updated: 2026-04-14T01:02:00+09:00
 project: stockAnalyse
 project_key: NOKEY
 tracking_system: file-system
@@ -49,7 +49,7 @@ development_status:
   epic-1-retrospective: done
   epic-2: in-progress
   2-1-create-strategy-configuration-workflow: done
-  2-2-materialize-rps-and-52-week-high-derived-facts: backlog
+  2-2-materialize-rps-and-52-week-high-derived-facts: done
   2-3-execute-screen-runs-and-persist-results: backlog
   2-4-display-screen-result-list-with-qualification-summary: backlog
   epic-2-retrospective: optional
