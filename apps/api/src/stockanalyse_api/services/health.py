@@ -47,7 +47,9 @@ def get_market_data_health(session, today: date | None = None) -> MarketDataHeal
     total_instruments = session.execute(select(func.count(func.distinct(MarketDataDaily.instrument_id)))).scalar_one()
 
     last_refresh = session.execute(
-        select(MarketDataRefreshRun).order_by(MarketDataRefreshRun.started_at.desc(), MarketDataRefreshRun.id.desc())
+        select(MarketDataRefreshRun)
+        .order_by(MarketDataRefreshRun.started_at.desc(), MarketDataRefreshRun.id.desc())
+        .limit(1)
     ).scalar_one_or_none()
 
     freshness_state, age_in_days = _classify_freshness(latest_trade_date, snapshot_date)
@@ -72,6 +74,8 @@ def get_market_data_health(session, today: date | None = None) -> MarketDataHeal
 
         if last_refresh.status == "failed":
             coverage_status = "failed"
+        elif partial_rows or unavailable_rows:
+            coverage_status = "partial"
         elif last_refresh.status == "partial" or last_refresh.partial_rows or last_refresh.unavailable_rows:
             coverage_status = "partial"
     elif latest_trade_date is None:

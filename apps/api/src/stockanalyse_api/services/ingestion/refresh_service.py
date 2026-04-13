@@ -41,8 +41,6 @@ def refresh_market_data(session, provider: EodMarketDataProvider, symbols: list[
     inserted = 0
     updated = 0
     processed = 0
-    partial_rows = 0
-    unavailable_rows = 0
     latest_trade_date: date | None = None
     rows_by_key: dict[tuple[int, date], MarketDataDaily] = {}
 
@@ -85,10 +83,9 @@ def refresh_market_data(session, provider: EodMarketDataProvider, symbols: list[
         row.volume = normalized.bar.volume
         row.data_source = normalized.bar.data_source
         row.data_status = normalized.bar.data_status or "complete"
-        if row.data_status == "partial":
-            partial_rows += 1
-        elif row.data_status == "unavailable":
-            unavailable_rows += 1
+
+    partial_rows = sum(1 for row in rows_by_key.values() if row.data_status == "partial")
+    unavailable_rows = sum(1 for row in rows_by_key.values() if row.data_status == "unavailable")
 
     session.commit()
     return {

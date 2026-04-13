@@ -1,6 +1,6 @@
 # Story 1.3: Ingest and Normalize Japan Equity End-of-Day Data
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 

@@ -1,6 +1,6 @@
 # Story 1.4: Expose Data Freshness and Refresh Status
 
-Status: review
+Status: done
 
 ## Story
 
@@ -47,6 +47,7 @@ GPT-5.4
 - Reworked the Next.js homepage to display freshness, coverage, and refresh outcome signals from the backend payload.
 - Verified with `PYTHONPATH=src python3 -m unittest tests.test_ingestion_review_regressions tests.test_market_data_health`.
 - Verified with `npm run lint` in `apps/web`.
+- Follow-up review fixes ensured coverage status reflects persisted incomplete rows, refresh-run counters follow final row state after duplicate updates, and UI distinguishes API connectivity issues from actual data-health failures.
 
 ### Completion Notes List
 
@@ -76,3 +77,4 @@ GPT-5.4
 ### Change Log
 
 - 2026-04-13: Implemented operational market-data health visibility across persistence, API, and web shell.
+- 2026-04-13: Fixed 1.4 review findings around aggregate coverage semantics, duplicate-row run counters, and API connectivity messaging.

@@ -24,6 +24,10 @@ type MarketDataHealthResponse = {
   last_refresh: RefreshPayload | null;
 };
 
+type MarketDataHealthResult =
+  | { kind: "ok"; health: MarketDataHealthResponse }
+  | { kind: "error"; message: string };
+
 const workflowSteps = [
   "Ingest and normalize Japan equity end-of-day bars",
   "Track refresh outcome, partial rows, and failed runs",
@@ -34,19 +38,28 @@ const apiBaseUrl = process.env.STOCKANALYSE_API_BASE_URL ?? "http://127.0.0.1:80
 
 export const dynamic = "force-dynamic";
 
-async function getMarketDataHealth(): Promise<MarketDataHealthResponse | null> {
+async function getMarketDataHealth(): Promise<MarketDataHealthResult> {
   try {
     const response = await fetch(`${apiBaseUrl}/health/market-data`, {
       cache: "no-store",
     });
 
     if (!response.ok) {
-      return null;
+      return {
+        kind: "error",
+        message: `Health API responded with ${response.status}.`,
+      };
     }
 
-    return (await response.json()) as MarketDataHealthResponse;
+    return {
+      kind: "ok",
+      health: (await response.json()) as MarketDataHealthResponse,
+    };
   } catch {
-    return null;
+    return {
+      kind: "error",
+      message: "Health API is unreachable. Check STOCKANALYSE_API_BASE_URL and backend availability.",
+    };
   }
 }
 
@@ -72,17 +85,33 @@ function toneClassForStatus(status: string): string {
 }
 
 export default async function HomePage() {
-  const health = await getMarketDataHealth();
+  const healthResult = await getMarketDataHealth();
+  const health = healthResult.kind === "ok" ? healthResult.health : null;
   const refresh = health?.last_refresh;
-  const freshnessTone = toneClassForStatus(health?.freshness_state ?? "failed");
-  const coverageTone = toneClassForStatus(health?.coverage_status ?? "failed");
-  const refreshTone = toneClassForStatus(refresh?.status ?? "failed");
+  const apiErrorMessage =
+    healthResult.kind === "error"
+      ? healthResult.message
+      : "Health API responded successfully.";
+  const freshnessStatus = healthResult.kind === "ok" ? healthResult.health.freshness_state : "api-unreachable";
+  const coverageStatus = healthResult.kind === "ok" ? healthResult.health.coverage_status : "connection-issue";
+  const refreshStatus = healthResult.kind === "ok" ? refresh?.status ?? "failed" : "connection-issue";
+  const freshnessTone =
+    healthResult.kind === "ok" ? toneClassForStatus(freshnessStatus) : "status-card--neutral";
+  const coverageTone =
+    healthResult.kind === "ok" ? toneClassForStatus(coverageStatus) : "status-card--neutral";
+  const refreshTone =
+    healthResult.kind === "ok" ? toneClassForStatus(refreshStatus) : "status-card--neutral";
 
   return (
     <main className="dashboard-shell">
       <section className="hero-panel">
         <div className="hero-copy">
           <p className="eyebrow">stockAnalyse</p>
+          <p className="top-nav">
+            <span>Data Health</span>
+            <span>/</span>
+            <Link href="/screen">Screen Configuration</Link>
+          </p>
           <h1>Operational trust view for Japan equity data.</h1>
           <p className="hero-text">
             Story 1.4 turns the shell into a live health surface: freshness,
@@ -104,9 +133,11 @@ export default async function HomePage() {
       <section className="status-grid">
         <article className={`status-card ${freshnessTone}`}>
           <p className="status-label">Freshness</p>
-          <h2>{health?.freshness_state ?? "unavailable"}</h2>
+          <h2>{freshnessStatus}</h2>
           <p className="status-copy">
-            Latest trade date: {health?.latest_trade_date ?? "No stored data"}
+            {health
+              ? `Latest trade date: ${health.latest_trade_date ?? "No stored data"}`
+              : apiErrorMessage}
           </p>
           <p className="status-meta">
             Age: {health?.age_in_days ?? "-"} day{health?.age_in_days === 1 ? "" : "s"}
@@ -115,11 +146,11 @@ export default async function HomePage() {
 
         <article className={`status-card ${coverageTone}`}>
           <p className="status-label">Coverage</p>
-          <h2>{health?.coverage_status ?? "unavailable"}</h2>
+          <h2>{coverageStatus}</h2>
           <p className="status-copy">
             {health
               ? `${health.total_instruments} instruments tracked in stored daily bars`
-              : "API not reachable, so coverage cannot be confirmed"}
+              : "Coverage cannot be evaluated until the health endpoint is reachable."}
           </p>
           <p className="status-meta">
             Partial rows: {health?.partial_rows ?? "-"} | Unavailable rows:{" "}
@@ -129,9 +160,9 @@ export default async function HomePage() {
 
         <article className={`status-card ${refreshTone}`}>
           <p className="status-label">Last Refresh</p>
-          <h2>{refresh?.status ?? "unavailable"}</h2>
+          <h2>{refreshStatus}</h2>
           <p className="status-copy">
-            Provider: {refresh?.provider ?? "No refresh run recorded"}
+            Provider: {refresh?.provider ?? "Refresh state unavailable because the API is unreachable"}
           </p>
           <p className="status-meta">
             Completed: {formatTimestamp(refresh?.completed_at ?? null)}
@@ -184,10 +215,13 @@ export default async function HomePage() {
               : "No symbol list captured yet"}
           </p>
           <p className="error-callout">
-            {refresh?.error_message ?? "No refresh error recorded."}
+            {healthResult.kind === "ok"
+              ? refresh?.error_message ?? "No refresh error recorded."
+              : apiErrorMessage}
           </p>
         </article>
       </section>
     </main>
   );
 }
+import Link from "next/link";

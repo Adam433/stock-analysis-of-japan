@@ -56,6 +56,61 @@ class FailingProvider:
         raise RuntimeError("fixture source unavailable")
 
 
+class CompleteSubsetProvider:
+    provider_name = "complete_subset"
+
+    def fetch_daily_bars(self, _symbols: list[str]) -> list[ProviderDailyBar]:
+        return [
+            ProviderDailyBar(
+                symbol="7203",
+                exchange="TSE",
+                trade_date=date(2026, 4, 11),
+                open=Decimal("1001"),
+                high=Decimal("1011"),
+                low=Decimal("996"),
+                close=Decimal("1006"),
+                adj_close=Decimal("1006"),
+                volume=101,
+                data_source=self.provider_name,
+                instrument_name="Toyota Motor",
+            )
+        ]
+
+
+class DuplicateOverwriteProvider:
+    provider_name = "duplicate_overwrite"
+
+    def fetch_daily_bars(self, _symbols: list[str]) -> list[ProviderDailyBar]:
+        return [
+            ProviderDailyBar(
+                symbol="7203",
+                exchange="TSE",
+                trade_date=date(2026, 4, 11),
+                open=Decimal("1000"),
+                high=None,
+                low=Decimal("995"),
+                close=Decimal("1005"),
+                adj_close=Decimal("1005"),
+                volume=100,
+                data_source=self.provider_name,
+                instrument_name="Toyota Motor",
+            ),
+            ProviderDailyBar(
+                symbol="7203",
+                exchange="TSE",
+                trade_date=date(2026, 4, 11),
+                open=Decimal("1000"),
+                high=Decimal("1010"),
+                low=Decimal("995"),
+                close=Decimal("1005"),
+                adj_close=Decimal("1005"),
+                volume=100,
+                data_source=self.provider_name,
+                instrument_name="Toyota Motor",
+            ),
+        ]
+
+
 class MarketDataHealthTests(unittest.TestCase):
     def setUp(self) -> None:
         self.engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
@@ -114,6 +169,26 @@ class MarketDataHealthTests(unittest.TestCase):
 
         self.assertEqual(health.freshness_state, "stale")
         self.assertEqual(health.age_in_days, 9)
+
+    def test_health_keeps_partial_coverage_when_latest_run_is_success_on_subset(self) -> None:
+        with self.session_factory() as session:
+            execute_market_data_refresh(session, MixedStatusProvider(), ["7203", "6758"])
+            execute_market_data_refresh(session, CompleteSubsetProvider(), ["7203"])
+            health = get_market_data_health(session, today=date(2026, 4, 12))
+
+        self.assertEqual(health.last_refresh["status"], "succeeded")
+        self.assertEqual(health.partial_rows, 1)
+        self.assertEqual(health.coverage_status, "partial")
+
+    def test_refresh_run_counts_final_row_state_after_duplicate_updates(self) -> None:
+        with self.session_factory() as session:
+            result = execute_market_data_refresh(session, DuplicateOverwriteProvider(), ["7203"])
+            health = get_market_data_health(session, today=date(2026, 4, 12))
+
+        self.assertEqual(result["partial_rows"], 0)
+        self.assertEqual(result["unavailable_rows"], 0)
+        self.assertEqual(health.last_refresh["status"], "succeeded")
+        self.assertEqual(health.coverage_status, "complete")
 
 
 if __name__ == "__main__":

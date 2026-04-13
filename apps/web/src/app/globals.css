@@ -53,6 +53,15 @@ a {
   padding: 32px 0 64px;
 }
 
+.top-nav {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
 .hero-panel,
 .detail-panel,
 .status-card {
@@ -170,9 +179,111 @@ a {
   color: var(--bad-fg);
 }
 
+.status-card--neutral {
+  background: linear-gradient(180deg, rgba(228, 236, 238, 0.96), rgba(255, 251, 242, 0.86));
+  color: #42535a;
+}
+
 .detail-panel {
   padding: 22px;
   border-radius: 26px;
+}
+
+.screen-panel {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 24px 80px rgba(43, 33, 19, 0.08);
+  border-radius: 32px;
+  padding: 28px;
+}
+
+.screen-panel__header h1 {
+  margin: 8px 0 0;
+  max-width: 14ch;
+  font-size: clamp(2.6rem, 5vw, 4.6rem);
+  line-height: 0.95;
+}
+
+.screen-summary-grid {
+  display: grid;
+  gap: 18px;
+  margin-top: 22px;
+}
+
+.screen-summary-card {
+  border: 1px solid rgba(14, 90, 82, 0.14);
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(240, 248, 245, 0.95), rgba(255, 251, 242, 0.86));
+  padding: 20px;
+}
+
+.screen-summary-card h2 {
+  margin: 10px 0 0;
+  font-size: 2rem;
+}
+
+.strategy-form {
+  display: grid;
+  gap: 18px;
+  margin-top: 24px;
+}
+
+.strategy-field {
+  display: grid;
+  gap: 8px;
+}
+
+.strategy-field span {
+  font-size: 1.1rem;
+}
+
+.strategy-field input {
+  width: 100%;
+  border: 1px solid rgba(27, 24, 20, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 14px 16px;
+  color: var(--foreground);
+  font: inherit;
+}
+
+.strategy-field small {
+  color: var(--muted);
+}
+
+.strategy-actions {
+  display: grid;
+  gap: 12px;
+  align-items: start;
+}
+
+.strategy-button {
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: white;
+  padding: 14px 20px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.strategy-button:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.strategy-message {
+  margin: 0;
+  color: var(--muted);
+}
+
+.strategy-message--saved {
+  color: var(--good-fg);
+}
+
+.strategy-message--error {
+  color: var(--bad-fg);
 }
 
 .detail-list {
@@ -221,5 +332,18 @@ a {
 
   .detail-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .screen-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .strategy-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
+  }
+
+  .strategy-actions {
+    grid-column: 1 / -1;
   }
 }

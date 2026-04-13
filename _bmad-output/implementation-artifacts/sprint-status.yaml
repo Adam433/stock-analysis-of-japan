@@ -1,5 +1,5 @@
 # generated: 2026-04-13T00:00:00+09:00
-# last_updated: 2026-04-13T23:35:00+09:00
+# last_updated: 2026-04-14T00:42:00+09:00
 # project: stockAnalyse
 # project_key: NOKEY
 # tracking_system: file-system
@@ -34,21 +34,21 @@
 # - Developer typically creates next story after previous one is 'done' to incorporate learnings
 
 generated: 2026-04-13T00:00:00+09:00
-last_updated: 2026-04-13T23:35:00+09:00
+last_updated: 2026-04-14T00:42:00+09:00
 project: stockAnalyse
 project_key: NOKEY
 tracking_system: file-system
 story_location: /Users/adam/Documents/GitHub/stockAnalyse/_bmad-output/implementation-artifacts
 
 development_status:
-  epic-1: in-progress
+  epic-1: done
   1-1-initialize-monorepo-application-shells: done
   1-2-establish-database-schema-and-migration-workflow: done
   1-3-ingest-and-normalize-japan-equity-end-of-day-data: done
-  1-4-expose-data-freshness-and-refresh-status: review
-  epic-1-retrospective: optional
-  epic-2: backlog
-  2-1-create-strategy-configuration-workflow: backlog
+  1-4-expose-data-freshness-and-refresh-status: done
+  epic-1-retrospective: done
+  epic-2: in-progress
+  2-1-create-strategy-configuration-workflow: done
   2-2-materialize-rps-and-52-week-high-derived-facts: backlog
   2-3-execute-screen-runs-and-persist-results: backlog
   2-4-display-screen-result-list-with-qualification-summary: backlog
