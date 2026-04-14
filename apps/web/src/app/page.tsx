@@ -1,8 +1,17 @@
 import Link from "next/link";
 
+import {
+  describeApiBaseUrlResolution,
+  resolveApiBaseUrl,
+} from "@/lib/apiBaseUrl";
+import { loadMarketDataHealth } from "@/lib/marketDataHealth";
+
 type RefreshPayload = {
   status: string;
   provider: string;
+  universe_scope: string;
+  universe_filter: string;
+  requested_symbol_count: number;
   started_at: string;
   completed_at: string | null;
   rows_processed: number;
@@ -24,6 +33,12 @@ type MarketDataHealthResponse = {
   partial_rows: number;
   unavailable_rows: number;
   last_refresh: RefreshPayload | null;
+  universe_manifest: {
+    universe_filter: string;
+    symbol_count: number;
+    updated_at: string | null;
+    source_path: string;
+  } | null;
 };
 
 type MarketDataHealthResult =
@@ -36,33 +51,22 @@ const workflowSteps = [
   "在筛选与回测前先依据已存信任信号判断",
 ];
 
-const apiBaseUrl = process.env.STOCKANALYSE_API_BASE_URL ?? "http://127.0.0.1:8000";
-
 export const dynamic = "force-dynamic";
 
-async function getMarketDataHealth(): Promise<MarketDataHealthResult> {
-  try {
-    const response = await fetch(`${apiBaseUrl}/health/market-data`, {
-      cache: "no-store",
-    });
+async function getMarketDataHealth(apiBaseUrl: string): Promise<MarketDataHealthResult> {
+  const { health, error } = await loadMarketDataHealth(apiBaseUrl);
 
-    if (!response.ok) {
-      return {
-        kind: "error",
-        message: `健康检查接口返回 ${response.status}。`,
-      };
-    }
-
+  if (health) {
     return {
       kind: "ok",
-      health: (await response.json()) as MarketDataHealthResponse,
-    };
-  } catch {
-    return {
-      kind: "error",
-      message: "无法访问健康检查接口，请检查 STOCKANALYSE_API_BASE_URL 与后端服务状态。",
+      health,
     };
   }
+
+  return {
+    kind: "error",
+    message: error ?? "健康检查接口调用失败。",
+  };
 }
 
 function formatTimestamp(value: string | null): string {
@@ -77,6 +81,9 @@ function formatTimestamp(value: string | null): string {
 }
 
 function toneClassForStatus(status: string): string {
+  if (status === "never-run") {
+    return "status-card--neutral";
+  }
   if (status === "fresh" || status === "succeeded" || status === "complete") {
     return "status-card--good";
   }
@@ -87,16 +94,19 @@ function toneClassForStatus(status: string): string {
 }
 
 export default async function HomePage() {
-  const healthResult = await getMarketDataHealth();
+  const apiBaseUrl = await resolveApiBaseUrl();
+  const apiBaseResolution = describeApiBaseUrlResolution(apiBaseUrl);
+  const healthResult = await getMarketDataHealth(apiBaseUrl);
   const health = healthResult.kind === "ok" ? healthResult.health : null;
   const refresh = health?.last_refresh;
+  const universeManifest = health?.universe_manifest;
   const apiErrorMessage =
     healthResult.kind === "error"
-      ? healthResult.message
+      ? `${healthResult.message} ${apiBaseResolution}`
       : "健康检查接口调用成功。";
   const freshnessStatus = healthResult.kind === "ok" ? healthResult.health.freshness_state : "api-unreachable";
   const coverageStatus = healthResult.kind === "ok" ? healthResult.health.coverage_status : "connection-issue";
-  const refreshStatus = healthResult.kind === "ok" ? refresh?.status ?? "failed" : "connection-issue";
+  const refreshStatus = healthResult.kind === "ok" ? refresh?.status ?? "never-run" : "connection-issue";
   const freshnessTone =
     healthResult.kind === "ok" ? toneClassForStatus(freshnessStatus) : "status-card--neutral";
   const coverageTone =
@@ -123,6 +133,7 @@ export default async function HomePage() {
             Story 1.4 把外壳转化为实时健康面：数据新鲜度、部分覆盖与失败的刷新任务
             在任何筛选或回测结果被信任之前就已可见。
           </p>
+          <p className="status-copy">API 基址：{apiBaseUrl}</p>
         </div>
 
         <div className="hero-orbit">
@@ -158,7 +169,9 @@ export default async function HomePage() {
               : "健康接口不可达，暂无法评估覆盖度。"}
           </p>
           <p className="status-meta">
-            部分行：{health?.partial_rows ?? "-"} ｜ 不可用行：{health?.unavailable_rows ?? "-"}
+            {universeManifest
+              ? `普通股清单：${universeManifest.symbol_count} 只 ｜ 更新于 ${formatTimestamp(universeManifest.updated_at)}`
+              : `部分行：${health?.partial_rows ?? "-"} ｜ 不可用行：${health?.unavailable_rows ?? "-"}`}
           </p>
         </article>
 
@@ -166,10 +179,20 @@ export default async function HomePage() {
           <p className="status-label">最近一次刷新</p>
           <h2>{refreshStatus}</h2>
           <p className="status-copy">
-            数据源：{refresh?.provider ?? "接口不可达，刷新状态未知"}
+            {health
+              ? refresh
+                ? `数据源：${refresh.provider} / ${
+                    refresh.universe_scope === "full_universe"
+                      ? `全量 universe（东京证券交易所普通股，${refresh.requested_symbol_count} 只）`
+                      : `指定标的（${refresh.requested_symbol_count} 只）`
+                  }`
+                : "尚无刷新记录，当前仅能依据已存数据判断新鲜度与覆盖度。"
+              : "接口不可达，刷新状态未知"}
           </p>
           <p className="status-meta">
-            完成时间：{formatTimestamp(refresh?.completed_at ?? null)}
+            {health && !refresh
+              ? "完成时间：尚未记录"
+              : `完成时间：${formatTimestamp(refresh?.completed_at ?? null)}`}
           </p>
         </article>
       </section>
@@ -220,8 +243,13 @@ export default async function HomePage() {
           </p>
           <p className="error-callout">
             {healthResult.kind === "ok"
-              ? refresh?.error_message ?? "未记录刷新错误。"
+              ? refresh?.error_message ?? (refresh ? "未记录刷新错误。" : "尚无刷新任务错误记录。")
               : apiErrorMessage}
+          </p>
+          <p className="status-copy">
+            {universeManifest
+              ? `Universe 清单来源：${universeManifest.source_path}`
+              : "尚未生成东京证券交易所普通股清单。"}
           </p>
         </article>
       </section>

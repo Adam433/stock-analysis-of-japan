@@ -59,6 +59,10 @@ export function WorkflowTrustBanner({
               部分行 {health.partial_rows}，不可用行 {health.unavailable_rows}，最近一次刷新{" "}
               {health.last_refresh?.status ?? "缺失"}。
             </p>
+            <p className="status-copy">
+              东京证券交易所普通股清单 {health.universe_manifest?.symbol_count ?? 0} 只，更新时间{" "}
+              {health.universe_manifest?.updated_at ?? "缺失"}。
+            </p>
           </>
         )}
       </div>

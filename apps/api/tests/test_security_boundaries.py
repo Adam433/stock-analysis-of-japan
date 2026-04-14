@@ -20,6 +20,25 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertEqual(provider.credential_boundary, BACKEND_ONLY_BOUNDARY)
         self.assertEqual(provider.market_scope, MVP_MARKET_SCOPE)
 
+    def test_local_csv_directory_provider_stays_within_backend_only_boundary(self) -> None:
+        provider = build_ingestion_provider(
+            "local_csv_directory",
+            csv_dir=Path("data/archive/local_seed_csv"),
+            symbols_file=Path("data/tse_common_stock_symbols.txt"),
+        )
+
+        self.assertEqual(provider.credential_boundary, BACKEND_ONLY_BOUNDARY)
+        self.assertEqual(provider.market_scope, MVP_MARKET_SCOPE)
+
+    def test_yahoo_finance_chart_provider_stays_within_backend_only_boundary(self) -> None:
+        provider = build_ingestion_provider(
+            "yahoo_finance_chart",
+            symbols_file=Path("data/tse_common_stock_symbols.txt"),
+        )
+
+        self.assertEqual(provider.credential_boundary, BACKEND_ONLY_BOUNDARY)
+        self.assertEqual(provider.market_scope, MVP_MARKET_SCOPE)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,24 @@ def get_data_dir() -> Path:
     return data_dir
 
 
+def get_tse_common_stock_symbols_path() -> Path:
+    return Path(
+        os.environ.get(
+            "STOCKANALYSE_TSE_COMMON_STOCK_SYMBOLS_PATH",
+            get_data_dir() / "tse_common_stock_symbols.txt",
+        )
+    )
+
+
+def get_local_csv_raw_dir() -> Path:
+    return Path(
+        os.environ.get(
+            "STOCKANALYSE_LOCAL_CSV_RAW_DIR",
+            get_data_dir() / "archive" / "local_seed_csv",
+        )
+    )
+
+
 def get_database_path() -> Path:
     return Path(os.environ.get("STOCKANALYSE_DB_PATH", get_data_dir() / "stockanalyse.db"))
 

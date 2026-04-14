@@ -1,0 +1,2 @@
+# Run at 18:30 every weekday.
+30 18 * * 1-5 cd /Users/adam/Documents/GitHub/stockAnalyse && /bin/sh scripts/maintenance/sync_universe_and_refresh.sh >> /tmp/stockanalyse-universe-refresh.log 2>&1

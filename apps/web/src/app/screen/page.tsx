@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { WorkflowTrustBanner } from "@/components/shared/WorkflowTrustBanner";
 import { StrategyConfigPanel } from "@/components/screen/StrategyConfigPanel";
+import { resolveApiBaseUrl } from "@/lib/apiBaseUrl";
 import { loadMarketDataHealth } from "@/lib/marketDataHealth";
 
 type StrategyConfigurationResponse = {
@@ -56,12 +57,11 @@ type LoadLatestRunResult = {
   error: string | null;
 };
 
-const apiBaseUrl =
-  process.env.STOCKANALYSE_API_BASE_URL ?? "http://127.0.0.1:8000";
-
 export const dynamic = "force-dynamic";
 
-async function loadStrategyConfiguration(): Promise<LoadStrategyConfigurationResult> {
+async function loadStrategyConfiguration(
+  apiBaseUrl: string,
+): Promise<LoadStrategyConfigurationResult> {
   try {
     const response = await fetch(`${apiBaseUrl}/screen/configuration`, {
       cache: "no-store",
@@ -86,7 +86,7 @@ async function loadStrategyConfiguration(): Promise<LoadStrategyConfigurationRes
   }
 }
 
-async function loadLatestScreenRun(): Promise<LoadLatestRunResult> {
+async function loadLatestScreenRun(apiBaseUrl: string): Promise<LoadLatestRunResult> {
   try {
     const response = await fetch(`${apiBaseUrl}/screen/runs/latest`, {
       cache: "no-store",
@@ -113,9 +113,10 @@ async function loadLatestScreenRun(): Promise<LoadLatestRunResult> {
 }
 
 export default async function ScreenConfigurationPage() {
+  const apiBaseUrl = await resolveApiBaseUrl();
   const [{ data, error }, { data: latestRun, error: latestRunError }, { health, error: healthError }] = await Promise.all([
-    loadStrategyConfiguration(),
-    loadLatestScreenRun(),
+    loadStrategyConfiguration(apiBaseUrl),
+    loadLatestScreenRun(apiBaseUrl),
     loadMarketDataHealth(apiBaseUrl),
   ]);
 

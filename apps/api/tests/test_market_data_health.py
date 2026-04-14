@@ -3,20 +3,32 @@ from __future__ import annotations
 import unittest
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
+import tempfile
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from stockanalyse_api.config.settings import get_tse_common_stock_symbols_path
 from stockanalyse_api.db.base import Base
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
 from stockanalyse_api.domain.operations.models import MarketDataRefreshRun
 from stockanalyse_api.services.health import get_market_data_health
 from stockanalyse_api.services.ingestion.provider_models import ProviderDailyBar
+from stockanalyse_api.services.ingestion.provider_models import ProviderInstrument
 from stockanalyse_api.services.ingestion.refresh_service import execute_market_data_refresh
+from stockanalyse_api.services.ingestion.refresh_service import refresh_market_data
 
 
 class MixedStatusProvider:
     provider_name = "mixed_fixture"
+
+    def list_supported_instruments(self) -> list[ProviderInstrument]:
+        return [
+            ProviderInstrument(symbol="7203", exchange="TSE", instrument_type="common_stock"),
+            ProviderInstrument(symbol="6758", exchange="TSE", instrument_type="common_stock"),
+            ProviderInstrument(symbol="1343", exchange="TSE", instrument_type="etf"),
+        ]
 
     def fetch_daily_bars(self, _symbols: list[str]) -> list[ProviderDailyBar]:
         return [
@@ -52,12 +64,18 @@ class MixedStatusProvider:
 class FailingProvider:
     provider_name = "broken_provider"
 
+    def list_supported_instruments(self) -> list[ProviderInstrument]:
+        return [ProviderInstrument(symbol="7203", exchange="TSE", instrument_type="common_stock")]
+
     def fetch_daily_bars(self, _symbols: list[str]) -> list[ProviderDailyBar]:
         raise RuntimeError("fixture source unavailable")
 
 
 class CompleteSubsetProvider:
     provider_name = "complete_subset"
+
+    def list_supported_instruments(self) -> list[ProviderInstrument]:
+        return [ProviderInstrument(symbol="7203", exchange="TSE", instrument_type="common_stock")]
 
     def fetch_daily_bars(self, _symbols: list[str]) -> list[ProviderDailyBar]:
         return [
@@ -79,6 +97,9 @@ class CompleteSubsetProvider:
 
 class DuplicateOverwriteProvider:
     provider_name = "duplicate_overwrite"
+
+    def list_supported_instruments(self) -> list[ProviderInstrument]:
+        return [ProviderInstrument(symbol="7203", exchange="TSE", instrument_type="common_stock")]
 
     def fetch_daily_bars(self, _symbols: list[str]) -> list[ProviderDailyBar]:
         return [
@@ -189,6 +210,52 @@ class MarketDataHealthTests(unittest.TestCase):
         self.assertEqual(result["unavailable_rows"], 0)
         self.assertEqual(health.last_refresh["status"], "succeeded")
         self.assertEqual(health.coverage_status, "complete")
+
+    def test_health_exposes_null_refresh_history_without_claiming_failure(self) -> None:
+        with self.session_factory() as session:
+            result = refresh_market_data(session, MixedStatusProvider(), ["7203", "6758"])
+            health = get_market_data_health(session, today=date(2026, 4, 12))
+
+        self.assertEqual(result["processed"], 2)
+        self.assertEqual(health.last_refresh, None)
+        self.assertEqual(health.freshness_state, "fresh")
+        self.assertEqual(health.coverage_status, "complete")
+
+    def test_execute_market_data_refresh_records_full_universe_scope(self) -> None:
+        with self.session_factory() as session:
+            execute_market_data_refresh(
+                session,
+                MixedStatusProvider(),
+                all_supported=True,
+            )
+            health = get_market_data_health(session, today=date(2026, 4, 12))
+
+        self.assertEqual(health.last_refresh["universe_scope"], "full_universe")
+        self.assertEqual(health.last_refresh["universe_filter"], "tse_common_stock")
+        self.assertEqual(health.last_refresh["requested_symbol_count"], 2)
+        self.assertEqual(health.last_refresh["requested_symbols"], [])
+
+    def test_health_reports_universe_manifest_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "tse_common_stock_symbols.txt"
+            manifest_path.write_text("7203.T\n6758.T\n", encoding="utf-8")
+
+            import os
+
+            original = os.environ.get("STOCKANALYSE_TSE_COMMON_STOCK_SYMBOLS_PATH")
+            os.environ["STOCKANALYSE_TSE_COMMON_STOCK_SYMBOLS_PATH"] = str(manifest_path)
+            try:
+                with self.session_factory() as session:
+                    health = get_market_data_health(session, today=date(2026, 4, 12))
+            finally:
+                if original is None:
+                    os.environ.pop("STOCKANALYSE_TSE_COMMON_STOCK_SYMBOLS_PATH", None)
+                else:
+                    os.environ["STOCKANALYSE_TSE_COMMON_STOCK_SYMBOLS_PATH"] = original
+
+        self.assertEqual(health.universe_manifest.symbol_count, 2)
+        self.assertEqual(health.universe_manifest.universe_filter, "tse_common_stock")
+        self.assertEqual(health.universe_manifest.source_path, str(manifest_path))
 
 
 if __name__ == "__main__":

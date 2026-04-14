@@ -2,18 +2,17 @@ import Link from "next/link";
 
 import { WorkflowTrustBanner } from "@/components/shared/WorkflowTrustBanner";
 import { StockDetailView } from "@/components/stocks/StockDetailView";
+import { resolveApiBaseUrl } from "@/lib/apiBaseUrl";
 import { loadMarketDataHealth } from "@/lib/marketDataHealth";
 
 type StockDetailResponse = {
   stock_detail: Parameters<typeof StockDetailView>[0]["detail"];
 };
 
-const apiBaseUrl =
-  process.env.STOCKANALYSE_API_BASE_URL ?? "http://127.0.0.1:8000";
-
 export const dynamic = "force-dynamic";
 
 async function loadStockDetail(
+  apiBaseUrl: string,
   instrumentId: string,
   screenRunId: string | undefined,
 ): Promise<{ data: StockDetailResponse["stock_detail"] | null; error: string | null }> {
@@ -54,10 +53,12 @@ export default async function StockDetailPage({
   params: Promise<{ instrumentId: string }>;
   searchParams: Promise<{ screen_run_id?: string }>;
 }) {
+  const apiBaseUrl = await resolveApiBaseUrl();
   const resolvedParams = await params;
   const resolvedSearchParams = await searchParams;
   const [{ data, error }, { health, error: healthError }] = await Promise.all([
     loadStockDetail(
+      apiBaseUrl,
       resolvedParams.instrumentId,
       resolvedSearchParams.screen_run_id,
     ),

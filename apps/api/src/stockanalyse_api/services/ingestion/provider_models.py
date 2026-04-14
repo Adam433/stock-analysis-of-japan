@@ -12,6 +12,7 @@ class ProviderInstrument:
     name: str | None = None
     currency: str = "JPY"
     is_active: bool = True
+    instrument_type: str = "common_stock"
 
 
 @dataclass(slots=True)

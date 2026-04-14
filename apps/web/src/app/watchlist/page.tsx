@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { WorkflowTrustBanner } from "@/components/shared/WorkflowTrustBanner";
 import { WatchlistReviewPanel } from "@/components/watchlist/WatchlistReviewPanel";
+import { resolveApiBaseUrl } from "@/lib/apiBaseUrl";
 import { loadMarketDataHealth } from "@/lib/marketDataHealth";
 
 type WatchlistEntry = {
@@ -16,12 +17,11 @@ type WatchlistEntry = {
   added_at: string;
 };
 
-const apiBaseUrl =
-  process.env.STOCKANALYSE_API_BASE_URL ?? "http://127.0.0.1:8000";
-
 export const dynamic = "force-dynamic";
 
-async function loadWatchlist(): Promise<{ entries: WatchlistEntry[]; error: string | null }> {
+async function loadWatchlist(
+  apiBaseUrl: string,
+): Promise<{ entries: WatchlistEntry[]; error: string | null }> {
   try {
     const response = await fetch(`${apiBaseUrl}/watchlist`, { cache: "no-store" });
     if (!response.ok) {
@@ -42,8 +42,9 @@ async function loadWatchlist(): Promise<{ entries: WatchlistEntry[]; error: stri
 }
 
 export default async function WatchlistPage() {
+  const apiBaseUrl = await resolveApiBaseUrl();
   const [{ entries, error }, { health, error: healthError }] = await Promise.all([
-    loadWatchlist(),
+    loadWatchlist(apiBaseUrl),
     loadMarketDataHealth(apiBaseUrl),
   ]);
 

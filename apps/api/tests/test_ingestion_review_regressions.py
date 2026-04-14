@@ -15,10 +15,14 @@ from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
 from stockanalyse_api.jobs.refresh_market_data import APP_ROOT, resolve_fixture_path
 from stockanalyse_api.services.ingestion.provider_models import ProviderDailyBar
+from stockanalyse_api.services.ingestion.provider_models import ProviderInstrument
 from stockanalyse_api.services.ingestion.refresh_service import refresh_market_data
 
 
 class DuplicateBarProvider:
+    def list_supported_instruments(self) -> list[ProviderInstrument]:
+        return [ProviderInstrument(symbol="7203", exchange="TSE", instrument_type="common_stock")]
+
     def fetch_daily_bars(self, _symbols: list[str]) -> list[ProviderDailyBar]:
         return [
             ProviderDailyBar(
@@ -47,6 +51,37 @@ class DuplicateBarProvider:
                 data_source="test_provider",
                 instrument_name="Toyota Motor",
             ),
+        ]
+
+
+class IncrementalAwareProvider:
+    def __init__(self) -> None:
+        self.last_start_after_by_symbol: dict[str, date] | None = None
+
+    def list_supported_instruments(self) -> list[ProviderInstrument]:
+        return [ProviderInstrument(symbol="7203", exchange="TSE", instrument_type="common_stock")]
+
+    def fetch_daily_bars(
+        self,
+        _symbols: list[str],
+        *,
+        start_after_by_symbol: dict[str, date] | None = None,
+    ) -> list[ProviderDailyBar]:
+        self.last_start_after_by_symbol = start_after_by_symbol
+        return [
+            ProviderDailyBar(
+                symbol="7203",
+                exchange="TSE",
+                trade_date=date(2026, 4, 12),
+                open=Decimal("1020"),
+                high=Decimal("1030"),
+                low=Decimal("1015"),
+                close=Decimal("1025"),
+                adj_close=Decimal("1025"),
+                volume=150,
+                data_source="test_provider",
+                instrument_name="Toyota Motor",
+            )
         ]
 
 
@@ -89,6 +124,64 @@ class IngestionReviewRegressionTests(unittest.TestCase):
         self.assertEqual(len(bars), 1)
         self.assertEqual(bars[0].close, Decimal("1015"))
         self.assertEqual(bars[0].volume, 120)
+
+    def test_refresh_market_data_deduplicates_duplicate_rows_across_commit_batches(self) -> None:
+        with self.session_factory() as session:
+            result = refresh_market_data(
+                session,
+                DuplicateBarProvider(),
+                ["7203"],
+                commit_every=1,
+            )
+
+        self.assertEqual(
+            result,
+            {
+                "processed": 2,
+                "inserted": 1,
+                "updated": 1,
+                "partial_rows": 0,
+                "unavailable_rows": 0,
+                "latest_trade_date": "2026-04-11",
+            },
+        )
+
+    def test_refresh_market_data_passes_latest_stored_date_to_incremental_provider(self) -> None:
+        provider = IncrementalAwareProvider()
+
+        with self.session_factory() as session:
+            instrument = Instrument(symbol="7203", exchange="TSE")
+            session.add(instrument)
+            session.flush()
+            session.add(
+                MarketDataDaily(
+                    instrument_id=instrument.id,
+                    trade_date=date(2026, 4, 11),
+                    open=Decimal("1000"),
+                    high=Decimal("1010"),
+                    low=Decimal("995"),
+                    close=Decimal("1005"),
+                    adj_close=Decimal("1005"),
+                    volume=100,
+                    data_source="seed",
+                )
+            )
+            session.commit()
+
+            result = refresh_market_data(session, provider, ["7203"])
+
+        self.assertEqual(provider.last_start_after_by_symbol, {"7203": date(2026, 4, 11)})
+        self.assertEqual(
+            result,
+            {
+                "processed": 1,
+                "inserted": 1,
+                "updated": 0,
+                "partial_rows": 0,
+                "unavailable_rows": 0,
+                "latest_trade_date": "2026-04-12",
+            },
+        )
 
     def test_resolve_fixture_path_falls_back_to_app_root_for_repo_root_execution(self) -> None:
         original_cwd = Path.cwd()

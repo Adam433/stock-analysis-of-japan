@@ -2,16 +2,16 @@ import Link from "next/link";
 
 import { WorkflowTrustBanner } from "@/components/shared/WorkflowTrustBanner";
 import { BacktestLaunchPanel } from "@/components/backtests/BacktestLaunchPanel";
+import { resolveApiBaseUrl } from "@/lib/apiBaseUrl";
 import { loadMarketDataHealth } from "@/lib/marketDataHealth";
 
 type BacktestRun = Parameters<typeof BacktestLaunchPanel>[0]["initialRun"];
 
-const apiBaseUrl =
-  process.env.STOCKANALYSE_API_BASE_URL ?? "http://127.0.0.1:8000";
-
 export const dynamic = "force-dynamic";
 
-async function loadLatestBacktestRun(): Promise<{ data: BacktestRun; error: string | null }> {
+async function loadLatestBacktestRun(
+  apiBaseUrl: string,
+): Promise<{ data: BacktestRun; error: string | null }> {
   try {
     const response = await fetch(`${apiBaseUrl}/backtests/runs/latest`, {
       cache: "no-store",
@@ -33,7 +33,9 @@ async function loadLatestBacktestRun(): Promise<{ data: BacktestRun; error: stri
   }
 }
 
-async function loadBacktestRuns(): Promise<{ data: NonNullable<Parameters<typeof BacktestLaunchPanel>[0]["initialRuns"]>; error: string | null }> {
+async function loadBacktestRuns(
+  apiBaseUrl: string,
+): Promise<{ data: NonNullable<Parameters<typeof BacktestLaunchPanel>[0]["initialRuns"]>; error: string | null }> {
   try {
     const response = await fetch(`${apiBaseUrl}/backtests/runs`, {
       cache: "no-store",
@@ -56,9 +58,10 @@ async function loadBacktestRuns(): Promise<{ data: NonNullable<Parameters<typeof
 }
 
 export default async function BacktestsPage() {
+  const apiBaseUrl = await resolveApiBaseUrl();
   const [{ data, error }, { data: runs, error: runsError }, { health, error: healthError }] = await Promise.all([
-    loadLatestBacktestRun(),
-    loadBacktestRuns(),
+    loadLatestBacktestRun(apiBaseUrl),
+    loadBacktestRuns(apiBaseUrl),
     loadMarketDataHealth(apiBaseUrl),
   ]);
 

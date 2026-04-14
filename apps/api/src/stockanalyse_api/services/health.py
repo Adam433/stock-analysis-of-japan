@@ -2,11 +2,21 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 from sqlalchemy import func, select
 
+from stockanalyse_api.config.settings import get_tse_common_stock_symbols_path
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
 from stockanalyse_api.domain.operations.models import MarketDataRefreshRun
+
+
+@dataclass(slots=True)
+class UniverseManifestSnapshot:
+    universe_filter: str
+    symbol_count: int
+    updated_at: str | None
+    source_path: str
 
 
 @dataclass(slots=True)
@@ -19,6 +29,7 @@ class MarketDataHealthSnapshot:
     partial_rows: int
     unavailable_rows: int
     last_refresh: dict[str, object] | None
+    universe_manifest: UniverseManifestSnapshot | None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -32,6 +43,24 @@ def _classify_freshness(latest_trade_date: date | None, today: date) -> tuple[st
     if age_in_days <= 3:
         return "fresh", age_in_days
     return "stale", age_in_days
+
+
+def _read_universe_manifest_snapshot(path: Path) -> UniverseManifestSnapshot | None:
+    if not path.exists():
+        return None
+
+    symbols = [
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    updated_at = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat()
+    return UniverseManifestSnapshot(
+        universe_filter="tse_common_stock",
+        symbol_count=len(symbols),
+        updated_at=updated_at,
+        source_path=str(path),
+    )
 
 
 def get_market_data_health(session, today: date | None = None) -> MarketDataHealthSnapshot:
@@ -67,9 +96,16 @@ def get_market_data_health(session, today: date | None = None) -> MarketDataHeal
             "rows_updated": last_refresh.rows_updated,
             "partial_rows": last_refresh.partial_rows,
             "unavailable_rows": last_refresh.unavailable_rows,
+            "universe_scope": last_refresh.universe_scope,
+            "universe_filter": last_refresh.universe_filter,
+            "requested_symbol_count": last_refresh.requested_symbol_count,
             "latest_trade_date": last_refresh.latest_trade_date.isoformat() if last_refresh.latest_trade_date else None,
             "error_message": last_refresh.error_message,
-            "requested_symbols": [symbol for symbol in last_refresh.requested_symbols.split(",") if symbol],
+            "requested_symbols": (
+                [symbol for symbol in last_refresh.requested_symbols.split(",") if symbol]
+                if last_refresh.universe_scope == "symbol_list"
+                else []
+            ),
         }
 
         if last_refresh.status == "failed":
@@ -81,6 +117,8 @@ def get_market_data_health(session, today: date | None = None) -> MarketDataHeal
     elif latest_trade_date is None:
         coverage_status = "missing"
 
+    universe_manifest = _read_universe_manifest_snapshot(get_tse_common_stock_symbols_path())
+
     return MarketDataHealthSnapshot(
         freshness_state=freshness_state,
         latest_trade_date=latest_trade_date.isoformat() if latest_trade_date else None,
@@ -90,4 +128,5 @@ def get_market_data_health(session, today: date | None = None) -> MarketDataHeal
         partial_rows=partial_rows,
         unavailable_rows=unavailable_rows,
         last_refresh=refresh_payload,
+        universe_manifest=universe_manifest,
     )
