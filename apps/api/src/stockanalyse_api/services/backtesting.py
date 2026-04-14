@@ -10,6 +10,10 @@ from stockanalyse_api.domain.backtests.models import BacktestRun
 from stockanalyse_api.domain.indicators.models import DerivedIndicatorDaily
 from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.screens.models import StrategyConfiguration
+from stockanalyse_api.services.rps_semantics import (
+    APPROVED_RPS_DEFINITION_VERSION,
+    normalize_rps_definition_version,
+)
 from stockanalyse_api.services.screening import evaluate_indicator_snapshot
 from stockanalyse_api.services.strategy_config import get_active_strategy_configuration
 
@@ -23,6 +27,10 @@ class BacktestRunSummary:
     end_date: str
     started_at: str
     completed_at: str | None
+    rps_definition_version: str | None
+    dataset_trade_date_start: str | None
+    dataset_trade_date_end: str | None
+    dataset_checksum: str | None
     error_message: str | None
     result_summary: dict[str, object]
     parameter_set: dict[str, object]
@@ -40,6 +48,10 @@ def _serialize(run: BacktestRun, configuration: StrategyConfiguration) -> Backte
         end_date=run.end_date.isoformat(),
         started_at=run.started_at.isoformat(),
         completed_at=run.completed_at.isoformat() if run.completed_at is not None else None,
+        rps_definition_version=normalize_rps_definition_version(run.rps_definition_version),
+        dataset_trade_date_start=run.dataset_trade_date_start.isoformat() if run.dataset_trade_date_start is not None else None,
+        dataset_trade_date_end=run.dataset_trade_date_end.isoformat() if run.dataset_trade_date_end is not None else None,
+        dataset_checksum=run.dataset_checksum,
         error_message=run.error_message,
         result_summary={
             "trade_dates_evaluated": run.trade_dates_evaluated,
@@ -77,6 +89,7 @@ def launch_backtest_run(session, *, start_date: date, end_date: date) -> Backtes
         end_date=end_date,
         started_at=datetime.now(UTC),
         completed_at=None,
+        rps_definition_version=APPROVED_RPS_DEFINITION_VERSION,
         status="running",
         error_message=None,
     )
@@ -151,12 +164,31 @@ def execute_backtest_run(session, run_id: int) -> BacktestRunSummary:
     unique_qualified_instruments: set[int] = set()
     qualifying_trade_dates: list[date] = []
     qualifying_tuples: list[str] = []
+    dataset_tuples: list[str] = []
     total_candidates_evaluated = 0
     qualifying_observations = 0
 
     for indicator_row, instrument in indicators:
         trade_dates.add(indicator_row.trade_date)
         total_candidates_evaluated += 1
+        dataset_tuples.append(
+            ":".join(
+                [
+                    indicator_row.trade_date.isoformat(),
+                    str(instrument.id),
+                    instrument.symbol,
+                    instrument.exchange,
+                    f"{indicator_row.rps_50:.2f}" if indicator_row.rps_50 is not None else "null",
+                    f"{indicator_row.rps_120:.2f}" if indicator_row.rps_120 is not None else "null",
+                    f"{indicator_row.rps_250:.2f}" if indicator_row.rps_250 is not None else "null",
+                    (
+                        f"{indicator_row.high_proximity_ratio:.6f}"
+                        if indicator_row.high_proximity_ratio is not None
+                        else "null"
+                    ),
+                ]
+            )
+        )
         evaluation = evaluate_indicator_snapshot(indicator_row, configuration)
         if evaluation["passed"]:
             qualifying_observations += 1
@@ -167,12 +199,16 @@ def execute_backtest_run(session, run_id: int) -> BacktestRunSummary:
             )
 
     checksum = sha256("|".join(qualifying_tuples).encode("utf-8")).hexdigest()
+    dataset_checksum = sha256("|".join(dataset_tuples).encode("utf-8")).hexdigest()
     run.trade_dates_evaluated = len(trade_dates)
     run.total_candidates_evaluated = total_candidates_evaluated
     run.qualifying_observations = qualifying_observations
     run.unique_qualified_instruments = len(unique_qualified_instruments)
     run.first_qualified_trade_date = min(qualifying_trade_dates) if qualifying_trade_dates else None
     run.last_qualified_trade_date = max(qualifying_trade_dates) if qualifying_trade_dates else None
+    run.dataset_trade_date_start = min(trade_dates) if trade_dates else None
+    run.dataset_trade_date_end = max(trade_dates) if trade_dates else None
+    run.dataset_checksum = dataset_checksum
     run.result_checksum = checksum
     run.status = "completed"
     run.error_message = None

@@ -18,86 +18,86 @@ This document provides the complete epic and story breakdown for stockAnalyse, d
 
 ### Functional Requirements
 
-FR1: The user can create a screening configuration for Japan equities.  
-FR2: The user can edit the parameter values of a screening configuration.  
-FR3: The user can define the RPS threshold used by the strategy.  
-FR4: The user can define the 52-week-high proximity threshold used by the strategy.  
-FR5: The user can run the strategy using the currently selected parameter set.  
-FR6: The user can rerun the strategy after changing parameters.  
-FR7: The product can preserve the parameter values used for each screen run.  
-FR8: The product can preserve the parameter values used for each backtest run.  
-FR9: The product can maintain a Japan equity universe for screening and backtesting.  
-FR10: The product can store end-of-day historical price data for supported securities.  
-FR11: The product can update historical market data for the supported universe.  
-FR12: The product can expose the freshness state of the stored market data.  
-FR13: The product can identify when market data for a security or date range is incomplete or unavailable.  
-FR14: The product can keep screening, charting, and backtesting aligned to the same stored market dataset.  
-FR15: The product can calculate 50-day, 120-day, and 250-day RPS-related values for supported securities.  
-FR16: The product can determine whether at least one supported RPS line satisfies the strategy threshold condition.  
-FR17: The product can calculate each security's proximity to its 52-week high.  
-FR18: The product can determine whether a security satisfies the configured 52-week-high proximity condition.  
-FR19: The product can evaluate whether a security passes the full MVP strategy based on the active conditions.  
-FR20: The product can retain the indicator and condition values that caused a security to pass or fail a run.  
-FR21: The user can run a screen across the supported Japan equity universe.  
-FR22: The product can return the list of securities that satisfy the active screen conditions.  
-FR23: The user can open an individual screening result for deeper inspection.  
-FR24: The product can show the exact rule breakdown for a screened security.  
-FR25: The product can show the underlying values used to determine whether each condition passed.  
-FR26: The user can tell from the result detail why a stock qualified for the screen.  
-FR27: The product can associate each result set with the run date and parameter set that produced it.  
-FR28: The user can view a candlestick chart for a supported security.  
-FR29: The user can view RPS information in a panel below the main price chart.  
-FR30: The product can visually distinguish RPS conditions that meet the configured threshold.  
-FR31: The user can inspect chart-adjacent summaries of the strategy condition values.  
-FR32: The user can review the stock's 52-week-high proximity state from the stock detail workflow.  
-FR33: The product can present chart review and condition breakdown information as part of the same stock analysis flow.  
-FR34: The user can add a screened security to a watchlist.  
-FR35: The user can remove a security from a watchlist.  
-FR36: The user can view the securities currently stored in the watchlist.  
-FR37: The user can record a note for a watchlist entry.  
-FR38: The user can record an observation reason for a watchlist entry.  
-FR39: The product can retain the date when a security was added to the watchlist.  
-FR40: The user can review saved watchlist notes, reasons, and added dates later.  
-FR41: The user can launch a historical backtest for the MVP strategy.  
-FR42: The user can select the historical date range used for a backtest.  
-FR43: The product can run the backtest using the same parameterized conditions used by the screen.  
-FR44: The product can return a reproducible backtest result for the same historical range and parameter set.  
-FR45: The user can review the result of a completed backtest.  
-FR46: The product can associate a backtest result with the parameter set and historical range that produced it.  
-FR47: The user can use backtest outputs to compare strategy adjustments across runs.  
-FR48: The user can see whether market data is current enough for routine post-close use.  
-FR49: The user can see when a data update has failed, is incomplete, or may affect output trustworthiness.  
-FR50: The user can identify whether a suspicious screen or backtest result may be caused by stale or incomplete data.  
-FR51: The product can expose enough run and data context to investigate unexpected outputs.  
-FR52: The product can keep research workflows separate from any future broker integration workflows.  
-FR53: The product can support future addition of new strategy conditions without invalidating the core workflow structure.  
+FR1: The user can create a screening configuration for Japan equities.
+FR2: The user can edit the parameter values of a screening configuration.
+FR3: The user can define the RPS threshold used by the strategy.
+FR4: The user can define the 52-week-high proximity threshold used by the strategy.
+FR5: The user can run the strategy using the currently selected parameter set.
+FR6: The user can rerun the strategy after changing parameters.
+FR7: The product can preserve the parameter values used for each screen run.
+FR8: The product can preserve the parameter values used for each backtest run.
+FR9: The product can maintain a Japan equity universe for screening and backtesting.
+FR10: The product can store end-of-day historical price data for supported securities.
+FR11: The product can update historical market data for the supported universe.
+FR12: The product can expose the freshness state of the stored market data.
+FR13: The product can identify when market data for a security or date range is incomplete or unavailable.
+FR14: The product can keep screening, charting, and backtesting aligned to the same stored market dataset.
+FR15: The product can calculate 50-day, 120-day, and 250-day RPS-related values for supported securities.
+FR16: The product can determine whether at least one supported RPS line satisfies the strategy threshold condition.
+FR17: The product can calculate each security's proximity to its 52-week high.
+FR18: The product can determine whether a security satisfies the configured 52-week-high proximity condition.
+FR19: The product can evaluate whether a security passes the full MVP strategy based on the active conditions.
+FR20: The product can retain the indicator and condition values that caused a security to pass or fail a run.
+FR21: The user can run a screen across the supported Japan equity universe.
+FR22: The product can return the list of securities that satisfy the active screen conditions.
+FR23: The user can open an individual screening result for deeper inspection.
+FR24: The product can show the exact rule breakdown for a screened security.
+FR25: The product can show the underlying values used to determine whether each condition passed.
+FR26: The user can tell from the result detail why a stock qualified for the screen.
+FR27: The product can associate each result set with the run date and parameter set that produced it.
+FR28: The user can view a candlestick chart for a supported security.
+FR29: The user can view RPS information in a panel below the main price chart.
+FR30: The product can visually distinguish RPS conditions that meet the configured threshold.
+FR31: The user can inspect chart-adjacent summaries of the strategy condition values.
+FR32: The user can review the stock's 52-week-high proximity state from the stock detail workflow.
+FR33: The product can present chart review and condition breakdown information as part of the same stock analysis flow.
+FR34: The user can add a screened security to a watchlist.
+FR35: The user can remove a security from a watchlist.
+FR36: The user can view the securities currently stored in the watchlist.
+FR37: The user can record a note for a watchlist entry.
+FR38: The user can record an observation reason for a watchlist entry.
+FR39: The product can retain the date when a security was added to the watchlist.
+FR40: The user can review saved watchlist notes, reasons, and added dates later.
+FR41: The user can launch a historical backtest for the MVP strategy.
+FR42: The user can select the historical date range used for a backtest.
+FR43: The product can run the backtest using the same parameterized conditions used by the screen.
+FR44: The product can return a reproducible backtest result for the same historical range and parameter set.
+FR45: The user can review the result of a completed backtest.
+FR46: The product can associate a backtest result with the parameter set and historical range that produced it.
+FR47: The user can use backtest outputs to compare strategy adjustments across runs.
+FR48: The user can see whether market data is current enough for routine post-close use.
+FR49: The user can see when a data update has failed, is incomplete, or may affect output trustworthiness.
+FR50: The user can identify whether a suspicious screen or backtest result may be caused by stale or incomplete data.
+FR51: The product can expose enough run and data context to investigate unexpected outputs.
+FR52: The product can keep research workflows separate from any future broker integration workflows.
+FR53: The product can support future addition of new strategy conditions without invalidating the core workflow structure.
 FR54: The product can support future expansion from Japan equities to other supported markets.
 
 ### NonFunctional Requirements
 
-NFR1: The system shall return a completed Japan equity screen within 5 minutes for normal end-of-day usage under the MVP data universe.  
-NFR2: The system shall open a stock detail view, including chart-ready data and condition breakdown, within 3 seconds for 95% of requests under normal usage.  
-NFR3: The system shall persist watchlist add, edit, and remove actions within 2 seconds for 95% of requests under normal usage.  
-NFR4: The system shall present explicit in-progress status for screen and backtest operations that cannot complete within 3 seconds.  
-NFR5: The system shall avoid hour-scale waits for routine screening and backtesting tasks in the MVP workflow.  
-NFR6: The system shall produce identical backtest outputs for identical historical ranges, parameter sets, and underlying stored datasets.  
-NFR7: The system shall detect and surface failed, partial, or stale market-data updates before those outputs are presented as normal screening or backtest results.  
-NFR8: The system shall preserve the parameter set, run context, and output association for every screening run and backtest run.  
-NFR9: The system shall prevent silent divergence between screening outputs, chart views, and condition breakdown values derived from the same stored dataset.  
-NFR10: The system shall retain watchlist entries, notes, observation reasons, and added dates without loss during normal operation.  
-NFR11: The system shall restrict all provider credentials and any future broker credentials to server-side storage and execution paths.  
-NFR12: The system shall encrypt sensitive credentials and secrets at rest and in transit.  
-NFR13: The system shall prevent browser clients from directly invoking privileged provider or broker operations with embedded secrets.  
-NFR14: The system shall maintain separate credential boundaries for historical-data providers and any future broker integrations.  
-NFR15: The system shall record sufficient server-side logs to investigate failed updates, failed runs, and data integrity issues.  
-NFR16: The system shall support keyboard access to primary workflows including parameter editing, result navigation, stock detail access, and watchlist editing.  
-NFR17: The system shall not rely on color alone to communicate whether a condition passed or failed.  
-NFR18: The system shall provide text-visible summaries for key signal states displayed on or near charts.  
-NFR19: The system shall keep parameter forms, watchlist forms, and result details readable and operable on supported desktop browsers without requiring pointer-only interaction.  
-NFR20: The system shall apply one consistent market-data normalization policy across screening, charting, and backtesting within the MVP scope.  
-NFR21: The system shall identify the source and freshness of stored market data used for screening and backtesting.  
-NFR22: The system shall distinguish complete data, partial data, and unavailable data states in a way the user can inspect.  
-NFR23: The system shall preserve traceability from each qualified stock result back to the stored values and thresholds that produced it.  
+NFR1: The system shall return a completed Japan equity screen within 5 minutes for normal end-of-day usage under the MVP data universe.
+NFR2: The system shall open a stock detail view, including chart-ready data and condition breakdown, within 3 seconds for 95% of requests under normal usage.
+NFR3: The system shall persist watchlist add, edit, and remove actions within 2 seconds for 95% of requests under normal usage.
+NFR4: The system shall present explicit in-progress status for screen and backtest operations that cannot complete within 3 seconds.
+NFR5: The system shall avoid hour-scale waits for routine screening and backtesting tasks in the MVP workflow.
+NFR6: The system shall produce identical backtest outputs for identical historical ranges, parameter sets, and underlying stored datasets.
+NFR7: The system shall detect and surface failed, partial, or stale market-data updates before those outputs are presented as normal screening or backtest results.
+NFR8: The system shall preserve the parameter set, run context, and output association for every screening run and backtest run.
+NFR9: The system shall prevent silent divergence between screening outputs, chart views, and condition breakdown values derived from the same stored dataset.
+NFR10: The system shall retain watchlist entries, notes, observation reasons, and added dates without loss during normal operation.
+NFR11: The system shall restrict all provider credentials and any future broker credentials to server-side storage and execution paths.
+NFR12: The system shall encrypt sensitive credentials and secrets at rest and in transit.
+NFR13: The system shall prevent browser clients from directly invoking privileged provider or broker operations with embedded secrets.
+NFR14: The system shall maintain separate credential boundaries for historical-data providers and any future broker integrations.
+NFR15: The system shall record sufficient server-side logs to investigate failed updates, failed runs, and data integrity issues.
+NFR16: The system shall support keyboard access to primary workflows including parameter editing, result navigation, stock detail access, and watchlist editing.
+NFR17: The system shall not rely on color alone to communicate whether a condition passed or failed.
+NFR18: The system shall provide text-visible summaries for key signal states displayed on or near charts.
+NFR19: The system shall keep parameter forms, watchlist forms, and result details readable and operable on supported desktop browsers without requiring pointer-only interaction.
+NFR20: The system shall apply one consistent market-data normalization policy across screening, charting, and backtesting within the MVP scope.
+NFR21: The system shall identify the source and freshness of stored market data used for screening and backtesting.
+NFR22: The system shall distinguish complete data, partial data, and unavailable data states in a way the user can inspect.
+NFR23: The system shall preserve traceability from each qualified stock result back to the stored values and thresholds that produced it.
 NFR24: The system shall keep future broker integration concerns isolated from the MVP research data workflows so that research reproducibility is not degraded.
 
 ### Additional Requirements
@@ -128,66 +128,67 @@ No UX Design document was provided for extraction.
 
 ### FR Coverage Map
 
-FR1: Epic 2 - Strategy configuration for Japan equity screening  
-FR2: Epic 2 - Strategy configuration for Japan equity screening  
-FR3: Epic 2 - Strategy configuration for Japan equity screening  
-FR4: Epic 2 - Strategy configuration for Japan equity screening  
-FR5: Epic 2 - Strategy configuration for Japan equity screening  
-FR6: Epic 2 - Strategy configuration for Japan equity screening  
-FR7: Epic 2 - Strategy configuration for Japan equity screening  
-FR8: Epic 5 - Reproducible backtest parameter tracking  
+FR1: Epic 2 - Strategy configuration for Japan equity screening
+FR2: Epic 2 - Strategy configuration for Japan equity screening
+FR3: Epic 2 - Strategy configuration for Japan equity screening
+FR4: Epic 2 - Strategy configuration for Japan equity screening
+FR5: Epic 2 - Strategy configuration for Japan equity screening
+FR6: Epic 2 - Strategy configuration for Japan equity screening
+FR7: Epic 2 - Strategy configuration for Japan equity screening
+FR8: Epic 5 - Reproducible backtest parameter tracking
 
-FR9: Epic 1 - Japan equity universe and data backbone  
-FR10: Epic 1 - Japan equity universe and data backbone  
-FR11: Epic 1 - Japan equity universe and data backbone  
-FR12: Epic 1 - Japan equity universe and data backbone  
-FR13: Epic 1 - Japan equity universe and data backbone  
-FR14: Epic 1 - Japan equity universe and data backbone  
+FR9: Epic 1 - Japan equity universe and data backbone
+FR10: Epic 1 - Japan equity universe and data backbone
+FR11: Epic 1 - Japan equity universe and data backbone
+FR12: Epic 1 - Japan equity universe and data backbone
+FR13: Epic 1 - Japan equity universe and data backbone
+FR14: Epic 1 - Japan equity universe and data backbone
 
-FR15: Epic 2 - Indicator materialization and screening execution  
-FR16: Epic 2 - Indicator materialization and screening execution  
-FR17: Epic 2 - Indicator materialization and screening execution  
-FR18: Epic 2 - Indicator materialization and screening execution  
-FR19: Epic 2 - Indicator materialization and screening execution  
-FR20: Epic 2 - Indicator materialization and screening execution  
-FR21: Epic 2 - Indicator materialization and screening execution  
-FR22: Epic 2 - Indicator materialization and screening execution  
-FR24: Epic 2 - Indicator materialization and screening execution  
-FR25: Epic 2 - Indicator materialization and screening execution  
-FR27: Epic 2 - Indicator materialization and screening execution  
+FR15: Epic 2 - Indicator materialization and screening execution
+FR16: Epic 2 - Indicator materialization and screening execution
+FR17: Epic 2 - Indicator materialization and screening execution
+FR18: Epic 2 - Indicator materialization and screening execution
+FR19: Epic 2 - Indicator materialization and screening execution
+FR20: Epic 2 - Indicator materialization and screening execution
+FR21: Epic 2 - Indicator materialization and screening execution
+FR22: Epic 2 - Indicator materialization and screening execution
+FR24: Epic 2 - Indicator materialization and screening execution
+FR25: Epic 2 - Indicator materialization and screening execution
+FR27: Epic 2 - Indicator materialization and screening execution
+FR55: Epic 2 - Indicator materialization and screening execution
 
-FR23: Epic 3 - Stock detail, chart review, and explainability  
-FR26: Epic 3 - Stock detail, chart review, and explainability  
-FR28: Epic 3 - Stock detail, chart review, and explainability  
-FR29: Epic 3 - Stock detail, chart review, and explainability  
-FR30: Epic 3 - Stock detail, chart review, and explainability  
-FR31: Epic 3 - Stock detail, chart review, and explainability  
-FR32: Epic 3 - Stock detail, chart review, and explainability  
-FR33: Epic 3 - Stock detail, chart review, and explainability  
+FR23: Epic 3 - Stock detail, chart review, and explainability
+FR26: Epic 3 - Stock detail, chart review, and explainability
+FR28: Epic 3 - Stock detail, chart review, and explainability
+FR29: Epic 3 - Stock detail, chart review, and explainability
+FR30: Epic 3 - Stock detail, chart review, and explainability
+FR31: Epic 3 - Stock detail, chart review, and explainability
+FR32: Epic 3 - Stock detail, chart review, and explainability
+FR33: Epic 3 - Stock detail, chart review, and explainability
 
-FR34: Epic 4 - Watchlist and research workflow continuity  
-FR35: Epic 4 - Watchlist and research workflow continuity  
-FR36: Epic 4 - Watchlist and research workflow continuity  
-FR37: Epic 4 - Watchlist and research workflow continuity  
-FR38: Epic 4 - Watchlist and research workflow continuity  
-FR39: Epic 4 - Watchlist and research workflow continuity  
-FR40: Epic 4 - Watchlist and research workflow continuity  
+FR34: Epic 4 - Watchlist and research workflow continuity
+FR35: Epic 4 - Watchlist and research workflow continuity
+FR36: Epic 4 - Watchlist and research workflow continuity
+FR37: Epic 4 - Watchlist and research workflow continuity
+FR38: Epic 4 - Watchlist and research workflow continuity
+FR39: Epic 4 - Watchlist and research workflow continuity
+FR40: Epic 4 - Watchlist and research workflow continuity
 
-FR41: Epic 5 - Backtesting and strategy iteration  
-FR42: Epic 5 - Backtesting and strategy iteration  
-FR43: Epic 5 - Backtesting and strategy iteration  
-FR44: Epic 5 - Backtesting and strategy iteration  
-FR45: Epic 5 - Backtesting and strategy iteration  
-FR46: Epic 5 - Backtesting and strategy iteration  
-FR47: Epic 5 - Backtesting and strategy iteration  
+FR41: Epic 5 - Backtesting and strategy iteration
+FR42: Epic 5 - Backtesting and strategy iteration
+FR43: Epic 5 - Backtesting and strategy iteration
+FR44: Epic 5 - Backtesting and strategy iteration
+FR45: Epic 5 - Backtesting and strategy iteration
+FR46: Epic 5 - Backtesting and strategy iteration
+FR47: Epic 5 - Backtesting and strategy iteration
 
-FR48: Epic 1 - Japan equity universe and data backbone  
-FR49: Epic 1 - Japan equity universe and data backbone  
-FR50: Epic 1 - Japan equity universe and data backbone  
-FR51: Epic 1 - Japan equity universe and data backbone  
+FR48: Epic 1 - Japan equity universe and data backbone
+FR49: Epic 1 - Japan equity universe and data backbone
+FR50: Epic 1 - Japan equity universe and data backbone
+FR51: Epic 1 - Japan equity universe and data backbone
 
-FR52: Epic 6 - Product hardening and extension boundaries  
-FR53: Epic 6 - Product hardening and extension boundaries  
+FR52: Epic 6 - Product hardening and extension boundaries
+FR53: Epic 6 - Product hardening and extension boundaries
 FR54: Epic 6 - Product hardening and extension boundaries
 
 ## Epic List
@@ -198,7 +199,7 @@ Establish the monorepo structure, frontend and backend application shells, datab
 
 ### Epic 2: Indicator Materialization and Screening Execution
 Enable the user to define strategy parameters, compute MVP indicators, execute Japan equity screens, and persist explainable screen runs based on stored derived facts rather than ad hoc UI calculations.
-**FRs covered:** FR1, FR2, FR3, FR4, FR5, FR6, FR7, FR15, FR16, FR17, FR18, FR19, FR20, FR21, FR22, FR24, FR25, FR27
+**FRs covered:** FR1, FR2, FR3, FR4, FR5, FR6, FR7, FR15, FR16, FR17, FR18, FR19, FR20, FR21, FR22, FR24, FR25, FR27, FR55
 
 ### Epic 3: Stock Detail, Chart Review, and Explainability
 Enable the user to open a screened stock, inspect candlestick data, review RPS panels, validate 52-week-high proximity, and understand exactly why the stock qualified.
@@ -230,15 +231,15 @@ So that all subsequent features have a stable implementation foundation.
 
 **Acceptance Criteria:**
 
-**Given** a fresh repository  
-**When** the project is initialized  
-**Then** separate `apps/web` and `apps/api` applications exist following the approved architecture structure  
-**And** the frontend uses the approved Next.js TypeScript starter conventions  
-**And** the backend uses the approved custom Python project structure  
+**Given** a fresh repository
+**When** the project is initialized
+**Then** separate `apps/web` and `apps/api` applications exist following the approved architecture structure
+**And** the frontend uses the approved Next.js TypeScript starter conventions
+**And** the backend uses the approved custom Python project structure
 
-**Given** the initialized repository  
-**When** a developer reviews the root structure  
-**Then** shared configuration, data, scripts, and `_bmad-output` locations are present or reserved according to the architecture document  
+**Given** the initialized repository
+**When** a developer reviews the root structure
+**Then** shared configuration, data, scripts, and `_bmad-output` locations are present or reserved according to the architecture document
 
 ### Story 1.2: Establish Database Schema and Migration Workflow
 
@@ -250,14 +251,14 @@ So that market data foundations can be stored consistently and later stories can
 
 **Acceptance Criteria:**
 
-**Given** the backend application  
-**When** the persistence layer is implemented  
-**Then** the SQLite-backed schema supports instruments and daily market data records needed by the historical data backbone  
-**And** schema migration tooling is configured and usable in local development  
+**Given** the backend application
+**When** the persistence layer is implemented
+**Then** the SQLite-backed schema supports instruments and daily market data records needed by the historical data backbone
+**And** schema migration tooling is configured and usable in local development
 
-**Given** a new local environment  
-**When** migrations are applied  
-**Then** the database can be created from migrations without manual schema editing  
+**Given** a new local environment
+**When** migrations are applied
+**Then** the database can be created from migrations without manual schema editing
 
 ### Story 1.3: Ingest and Normalize Japan Equity End-of-Day Data
 
@@ -269,14 +270,14 @@ So that screening and backtesting run on a trustworthy dataset.
 
 **Acceptance Criteria:**
 
-**Given** a configured market-data provider  
-**When** a market-data refresh is executed  
-**Then** the system stores normalized Japan equity instrument records and daily market data records  
-**And** raw-price and adjusted-price concepts remain distinct in storage  
+**Given** a configured market-data provider
+**When** a market-data refresh is executed
+**Then** the system stores normalized Japan equity instrument records and daily market data records
+**And** raw-price and adjusted-price concepts remain distinct in storage
 
-**Given** provider data contains incomplete or unavailable values  
-**When** normalization runs  
-**Then** the system marks incomplete or unavailable states explicitly instead of silently treating them as complete data  
+**Given** provider data contains incomplete or unavailable values
+**When** normalization runs
+**Then** the system marks incomplete or unavailable states explicitly instead of silently treating them as complete data
 
 ### Story 1.4: Expose Data Freshness and Refresh Status
 
@@ -288,13 +289,13 @@ So that I can trust or question screening and backtest outputs appropriately.
 
 **Acceptance Criteria:**
 
-**Given** market-data refresh jobs have run  
-**When** the user requests data health information  
-**Then** the system returns refresh status, freshness state, and failure or incompleteness indicators  
+**Given** market-data refresh jobs have run
+**When** the user requests data health information
+**Then** the system returns refresh status, freshness state, and failure or incompleteness indicators
 
-**Given** a refresh fails or only partially completes  
-**When** the user views the product status  
-**Then** the failed or partial state is visible and not masked as normal success  
+**Given** a refresh fails or only partially completes
+**When** the user views the product status
+**Then** the failed or partial state is visible and not masked as normal success
 
 ## Epic 2: Indicator Materialization and Screening Execution
 
@@ -310,13 +311,13 @@ So that I can control the screen logic without changing code.
 
 **Acceptance Criteria:**
 
-**Given** the screen configuration view  
-**When** the user enters an RPS threshold and a 52-week-high proximity threshold  
-**Then** the system accepts and validates the parameter values for a screen run  
+**Given** the screen configuration view
+**When** the user enters an RPS threshold and a 52-week-high proximity threshold
+**Then** the system accepts and validates the parameter values for a screen run
 
-**Given** a saved or current parameter set  
-**When** the user updates the values  
-**Then** the new values are preserved for the next screen run  
+**Given** a saved or current parameter set
+**When** the user updates the values
+**Then** the new values are preserved for the next screen run
 
 ### Story 2.2: Materialize RPS and 52-Week-High Derived Facts
 
@@ -328,14 +329,15 @@ So that screening, charting, and backtesting all use the same authoritative valu
 
 **Acceptance Criteria:**
 
-**Given** normalized daily market data exists  
-**When** derived-facts materialization runs  
-**Then** the system computes and stores 50-day, 120-day, and 250-day RPS-related values for supported securities  
-**And** the system computes and stores 52-week-high proximity values for supported securities  
+**Given** normalized daily market data exists
+**When** derived-facts materialization runs
+**Then** the system computes and stores 50-day, 120-day, and 250-day RPS-related values for supported securities using the approved business definition
+**And** the system computes and stores 52-week-high proximity values for supported securities
 
-**Given** derived facts have been computed  
-**When** later services query them  
-**Then** the same stored values are available for screening, chart detail, and backtesting  
+**Given** derived facts have been computed
+**When** later services query them
+**Then** the same stored values are available for screening, chart detail, and backtesting
+**And** non-computable RPS dates or securities are surfaced explicitly rather than silently approximated
 
 ### Story 2.3: Execute Screen Runs and Persist Results
 
@@ -347,14 +349,15 @@ So that I can retrieve the stocks that satisfy the active strategy.
 
 **Acceptance Criteria:**
 
-**Given** a valid parameter set and available derived facts  
-**When** the user launches a screen run  
-**Then** the system evaluates the configured strategy across the supported Japan equity universe  
-**And** the system persists a screen run record with the parameter set and run context  
+**Given** a valid parameter set and available derived facts
+**When** the user launches a screen run
+**Then** the system evaluates the configured strategy across the supported Japan equity universe
+**And** the system persists a screen run record with the parameter set and run context
 
-**Given** a completed screen run  
-**When** results are returned  
-**Then** each qualified stock is linked to the stored values that caused it to pass  
+**Given** a completed screen run
+**When** results are returned
+**Then** each qualified stock is linked to the stored values that caused it to pass
+**And** the persisted run remains traceable to the approved RPS semantic contract and threshold semantics active at execution time
 
 ### Story 2.4: Display Screen Result List with Qualification Summary
 
@@ -366,14 +369,74 @@ So that I can choose which candidates to inspect further.
 
 **Acceptance Criteria:**
 
-**Given** a completed screen run with qualifying securities  
-**When** the user views the result list  
-**Then** the system displays the qualified stocks from that run  
-**And** the result list is associated with the run date and parameter set that produced it  
+**Given** a completed screen run with qualifying securities
+**When** the user views the result list
+**Then** the system displays the qualified stocks from that run
+**And** the result list is associated with the run date and parameter set that produced it
 
-**Given** a stock appears in the result list  
-**When** the user views its summary  
-**Then** the summary indicates that the stock passed and provides enough context to open the detailed explanation flow  
+**Given** a stock appears in the result list
+**When** the user views its summary
+**Then** the summary indicates that the stock passed and provides enough context to open the detailed explanation flow
+
+### Story 2.5: Freeze RPS Business Definition and Derived-Fact Contract
+
+As a product and engineering team,
+I want the RPS business definition, ranking semantics, and derived-fact contract to be explicitly frozen,
+So that future screening, charting, and backtesting changes do not drift away from the intended method.
+
+**FRs implemented:** FR14, FR15, FR16, FR20
+
+**Acceptance Criteria:**
+
+**Given** the MVP RPS workflow is under review
+**When** the team finalizes the approved RPS semantics
+**Then** the project documents define the exact formula, ranking universe policy, normalization rule, and non-computable-data handling for RPS 50, 120, and 250
+**And** the approved definition is frozen in a single contract document that future stories can reference directly
+
+**Given** the approved RPS semantics exist
+**When** derived facts, screen runs, stock detail payloads, or backtests consume RPS data
+**Then** they all reference the same documented contract and no client-side approximation is treated as authoritative
+
+### Story 2.6: Persist RPS Definition Version with Screen Runs
+
+As an operator,
+I want each screen run to record which approved RPS definition version it used,
+So that historical results remain explainable even after the RPS contract evolves.
+
+**FRs implemented:** FR7, FR20, FR27, FR51
+
+**Acceptance Criteria:**
+
+**Given** an approved RPS semantic contract version exists
+**When** the user executes a screen run
+**Then** the persisted run records the RPS definition version or equivalent contract identifier used at execution time
+
+**Given** a historical screen result is investigated later
+**When** the operator reviews the run context and qualification values
+**Then** they can identify which RPS definition version governed that result without inferring it from source code history
+
+### Story 2.7: Select Screening Trade Date from Available Derived-Fact Dates
+
+As a user,
+I want to choose an available historical screening trade date,
+So that I can replay the screen against a past market state rather than always using the latest derived facts.
+
+**FRs implemented:** FR21, FR22, FR27, FR55
+
+**Acceptance Criteria:**
+
+**Given** persisted derived facts exist for multiple trade dates
+**When** the user opens the screening workflow
+**Then** the product can present an explicit screening trade-date choice sourced from available derived-fact dates
+
+**Given** the user selects a historical trade date and launches a screen run
+**When** the run completes
+**Then** the system evaluates only the stored derived facts for that selected trade date
+**And** the persisted run context records the selected date without implying that arbitrary calendar dates are supported
+
+**Given** the user does not manually choose a trade date
+**When** a screen run is launched
+**Then** the product continues to default to the latest available derived-fact trade date
 
 ## Epic 3: Stock Detail, Chart Review, and Explainability
 
@@ -389,13 +452,14 @@ So that chart review and qualification logic stay aligned.
 
 **Acceptance Criteria:**
 
-**Given** a stock from a completed screen run  
-**When** the stock detail is requested  
-**Then** the backend returns candlestick data, relevant RPS values, 52-week-high proximity state, and rule breakdown from stored data  
+**Given** a stock from a completed screen run
+**When** the stock detail is requested
+**Then** the backend returns candlestick data, relevant RPS values, historical RPS series, 52-week-high proximity state, and rule breakdown from stored data
 
-**Given** the stock detail payload  
-**When** it is compared with the originating screen run  
-**Then** the qualification values remain consistent with the run that produced the result  
+**Given** the stock detail payload
+**When** it is compared with the originating screen run
+**Then** the qualification values remain consistent with the run that produced the result
+**And** missing or partial RPS history is represented explicitly instead of being fabricated in the client
 
 ### Story 3.2: Build Stock Detail Page with Candlestick and RPS Panels
 
@@ -407,14 +471,15 @@ So that I can inspect the setup visually in one workflow.
 
 **Acceptance Criteria:**
 
-**Given** a selected qualified stock  
-**When** the stock detail page loads  
-**Then** the page displays a candlestick chart for the stock  
-**And** the page displays an RPS panel below the main price chart  
+**Given** a selected qualified stock
+**When** the stock detail page loads
+**Then** the page displays a candlestick chart for the stock
+**And** the page displays an RPS panel below the main price chart using traceable backend-derived history
 
-**Given** the RPS panel is shown  
-**When** the active threshold is applied  
-**Then** RPS conditions meeting the threshold are visually distinguishable without relying on color alone  
+**Given** the RPS panel is shown
+**When** the active threshold is applied
+**Then** RPS conditions meeting the threshold are visually distinguishable without relying on color alone
+**And** explanatory chart annotations are visually separated from official screening signals
 
 ### Story 3.3: Show Rule Breakdown and Exact Qualifying Values
 
@@ -426,14 +491,55 @@ So that I can validate the result before adding it to my watchlist.
 
 **Acceptance Criteria:**
 
-**Given** a stock detail page for a qualified stock  
-**When** the explainability section is displayed  
-**Then** the system shows the exact rule breakdown for the stock  
-**And** the system shows the underlying values used to determine whether each condition passed  
+**Given** a stock detail page for a qualified stock
+**When** the explainability section is displayed
+**Then** the system shows the exact rule breakdown for the stock
+**And** the system shows the underlying values used to determine whether each condition passed
+**And** the system labels whether each displayed RPS visual state is part of official screen logic or explanation-only context
 
-**Given** the user reviews the stock detail  
-**When** they inspect the explainability section  
-**Then** they can determine why the stock qualified without leaving the stock analysis flow  
+**Given** the user reviews the stock detail
+**When** they inspect the explainability section
+**Then** they can determine why the stock qualified without leaving the stock analysis flow
+
+### Story 3.4: Replace Manual Stock Detail SVG Charts with Lightweight Charts
+
+As a user,
+I want the stock detail page to use mature charting components for price and RPS history,
+So that the visual analysis workflow feels trustworthy and does not rely on fabricated chart geometry.
+
+**FRs implemented:** FR28, FR29, FR30, FR33
+
+**Acceptance Criteria:**
+
+**Given** a stock detail page loads
+**When** the price panel renders
+**Then** candlesticks are drawn by a mature charting library instead of custom SVG geometry
+
+**Given** a stock detail page loads
+**When** the RPS panel renders
+**Then** it uses true historical derived-indicator values from the backend rather than a frontend-generated decay curve
+
+**Given** the active threshold is shown in the RPS panel
+**When** users inspect the chart
+**Then** the threshold is represented directly in the chart and remains visually distinguishable
+
+### Story 3.5: Clarify RPS Chart Semantics and Explainability Boundaries
+
+As a user,
+I want the RPS chart to distinguish official screening signals from explanatory visual annotations,
+So that I do not mistake a helpful chart cue for a rule that actually drove qualification.
+
+**FRs implemented:** FR24, FR25, FR29, FR30, FR33
+
+**Acceptance Criteria:**
+
+**Given** the stock detail page shows RPS history
+**When** the user reviews the chart and rule breakdown together
+**Then** the UI explicitly separates threshold-driven screening logic from explanatory-only visual annotations
+
+**Given** the system presents RPS history or status annotations
+**When** a displayed state is not part of official screen logic
+**Then** the product labels it as explanatory-only and does not imply that it affected qualification
 
 ## Epic 4: Watchlist and Research Workflow Continuity
 
@@ -449,13 +555,13 @@ So that I can maintain a focused list of candidates worth monitoring.
 
 **Acceptance Criteria:**
 
-**Given** a screened or reviewed stock  
-**When** the user adds it to the watchlist  
-**Then** the stock is stored as a watchlist entry linked to the canonical instrument identity  
+**Given** a screened or reviewed stock
+**When** the user adds it to the watchlist
+**Then** the stock is stored as a watchlist entry linked to the canonical instrument identity
 
-**Given** a stock is already in the watchlist  
-**When** the user removes it  
-**Then** the watchlist no longer includes that entry  
+**Given** a stock is already in the watchlist
+**When** the user removes it
+**Then** the watchlist no longer includes that entry
 
 ### Story 4.2: Persist Watchlist Notes, Observation Reasons, and Added Dates
 
@@ -467,13 +573,13 @@ So that I can remember why the stock matters later.
 
 **Acceptance Criteria:**
 
-**Given** a watchlist entry  
-**When** the user saves a note and observation reason  
-**Then** the system persists those fields with the watchlist entry  
+**Given** a watchlist entry
+**When** the user saves a note and observation reason
+**Then** the system persists those fields with the watchlist entry
 
-**Given** a watchlist entry is created  
-**When** it is stored  
-**Then** the system preserves the date the stock was added to the watchlist  
+**Given** a watchlist entry is created
+**When** it is stored
+**Then** the system preserves the date the stock was added to the watchlist
 
 ### Story 4.3: View and Review the Watchlist
 
@@ -485,13 +591,13 @@ So that my daily research workflow continues across sessions.
 
 **Acceptance Criteria:**
 
-**Given** one or more watchlist entries exist  
-**When** the user opens the watchlist view  
-**Then** the system displays the stored watchlist securities  
+**Given** one or more watchlist entries exist
+**When** the user opens the watchlist view
+**Then** the system displays the stored watchlist securities
 
-**Given** a watchlist entry is displayed  
-**When** the user reviews it  
-**Then** the saved note, observation reason, and added date are visible  
+**Given** a watchlist entry is displayed
+**When** the user reviews it
+**Then** the saved note, observation reason, and added date are visible
 
 ## Epic 5: Backtesting and Strategy Iteration
 
@@ -507,13 +613,13 @@ So that I can evaluate the strategy with historical evidence.
 
 **Acceptance Criteria:**
 
-**Given** a valid strategy parameter set  
-**When** the user selects a historical range and starts a backtest  
-**Then** the system creates and persists a backtest run record with the parameter set and historical range  
+**Given** a valid strategy parameter set
+**When** the user selects a historical range and starts a backtest
+**Then** the system creates and persists a backtest run record with the parameter set and historical range
 
-**Given** a backtest run is started  
-**When** execution takes longer than an immediate request cycle  
-**Then** the system exposes an explicit in-progress state for that run  
+**Given** a backtest run is started
+**When** execution takes longer than an immediate request cycle
+**Then** the system exposes an explicit in-progress state for that run
 
 ### Story 5.2: Execute Reproducible Backtests from Stored Inputs
 
@@ -525,13 +631,14 @@ So that the results are reproducible and trustworthy.
 
 **Acceptance Criteria:**
 
-**Given** a backtest run with a historical range and parameter set  
-**When** the system executes the backtest  
-**Then** it uses the same normalized dataset and parameterized conditions as the screen logic  
+**Given** a backtest run with a historical range and parameter set
+**When** the system executes the backtest
+**Then** it uses the same normalized dataset and parameterized conditions as the screen logic
+**And** it uses the same approved RPS semantic definition as screening and chart explainability
 
-**Given** the same historical range, parameter set, and stored dataset  
-**When** the backtest is run again  
-**Then** the system returns the same result  
+**Given** the same historical range, parameter set, and stored dataset
+**When** the backtest is run again
+**Then** the system returns the same result
 
 ### Story 5.3: Review Backtest Results and Compare Strategy Adjustments
 
@@ -543,13 +650,49 @@ So that I can iterate on my strategy with evidence rather than intuition alone.
 
 **Acceptance Criteria:**
 
-**Given** one or more completed backtest runs  
-**When** the user opens a backtest result  
-**Then** the system displays the completed backtest output linked to the run record  
+**Given** one or more completed backtest runs
+**When** the user opens a backtest result
+**Then** the system displays the completed backtest output linked to the run record
 
-**Given** multiple backtest runs exist  
-**When** the user reviews them  
-**Then** the system provides enough run context to compare parameter adjustments across runs  
+**Given** multiple backtest runs exist
+**When** the user reviews them
+**Then** the system provides enough run context to compare parameter adjustments across runs
+
+### Story 5.4: Verify Backtest Alignment with Approved RPS Semantics
+
+As a user,
+I want backtest outputs to remain aligned with the approved RPS definition,
+So that historical evaluation does not drift away from the screen and chart workflows.
+
+**FRs implemented:** FR14, FR43, FR44
+
+**Acceptance Criteria:**
+
+**Given** the approved RPS business definition has been frozen
+**When** a backtest is executed for a parameter set and date range
+**Then** the system can demonstrate that the same RPS semantics were used by screening, chart detail, and backtesting
+
+**Given** a suspicious backtest or screening discrepancy is investigated
+**When** operators review the run context
+**Then** they can identify which RPS definition and stored dataset were used without reverse-engineering the code
+
+### Story 5.5: Persist RPS Definition Version with Backtest Runs
+
+As an operator,
+I want each backtest run to record the approved RPS definition version it used,
+So that historical simulations remain reproducible and comparable after contract updates.
+
+**FRs implemented:** FR8, FR44, FR46, FR51
+
+**Acceptance Criteria:**
+
+**Given** an approved RPS semantic contract version exists
+**When** a backtest run is launched and executed
+**Then** the persisted backtest record stores the RPS definition version or equivalent contract identifier used for that run
+
+**Given** two backtest runs are compared across time
+**When** their outputs differ because the contract version changed
+**Then** the operator can see that definition-version difference directly in the run context instead of inferring it from repository history
 
 ## Epic 6: Product Hardening and Extension Boundaries
 
@@ -565,14 +708,14 @@ So that I can use the tool confidently during daily research.
 
 **Acceptance Criteria:**
 
-**Given** a screen, stock detail, watchlist, or backtest workflow  
-**When** stale data, partial data, invalid input, or a failed run occurs  
-**Then** the UI presents a clear explicit state instead of a silent or misleading success state  
+**Given** a screen, stock detail, watchlist, or backtest workflow
+**When** stale data, partial data, invalid input, or a failed run occurs
+**Then** the UI presents a clear explicit state instead of a silent or misleading success state
 
-**Given** primary workflows in the web app  
-**When** the user navigates them with keyboard-only interaction  
-**Then** the main parameter, result, stock detail, and watchlist flows remain operable  
-**And** important pass or fail states are not communicated by color alone  
+**Given** primary workflows in the web app
+**When** the user navigates them with keyboard-only interaction
+**Then** the main parameter, result, stock detail, and watchlist flows remain operable
+**And** important pass or fail states are not communicated by color alone
 
 ### Story 6.2: Preserve Security and Future Extension Boundaries
 
@@ -584,11 +727,11 @@ So that future broker or market expansion work does not compromise current corre
 
 **Acceptance Criteria:**
 
-**Given** the MVP implementation  
-**When** provider credentials are configured  
-**Then** they are handled only on the backend and never exposed to the browser  
+**Given** the MVP implementation
+**When** provider credentials are configured
+**Then** they are handled only on the backend and never exposed to the browser
 
-**Given** future post-MVP concerns such as broker integration or non-Japan market expansion  
-**When** the MVP modules are reviewed  
-**Then** research workflows remain structurally separate from those deferred concerns  
-**And** the MVP architecture still supports future addition of new strategy conditions and markets without invalidating the core workflow structure  
+**Given** future post-MVP concerns such as broker integration or non-Japan market expansion
+**When** the MVP modules are reviewed
+**Then** research workflows remain structurally separate from those deferred concerns
+**And** the MVP architecture still supports future addition of new strategy conditions and markets without invalidating the core workflow structure

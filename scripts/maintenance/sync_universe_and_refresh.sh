@@ -29,3 +29,5 @@ else
     --symbols-file "$SYMBOLS_FILE" \
     --commit-every "$REFRESH_COMMIT_EVERY"
 fi
+
+PYTHONPATH=src "$PYTHON_BIN" -m stockanalyse_api.jobs.materialize_derived_facts

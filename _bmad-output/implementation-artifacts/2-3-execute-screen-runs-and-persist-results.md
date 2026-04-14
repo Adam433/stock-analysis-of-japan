@@ -1,20 +1,20 @@
-# Story 2.3: Execute Screen Runs and Persist Results
+# 故事 2.3: Execute Screen Runs and Persist Results
 
-Status: done
+状态: done
 
-## Story
+## 用户故事
 
-As a user,  
-I want to run the MVP screen against the Japan equity universe,  
-so that I can retrieve the stocks that satisfy the active strategy.
+作为用户，  
+我希望run the MVP screen against the Japan equity universe，  
+以便I can retrieve the stocks that satisfy the active strategy。
 
-## Acceptance Criteria
+## 验收标准
 
-1. Given a valid parameter set and available derived facts, when the user launches a screen run, then the system evaluates the configured strategy across the supported Japan equity universe.
-2. Given a valid parameter set and available derived facts, when the user launches a screen run, then the system persists a screen run record with the parameter set and run context.
-3. Given a completed screen run, when results are returned, then each qualified stock is linked to the stored values that caused it to pass.
+1. 假设a valid parameter set and available derived facts，当the user launches a screen run，那么the system evaluates the configured strategy across the supported Japan equity universe。
+2. 假设a valid parameter set and available derived facts，当the user launches a screen run，那么the system persists a screen run record with the parameter set and run context。
+3. 假设a completed screen run，当results are returned，那么each qualified stock is linked to the stored values that caused it to pass。
 
-## Tasks / Subtasks
+## 任务 / 子任务
 
 - [x] Extend the screening domain with run persistence. (AC: 2, 3)
   - [x] Add `screen_runs` for run-level context and parameter-set linkage.
@@ -30,19 +30,19 @@ so that I can retrieve the stocks that satisfy the active strategy.
   - [x] Add regression tests for run persistence, qualified result traceability, and missing-derived-fact failure handling.
   - [x] Run backend tests, compile validation, and migration upgrade validation.
 
-## Dev Notes
+## 开发备注
 
 - This story consumes the active parameter set from Story 2.1 and the persisted derived facts from Story 2.2. It should not recalculate authoritative factors during screen execution. [Source: _bmad-output/implementation-artifacts/2-1-create-strategy-configuration-workflow.md; _bmad-output/implementation-artifacts/2-2-materialize-rps-and-52-week-high-derived-facts.md]
 - Architecture requires persisted screen runs and traceability from each qualifying stock back to thresholds and stored values. [Source: _bmad-output/planning-artifacts/architecture.md:246,480,649,865]
 - Result-list rendering belongs to Story 2.4. This story only needs the execution and persisted-result backbone that the list can query next. [Source: _bmad-output/planning-artifacts/epics.md:346-372]
 
-## Dev Agent Record
+## 开发代理记录
 
-### Agent Model Used
+### 使用的代理模型
 
 GPT-5.4
 
-### Debug Log References
+### 调试日志参考
 
 - Added `screen_runs` and `screen_run_results` persistence through migration `20260414_0006`.
 - Implemented a screening service that evaluates persisted derived facts against the active strategy configuration.
@@ -51,14 +51,14 @@ GPT-5.4
 - Verified with `PYTHONPATH=src python3 -m unittest tests.test_ingestion_review_regressions tests.test_market_data_health tests.test_strategy_configuration tests.test_factor_materialization tests.test_screening`.
 - Verified with `PYTHONPATH=src python3 -m compileall src` and `PYTHONPATH=src python3 -m alembic -c alembic.ini upgrade head`.
 
-### Completion Notes List
+### 完成说明
 
 - Screen execution now uses the active strategy configuration plus the latest derived indicator facts.
 - Each run persists both run-level context and per-instrument evaluation output.
 - Qualified results include traceable threshold/value fields needed for later explainability and result-list summaries.
 - The API now exposes enough persisted run data for Story 2.4 to render the result list without changing the execution model.
 
-### File List
+### 文件清单
 
 - _bmad-output/implementation-artifacts/2-3-execute-screen-runs-and-persist-results.md
 - apps/api/migrations/versions/20260414_0006_add_screen_runs_and_results.py
@@ -70,6 +70,6 @@ GPT-5.4
 - apps/api/src/stockanalyse_api/jobs/run_screen.py
 - apps/api/tests/test_screening.py
 
-### Change Log
+### 变更日志
 
 - 2026-04-14: Implemented persisted screen runs, per-stock result records, and minimal screening execution APIs.

@@ -17,6 +17,7 @@ class StockDetailPayload:
     rule_breakdown: dict[str, object]
     latest_indicator_snapshot: dict[str, object]
     candlesticks: list[dict[str, object]]
+    indicator_history: list[dict[str, object]]
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -72,6 +73,29 @@ def get_stock_detail_payload(session, *, instrument_id: int, screen_run_id: int)
             "data_status": candle.data_status,
         }
         for candle in candle_rows
+    ]
+
+    indicator_rows = session.execute(
+        select(DerivedIndicatorDaily)
+        .where(
+            DerivedIndicatorDaily.instrument_id == instrument_id,
+            DerivedIndicatorDaily.trade_date >= candle_rows[0].trade_date if candle_rows else screen_run.trade_date,
+            DerivedIndicatorDaily.trade_date <= screen_run.trade_date,
+        )
+        .order_by(DerivedIndicatorDaily.trade_date.asc())
+    ).scalars().all()
+
+    indicator_history = [
+        {
+            "trade_date": row.trade_date.isoformat(),
+            "rps_50": f"{row.rps_50:.2f}" if row.rps_50 is not None else None,
+            "rps_120": f"{row.rps_120:.2f}" if row.rps_120 is not None else None,
+            "rps_250": f"{row.rps_250:.2f}" if row.rps_250 is not None else None,
+            "high_proximity_ratio": (
+                f"{row.high_proximity_ratio:.6f}" if row.high_proximity_ratio is not None else None
+            ),
+        }
+        for row in indicator_rows
     ]
 
     latest_indicator_snapshot = {
@@ -131,4 +155,5 @@ def get_stock_detail_payload(session, *, instrument_id: int, screen_run_id: int)
         },
         latest_indicator_snapshot=latest_indicator_snapshot,
         candlesticks=candlesticks,
+        indicator_history=indicator_history,
     )

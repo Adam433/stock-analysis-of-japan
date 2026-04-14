@@ -90,8 +90,27 @@ Both templates call `scripts/maintenance/sync_universe_and_refresh.sh`, which ru
 
 1. JPX universe sync
 2. full-universe refresh with batched commits and incremental tail-only ingestion
+3. derived-indicator materialization for screening/backtesting
 
 By default the maintenance script now uses `REFRESH_PROVIDER=yahoo_finance_chart`, so nightly automation can fill JPX manifest symbols even when no local CSV exists for them.
+
+## Screening Dependency
+
+`/screen/runs` does not evaluate raw price rows directly. It reads persisted facts from
+`derived_indicator_daily`.
+
+That means a refresh pipeline must run both:
+
+1. market-data refresh into `market_data_daily`
+2. derived-fact materialization into `derived_indicator_daily`
+
+If `derived_indicator_daily` is empty, the API correctly returns:
+`No derived indicator facts are available for screening.`
+
+Operational note:
+
+- Derived-fact materialization now processes `market_data_daily` in trade-date order and commits in small trade-date batches.
+- This keeps the local SQLite database more responsive while facts are being generated for large histories.
 
 ## Storage
 

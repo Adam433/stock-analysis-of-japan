@@ -1,22 +1,22 @@
-# Story 1.2: Establish Database Schema and Migration Workflow
+# 故事 1.2: Establish Database Schema and Migration Workflow
 
-Status: done
+状态: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
-## Story
+## 用户故事
 
 As a developer,  
 I want the initial database schema baseline and migration workflow in place,  
-so that market data foundations can be stored consistently and later stories can evolve the schema safely.
+以便market data foundations can be stored consistently and later stories can evolve the schema safely。
 
-## Acceptance Criteria
+## 验收标准
 
-1. Given the backend application, when the persistence layer is implemented, then the SQLite-backed schema supports instruments and daily market data records needed by the historical data backbone.
-2. Given the backend application, when the persistence layer is implemented, then schema migration tooling is configured and usable in local development.
-3. Given a new local environment, when migrations are applied, then the database can be created from migrations without manual schema editing.
+1. 假设the backend application，当the persistence layer is implemented，那么the SQLite-backed schema supports instruments and daily market data records needed by the historical data backbone。
+2. 假设the backend application，当the persistence layer is implemented，那么schema migration tooling is configured and usable in local development。
+3. 假设a new local environment，当migrations are applied，那么the database can be created from migrations without manual schema editing。
 
-## Tasks / Subtasks
+## 任务 / 子任务
 
 - [x] Add backend database dependencies and runtime configuration. (AC: 1, 2)
   - [x] Add `SQLAlchemy` and `Alembic` to `apps/api/pyproject.toml`.
@@ -37,7 +37,7 @@ so that market data foundations can be stored consistently and later stories can
   - [x] Apply the migration locally with Alembic.
   - [x] Verify the SQLite database contains the expected baseline tables after migration.
 
-## Dev Notes
+## 开发备注
 
 - This story owns the first real persistence layer. It should stay limited to the minimum schema needed by the historical data backbone. It is not the place to pre-create future tables just because they are known to be coming later. [Source: _bmad-output/planning-artifacts/epics.md:243-260]
 - The MVP system-of-record database starts with SQLite, but the schema and migration path must remain compatible with later PostgreSQL migration. [Source: _bmad-output/planning-artifacts/architecture.md:215-258]
@@ -101,19 +101,19 @@ so that market data foundations can be stored consistently and later stories can
 - Architecture project structure: [architecture.md](/Users/adam/Documents/GitHub/stockAnalyse/_bmad-output/planning-artifacts/architecture.md:565)
 - Previous story: [1-1-initialize-monorepo-application-shells.md](/Users/adam/Documents/GitHub/stockAnalyse/_bmad-output/implementation-artifacts/1-1-initialize-monorepo-application-shells.md)
 
-## Dev Agent Record
+## 开发代理记录
 
-### Agent Model Used
+### 使用的代理模型
 
 GPT-5.4
 
-### Debug Log References
+### 调试日志参考
 
 - Installed `SQLAlchemy==2.0.48` and `alembic==1.18.4` into the local `.venv`.
 - `../../.venv/bin/python -m alembic -c alembic.ini upgrade head` succeeded from `apps/api`.
 - Verified resulting SQLite schema with `sqlite3` inspection through Python using `PYTHONPATH=src`.
 
-### Completion Notes List
+### 完成说明
 
 - Added the backend migration toolchain and pinned persistence dependencies.
 - Created SQLAlchemy base/session foundations and backend settings for the local SQLite path.
@@ -122,7 +122,7 @@ GPT-5.4
 - Applied the migration successfully and verified the expected tables in `data/stockanalyse.db`.
 - Enabled SQLite foreign key enforcement at connection time so schema behavior matches the migration intent.
 
-### File List
+### 文件清单
 
 - _bmad-output/implementation-artifacts/1-2-establish-database-schema-and-migration-workflow.md
 - apps/api/pyproject.toml
@@ -139,6 +139,6 @@ GPT-5.4
 - apps/api/src/stockanalyse_api/domain/market_data/__init__.py
 - apps/api/src/stockanalyse_api/domain/market_data/models.py
 
-### Change Log
+### 变更日志
 
 - 2026-04-13: Implemented Story 1.2 database baseline with SQLite, SQLAlchemy, Alembic, and verified migrations locally.

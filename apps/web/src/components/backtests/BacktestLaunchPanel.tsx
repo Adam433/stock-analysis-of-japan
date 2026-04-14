@@ -10,6 +10,10 @@ type BacktestRun = {
   end_date: string;
   started_at: string;
   completed_at: string | null;
+  rps_definition_version: string | null;
+  dataset_trade_date_start: string | null;
+  dataset_trade_date_end: string | null;
+  dataset_checksum: string | null;
   error_message: string | null;
   result_summary: {
     trade_dates_evaluated: number;
@@ -162,6 +166,11 @@ export function BacktestLaunchPanel({
           <h2>{latestRun ? `v${latestRun.parameter_set.version}` : "不可用"}</h2>
           <p className="status-copy">每个回测任务都绑定到精确的策略配置版本。</p>
         </article>
+        <article className="screen-summary-card">
+          <p className="status-label">RPS 语义</p>
+          <h2>{latestRun?.rps_definition_version ?? "历史未记录"}</h2>
+          <p className="status-copy">用于核对回测是否与 screening 和图表解释保持同一语义。</p>
+        </article>
       </div>
 
       <form className="strategy-form" onSubmit={handleSubmit}>
@@ -233,6 +242,16 @@ export function BacktestLaunchPanel({
               <p className="status-label">完成时间</p>
               <h3>{formatTimestamp(latestRun.completed_at)}</h3>
             </article>
+            <article className="run-metadata-card">
+              <p className="status-label">数据集范围</p>
+              <h3>
+                {latestRun.dataset_trade_date_start ?? "-"} 至 {latestRun.dataset_trade_date_end ?? "-"}
+              </h3>
+            </article>
+            <article className="run-metadata-card">
+              <p className="status-label">数据集指纹</p>
+              <h3>{latestRun.dataset_checksum ?? "历史未记录"}</h3>
+            </article>
           </div>
         ) : (
           <p className="empty-state">暂无持久化的回测记录。</p>
@@ -298,6 +317,7 @@ export function BacktestLaunchPanel({
                     <p className="status-copy">
                       区间 {run.start_date} 至 {run.end_date}
                     </p>
+                    <p className="status-copy">RPS 语义 {run.rps_definition_version ?? "历史未记录"}</p>
                     <p className="status-copy">
                       入选快照 {run.result_summary.qualifying_observations} ｜ 标的{" "}
                       {run.result_summary.unique_qualified_instruments}
@@ -352,12 +372,20 @@ export function BacktestLaunchPanel({
                           <dt>校验和</dt>
                           <dd>{run.result_summary.result_checksum ?? "不可用"}</dd>
                         </div>
+                        <div>
+                          <dt>数据集指纹</dt>
+                          <dd>{run.dataset_checksum ?? "历史未记录"}</dd>
+                        </div>
                       </div>
 
                       <ul className="signal-list">
                         <li>
                           参数集：RPS {run.parameter_set.rps_threshold} / 距高点{" "}
                           {run.parameter_set.high_proximity_threshold_pct}%
+                        </li>
+                        <li>
+                          RPS 语义：{run.rps_definition_version ?? "历史未记录"} ｜ 数据集范围：
+                          {" "}{run.dataset_trade_date_start ?? "-"} 至 {run.dataset_trade_date_end ?? "-"}
                         </li>
                         <li>
                           入选日期跨度：{run.result_summary.first_qualified_trade_date ?? "-"} 至{" "}

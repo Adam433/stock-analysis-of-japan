@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from datetime import date, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -11,6 +12,7 @@ from stockanalyse_api.db.base import Base
 from stockanalyse_api.domain.indicators.models import DerivedIndicatorDaily
 from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
+from stockanalyse_api.jobs.materialize_derived_facts import main as materialize_job_main
 from stockanalyse_api.services.factor_materialization import materialize_derived_indicator_facts
 
 
@@ -111,6 +113,28 @@ class FactorMaterializationTests(unittest.TestCase):
 
         self.assertEqual(result["inserted"], 0)
         self.assertEqual(result["updated"], 520)
+        self.assertEqual(len(row_count), 520)
+
+    def test_materialize_derived_indicator_facts_commits_across_trade_date_batches(self) -> None:
+        self._seed_market_data()
+
+        with self.session_factory() as session:
+            result = materialize_derived_indicator_facts(session, commit_every_dates=3)
+            row_count = session.execute(select(DerivedIndicatorDaily)).scalars().all()
+
+        self.assertEqual(result["inserted"], 520)
+        self.assertEqual(result["updated"], 0)
+        self.assertEqual(len(row_count), 520)
+
+    def test_materialize_job_entrypoint_runs_with_registered_models(self) -> None:
+        self._seed_market_data()
+
+        with patch("stockanalyse_api.jobs.materialize_derived_facts.SessionLocal", self.session_factory):
+            materialize_job_main()
+
+        with self.session_factory() as session:
+            row_count = session.execute(select(DerivedIndicatorDaily)).scalars().all()
+
         self.assertEqual(len(row_count), 520)
 
 

@@ -11,6 +11,7 @@ from stockanalyse_api.db.base import Base
 from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
 from stockanalyse_api.services.chart_data import get_stock_detail_payload
+from stockanalyse_api.services.backtesting import execute_backtest_run, launch_backtest_run
 from stockanalyse_api.services.factor_materialization import materialize_derived_indicator_facts
 from stockanalyse_api.services.screening import execute_screen_run
 from stockanalyse_api.services.strategy_config import get_active_strategy_configuration, save_strategy_configuration
@@ -123,9 +124,26 @@ class ChartDataTests(unittest.TestCase):
         self.assertTrue(payload.rule_breakdown["passed"])
         self.assertTrue(payload.rule_breakdown["rps_condition"]["passed"])
         self.assertTrue(payload.rule_breakdown["high_proximity_condition"]["passed"])
+        self.assertEqual(payload.rule_breakdown["rps_condition"]["threshold"], 90)
+        self.assertIsNotNone(payload.rule_breakdown["rps_condition"]["best_rps_value"])
         self.assertEqual(payload.latest_indicator_snapshot["trade_date"], payload.screen_run["trade_date"])
         self.assertGreaterEqual(len(payload.candlesticks), 100)
         self.assertEqual(payload.candlesticks[-1]["trade_date"], payload.screen_run["trade_date"])
+        self.assertGreaterEqual(len(payload.indicator_history), 10)
+        self.assertEqual(payload.indicator_history[-1]["trade_date"], payload.screen_run["trade_date"])
+        self.assertIsNotNone(payload.indicator_history[-1]["rps_50"])
+        self.assertEqual(
+            payload.latest_indicator_snapshot["rps_50"],
+            payload.indicator_history[-1]["rps_50"],
+        )
+        self.assertEqual(
+            payload.latest_indicator_snapshot["rps_120"],
+            payload.indicator_history[-1]["rps_120"],
+        )
+        self.assertEqual(
+            payload.latest_indicator_snapshot["rps_250"],
+            payload.indicator_history[-1]["rps_250"],
+        )
 
     def test_get_stock_detail_payload_returns_none_for_invalid_run_binding(self) -> None:
         instrument_id, screen_run_id = self._seed_screen_context()
@@ -138,6 +156,28 @@ class ChartDataTests(unittest.TestCase):
             )
 
         self.assertIsNone(payload)
+
+    def test_chart_detail_trade_date_stays_aligned_with_single_day_backtest_dataset_context(self) -> None:
+        instrument_id, screen_run_id = self._seed_screen_context()
+
+        with self.session_factory() as session:
+            payload = get_stock_detail_payload(
+                session,
+                instrument_id=instrument_id,
+                screen_run_id=screen_run_id,
+            )
+            assert payload is not None
+            backtest = launch_backtest_run(
+                session,
+                start_date=date.fromisoformat(payload.screen_run["trade_date"]),
+                end_date=date.fromisoformat(payload.screen_run["trade_date"]),
+            )
+            completed = execute_backtest_run(session, backtest.id)
+
+        self.assertEqual(completed.dataset_trade_date_start, payload.screen_run["trade_date"])
+        self.assertEqual(completed.dataset_trade_date_end, payload.screen_run["trade_date"])
+        self.assertEqual(payload.latest_indicator_snapshot["trade_date"], payload.screen_run["trade_date"])
+        self.assertEqual(payload.indicator_history[-1]["trade_date"], payload.screen_run["trade_date"])
 
 
 if __name__ == "__main__":

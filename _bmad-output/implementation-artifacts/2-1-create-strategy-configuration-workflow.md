@@ -1,19 +1,19 @@
-# Story 2.1: Create Strategy Configuration Workflow
+# 故事 2.1: Create Strategy Configuration Workflow
 
-Status: done
+状态: done
 
-## Story
+## 用户故事
 
-As a user,  
-I want to define and edit MVP strategy parameters,  
-so that I can control the screen logic without changing code.
+作为用户，  
+我希望define and edit MVP strategy parameters，  
+以便I can control the screen logic without changing code。
 
-## Acceptance Criteria
+## 验收标准
 
-1. Given the screen configuration view, when the user enters an RPS threshold and a 52-week-high proximity threshold, then the system accepts and validates the parameter values for a screen run.
-2. Given a saved or current parameter set, when the user updates the values, then the new values are preserved for the next screen run.
+1. 假设the screen configuration view，当the user enters an RPS threshold and a 52-week-high proximity threshold，那么the system accepts and validates the parameter values for a screen run。
+2. 假设a saved or current parameter set，当the user updates the values，那么the new values are preserved for the next screen run。
 
-## Tasks / Subtasks
+## 任务 / 子任务
 
 - [x] Add persisted strategy-configuration storage. (AC: 2)
   - [x] Create a `strategy_configurations` table under the screening domain.
@@ -30,19 +30,19 @@ so that I can control the screen logic without changing code.
   - [x] Add backend regression tests for default config creation, versioned saves, and invalid values.
   - [x] Run backend tests, frontend lint, frontend build, and migration upgrade validation.
 
-## Dev Notes
+## 开发备注
 
 - Epic 2 begins the screening domain, but this story should stop at parameter configuration and persistence. It must not implement derived facts or universe-wide screen execution yet. [Source: _bmad-output/planning-artifacts/epics.md:301-353]
 - Architecture maps strategy configuration to `apps/web/src/app/screen` and `apps/api/src/stockanalyse_api/domain/screens`. Keep that boundary clean for later stories. [Source: _bmad-output/planning-artifacts/architecture.md:643-669]
 - Later screen and backtest runs need parameter traceability, so versioned persistence is a safer baseline than a singleton mutable settings record. [Source: _bmad-output/planning-artifacts/prd.md:163-165,382-384,440-441]
 
-## Dev Agent Record
+## 开发代理记录
 
-### Agent Model Used
+### 使用的代理模型
 
 GPT-5.4
 
-### Debug Log References
+### 调试日志参考
 
 - Added `strategy_configurations` persistence and migration `20260414_0004`.
 - Added strategy configuration services plus `GET/PUT /screen/configuration`.
@@ -52,14 +52,14 @@ GPT-5.4
 - Verified with `PYTHONPATH=src python3 -m compileall src`, `PYTHONPATH=src python3 -m alembic -c alembic.ini upgrade head`, `npm run lint`, and `npm run build`.
 - Follow-up implementation review tightened the `/screen` error-state semantics so API connectivity issues are not shown as an existing active configuration.
 
-### Completion Notes List
+### 完成说明
 
 - Strategy parameters are now persisted server-side with version history and an active configuration concept.
 - The web app exposes a dedicated screen configuration workflow instead of relying on static placeholders.
 - Validation now exists both client-side and server-side for the two MVP thresholds.
 - The active parameter set is ready to be consumed by later screen-run and backtest stories.
 
-### File List
+### 文件清单
 
 - _bmad-output/implementation-artifacts/2-1-create-strategy-configuration-workflow.md
 - apps/api/migrations/env.py
@@ -76,7 +76,7 @@ GPT-5.4
 - apps/web/src/app/globals.css
 - apps/web/src/components/screen/StrategyConfigPanel.tsx
 
-### Change Log
+### 变更日志
 
 - 2026-04-14: Implemented versioned strategy configuration persistence, backend API routes, and the initial `/screen` workflow.
 - 2026-04-14: Closed the implementation with a quick review pass and corrected the screen configuration error-state presentation.

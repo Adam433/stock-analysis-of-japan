@@ -9,6 +9,10 @@ from sqlalchemy import select
 from stockanalyse_api.domain.indicators.models import DerivedIndicatorDaily
 from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.screens.models import ScreenRun, ScreenRunResult, StrategyConfiguration
+from stockanalyse_api.services.rps_semantics import (
+    APPROVED_RPS_DEFINITION_VERSION,
+    normalize_rps_definition_version,
+)
 
 
 @dataclass(slots=True)
@@ -17,6 +21,7 @@ class ScreenRunSummary:
     strategy_configuration_id: int
     trade_date: str
     executed_at: str
+    rps_definition_version: str | None
     total_candidates: int
     qualified_count: int
     status: str
@@ -93,6 +98,7 @@ def execute_screen_run(session) -> ScreenRunSummary:
         strategy_configuration_id=configuration.id,
         trade_date=trade_date,
         executed_at=datetime.now(UTC),
+        rps_definition_version=APPROVED_RPS_DEFINITION_VERSION,
         total_candidates=len(indicators),
         qualified_count=0,
         status="completed",
@@ -156,6 +162,7 @@ def execute_screen_run(session) -> ScreenRunSummary:
         strategy_configuration_id=configuration.id,
         trade_date=trade_date.isoformat(),
         executed_at=screen_run.executed_at.isoformat(),
+        rps_definition_version=normalize_rps_definition_version(screen_run.rps_definition_version),
         total_candidates=screen_run.total_candidates,
         qualified_count=screen_run.qualified_count,
         status=screen_run.status,
@@ -204,6 +211,7 @@ def get_screen_run(session, screen_run_id: int) -> ScreenRunSummary | None:
         strategy_configuration_id=screen_run.strategy_configuration_id,
         trade_date=screen_run.trade_date.isoformat(),
         executed_at=screen_run.executed_at.isoformat(),
+        rps_definition_version=normalize_rps_definition_version(screen_run.rps_definition_version),
         total_candidates=screen_run.total_candidates,
         qualified_count=screen_run.qualified_count,
         status=screen_run.status,

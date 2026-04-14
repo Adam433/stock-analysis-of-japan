@@ -1,19 +1,19 @@
-# Story 4.1: Add and Remove Qualified Stocks from the Watchlist
+# 故事 4.1: Add and Remove Qualified Stocks from the Watchlist
 
-Status: done
+状态: done
 
-## Story
+## 用户故事
 
-As a user,  
-I want to add or remove qualified stocks from a watchlist,  
-so that I can maintain a focused list of candidates worth monitoring.
+作为用户，  
+我希望add or remove qualified stocks from a watchlist，  
+以便I can maintain a focused list of candidates worth monitoring。
 
-## Acceptance Criteria
+## 验收标准
 
-1. Given a screened or reviewed stock, when the user adds it to the watchlist, then the stock is stored as a watchlist entry linked to the canonical instrument identity.
-2. Given a stock is already in the watchlist, when the user removes it, then the watchlist no longer includes that entry.
+1. 假设a screened or reviewed stock，当the user adds it to the watchlist，那么the stock is stored as a watchlist entry linked to the canonical instrument identity。
+2. 假设a stock is already in the watchlist，当the user removes it，那么the watchlist no longer includes that entry。
 
-## Tasks / Subtasks
+## 任务 / 子任务
 
 - [x] Add watchlist persistence and API endpoints. (AC: 1, 2)
   - [x] Create a `watchlist_entries` table linked to canonical `instrument_id`.
@@ -26,19 +26,19 @@ so that I can maintain a focused list of candidates worth monitoring.
   - [x] Add backend tests for add, remove, and idempotent re-add behavior.
   - [x] Run backend unit tests, compile validation, Alembic upgrade, frontend lint, and frontend build.
 
-## Dev Notes
+## 开发备注
 
 - Epic 4 depends on the canonical instrument identity and the existing screen/detail workflows from Epics 2 and 3. Watchlist persistence should remain a separate domain instead of being bolted into screen results or stock detail records. [Source: _bmad-output/planning-artifacts/architecture.md:379,420,650-661]
 - Story 4.1 is intentionally limited to add/remove behavior. Notes, observation reasons, and explicit added-date display belong to Stories 4.2 and 4.3. [Source: _bmad-output/planning-artifacts/epics.md:445-476]
 - The PRD expects watchlist actions to behave like core research workflow actions, so both the result-list path and the reviewed-stock path should support add/remove without leaving the current flow. [Source: _bmad-output/planning-artifacts/prd.md:151,236,261-282]
 
-## Dev Agent Record
+## 开发代理记录
 
-### Agent Model Used
+### 使用的代理模型
 
 GPT-5.4
 
-### Debug Log References
+### 调试日志参考
 
 - Added a watchlist domain, migration, service layer, and `/watchlist` API routes.
 - Connected watchlist add/remove actions to the qualified result list and stock detail page.
@@ -47,13 +47,13 @@ GPT-5.4
 - Verified with `PYTHONPATH=src python3 -m alembic -c alembic.ini upgrade head`.
 - Verified with `npm run lint` and `npm run build`.
 
-### Completion Notes List
+### 完成说明
 
 - Qualified stocks can now be added to or removed from a persisted watchlist from both screening and reviewed-stock workflows.
 - Watchlist entries are stored against canonical instruments and add behavior is idempotent.
 - The implementation lays the persistence and UI foundation for Story 4.2 to add notes, observation reasons, and explicit added-date handling.
 
-### File List
+### 文件清单
 
 - _bmad-output/implementation-artifacts/4-1-add-and-remove-qualified-stocks-from-the-watchlist.md
 - apps/api/migrations/env.py
@@ -71,6 +71,6 @@ GPT-5.4
 - apps/web/src/components/stocks/StockDetailView.tsx
 - apps/web/src/components/watchlist/WatchlistToggleButton.tsx
 
-### Change Log
+### 变更日志
 
 - 2026-04-14: Added persisted watchlist add/remove workflow across the result list and stock detail page.

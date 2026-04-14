@@ -4,10 +4,11 @@ import unittest
 from datetime import date, timedelta
 from decimal import Decimal
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from stockanalyse_api.db.base import Base
+from stockanalyse_api.domain.backtests.models import BacktestRun
 from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
 from stockanalyse_api.services.backtesting import (
@@ -18,6 +19,11 @@ from stockanalyse_api.services.backtesting import (
     launch_backtest_run,
 )
 from stockanalyse_api.services.factor_materialization import materialize_derived_indicator_facts
+from stockanalyse_api.services.rps_semantics import (
+    APPROVED_RPS_DEFINITION_VERSION,
+    LEGACY_UNRECORDED_RPS_DEFINITION_VERSION,
+)
+from stockanalyse_api.services.screening import execute_screen_run
 from stockanalyse_api.services.strategy_config import get_active_strategy_configuration, save_strategy_configuration
 
 
@@ -107,6 +113,7 @@ class BacktestingTests(unittest.TestCase):
         self.assertEqual(run.status, "running")
         self.assertEqual(run.start_date, "2024-01-01")
         self.assertEqual(run.end_date, "2024-12-31")
+        self.assertEqual(run.rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
         self.assertEqual(run.parameter_set["version"], 1)
 
     def test_launch_backtest_run_rejects_invalid_date_range(self) -> None:
@@ -139,6 +146,8 @@ class BacktestingTests(unittest.TestCase):
         assert latest is not None
         assert fetched is not None
         self.assertEqual(latest.id, second.id)
+        self.assertEqual(latest.rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
+        self.assertEqual(fetched.rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
         self.assertEqual(fetched.start_date, "2024-01-01")
 
     def test_list_backtest_runs_returns_runs_with_latest_first(self) -> None:
@@ -156,6 +165,8 @@ class BacktestingTests(unittest.TestCase):
             runs = list_backtest_runs(session)
 
         self.assertEqual([run.id for run in runs], [second.id, first.id])
+        self.assertEqual(runs[0].rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
+        self.assertEqual(runs[1].rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
 
     def test_execute_backtest_run_completes_with_reproducible_summary(self) -> None:
         self._seed_backtest_context()
@@ -186,3 +197,64 @@ class BacktestingTests(unittest.TestCase):
             first_completed.result_summary["unique_qualified_instruments"],
             second_completed.result_summary["unique_qualified_instruments"],
         )
+        self.assertEqual(first_completed.rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
+        self.assertEqual(second_completed.rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
+        self.assertEqual(first_completed.dataset_trade_date_start, "2024-09-01")
+        self.assertEqual(first_completed.dataset_trade_date_end, "2024-09-16")
+        self.assertIsNotNone(first_completed.dataset_checksum)
+        self.assertEqual(first_completed.dataset_checksum, second_completed.dataset_checksum)
+
+    def test_execute_backtest_run_without_derived_facts_preserves_run_version_context(self) -> None:
+        with self.session_factory() as session:
+            launched = launch_backtest_run(
+                session,
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+            )
+            with self.assertRaises(ValueError):
+                execute_backtest_run(session, launched.id)
+            fetched = get_backtest_run(session, launched.id)
+
+        self.assertIsNotNone(fetched)
+        assert fetched is not None
+        self.assertEqual(fetched.status, "failed")
+        self.assertEqual(fetched.rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
+        self.assertIsNone(fetched.dataset_trade_date_start)
+        self.assertIsNone(fetched.dataset_trade_date_end)
+        self.assertIsNone(fetched.dataset_checksum)
+
+    def test_get_backtest_run_returns_explicit_legacy_marker_when_version_is_missing(self) -> None:
+        with self.session_factory() as session:
+            launch_backtest_run(
+                session,
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+            )
+            persisted = session.execute(select(BacktestRun).limit(1)).scalar_one()
+            persisted.rps_definition_version = None
+            session.commit()
+            fetched = get_backtest_run(session, persisted.id)
+
+        self.assertIsNotNone(fetched)
+        assert fetched is not None
+        self.assertEqual(fetched.rps_definition_version, LEGACY_UNRECORDED_RPS_DEFINITION_VERSION)
+
+    def test_single_day_backtest_stays_aligned_with_screening_semantics(self) -> None:
+        self._seed_backtest_context()
+
+        with self.session_factory() as session:
+            screen_run = execute_screen_run(session)
+            backtest = launch_backtest_run(
+                session,
+                start_date=date(2024, 9, 16),
+                end_date=date(2024, 9, 16),
+            )
+            completed = execute_backtest_run(session, backtest.id)
+
+        self.assertEqual(screen_run.rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
+        self.assertEqual(completed.rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
+        self.assertEqual(screen_run.trade_date, "2024-09-16")
+        self.assertEqual(completed.dataset_trade_date_start, screen_run.trade_date)
+        self.assertEqual(completed.dataset_trade_date_end, screen_run.trade_date)
+        self.assertEqual(completed.result_summary["trade_dates_evaluated"], 1)
+        self.assertEqual(completed.result_summary["qualifying_observations"], screen_run.qualified_count)

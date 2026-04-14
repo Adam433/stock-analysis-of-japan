@@ -30,6 +30,7 @@ class ScreenRun(TimestampMixin, Base):
     )
     trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    rps_definition_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     total_candidates: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     qualified_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="completed", server_default="completed")

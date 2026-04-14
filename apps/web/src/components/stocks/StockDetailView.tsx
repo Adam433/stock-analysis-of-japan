@@ -1,5 +1,6 @@
 "use client";
 
+import { StockDetailCharts } from "@/components/stocks/StockDetailCharts";
 import { WatchlistToggleButton } from "@/components/watchlist/WatchlistToggleButton";
 
 type Candlestick = {
@@ -54,6 +55,13 @@ type StockDetailPayload = {
     high_proximity_ratio: string | null;
   };
   candlesticks: Candlestick[];
+  indicator_history: {
+    trade_date: string;
+    rps_50: string | null;
+    rps_120: string | null;
+    rps_250: string | null;
+    high_proximity_ratio: string | null;
+  }[];
 };
 
 type StockDetailViewProps = {
@@ -84,96 +92,11 @@ function formatTimestamp(value: string): string {
   }).format(new Date(value));
 }
 
-function buildCandleGeometry(candlesticks: Candlestick[]) {
-  const validRows = candlesticks.filter(
-    (candle) =>
-      candle.open !== null &&
-      candle.high !== null &&
-      candle.low !== null &&
-      candle.close !== null,
-  );
-
-  if (!validRows.length) {
-    return [];
-  }
-
-  const highs = validRows.map((candle) => Number(candle.high));
-  const lows = validRows.map((candle) => Number(candle.low));
-  const maxHigh = Math.max(...highs);
-  const minLow = Math.min(...lows);
-  const span = maxHigh - minLow || 1;
-  const width = 760;
-  const height = 260;
-  const step = width / Math.max(validRows.length, 1);
-
-  return validRows.map((candle, index) => {
-    const x = index * step + step / 2;
-    const open = Number(candle.open);
-    const high = Number(candle.high);
-    const low = Number(candle.low);
-    const close = Number(candle.close);
-    const yForPrice = (price: number) => height - ((price - minLow) / span) * height;
-
-    return {
-      trade_date: candle.trade_date,
-      x,
-      wickTop: yForPrice(high),
-      wickBottom: yForPrice(low),
-      bodyTop: yForPrice(Math.max(open, close)),
-      bodyBottom: yForPrice(Math.min(open, close)),
-      bullish: close >= open,
-    };
-  });
-}
-
-function buildRpsLines(detail: StockDetailPayload) {
-  const rows = detail.candlesticks;
-  const latestTradeDate = detail.latest_indicator_snapshot.trade_date;
-  const latestIndex = rows.findIndex((row) => row.trade_date === latestTradeDate);
-  if (latestIndex === -1) {
-    return [];
-  }
-
-  const width = 760;
-  const height = 180;
-  const step = rows.length > 1 ? width / (rows.length - 1) : width;
-  const valueAtLatest = {
-    rps_50: detail.latest_indicator_snapshot.rps_50,
-    rps_120: detail.latest_indicator_snapshot.rps_120,
-    rps_250: detail.latest_indicator_snapshot.rps_250,
-  };
-
-  return [
-    { key: "rps_50", label: "RPS 50", color: "#0e5a52", dash: "0" },
-    { key: "rps_120", label: "RPS 120", color: "#c96b2c", dash: "8 5" },
-    { key: "rps_250", label: "RPS 250", color: "#8b2f24", dash: "3 5" },
-  ].map((line, offsetIndex) => {
-    const latestValue = valueAtLatest[line.key as keyof typeof valueAtLatest];
-    const numericLatestValue = latestValue ? Number(latestValue) : 0;
-    const points = rows.map((row, index) => {
-      const distance = Math.abs(index - latestIndex);
-      const decay = Math.max(0.35, 1 - distance * 0.015 - offsetIndex * 0.02);
-      const value = numericLatestValue * decay;
-      const y = height - (value / 100) * height;
-      return `${index * step},${y}`;
-    });
-
-    return {
-      ...line,
-      latestValue: latestValue ? Number(latestValue) : null,
-      meetsThreshold:
-        latestValue !== null && Number(latestValue) >= detail.rule_breakdown.rps_condition.threshold,
-      points: points.join(" "),
-    };
-  });
-}
-
 export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
-  const candleGeometry = buildCandleGeometry(detail.candlesticks);
-  const rpsLines = buildRpsLines(detail);
   const bestRpsValue = detail.rule_breakdown.rps_condition.best_rps_value;
   const maxDrawdown = detail.rule_breakdown.high_proximity_condition.max_drawdown_from_high_pct;
   const highProximityRatio = detail.rule_breakdown.high_proximity_condition.high_proximity_ratio;
+  const officialRpsStatus = detail.rule_breakdown.rps_condition.passed ? "已通过" : "未通过";
   const qualificationSummary = detail.rule_breakdown.passed
     ? `入选：最佳 RPS ${formatNumber(bestRpsValue)} 已突破 ${
         detail.rule_breakdown.rps_condition.threshold
@@ -233,7 +156,7 @@ export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
         </article>
         <article className="run-metadata-card">
           <p className="status-label">距 52 周高点回撤</p>
-          <h3>{detail.rule_breakdown.high_proximity_condition.max_drawdown_from_high_pct ?? "不可用"}%</h3>
+          <h3>{formatPercent(detail.rule_breakdown.high_proximity_condition.max_drawdown_from_high_pct)}</h3>
           <p className="status-copy">
             允许回撤 {detail.rule_breakdown.high_proximity_condition.threshold_pct}%。
           </p>
@@ -250,70 +173,36 @@ export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
 
       <section className="chart-panel">
         <div className="chart-panel__header">
-          <p className="eyebrow">K 线</p>
-          <h2>来自已存日频行情的价格走势。</h2>
+          <p className="eyebrow">图表观察</p>
+          <h2>真实 RPS 历史只承担验证与解释，不替代正式筛选判定。</h2>
+          <p className="hero-text">
+            图上的橙色阈值线与 RPS 历史序列用于帮助复核走势；当前 MVP 的正式 RPS
+            规则仍只以 `rule_breakdown` 中的最佳 RPS、阈值和通过判定为准。
+          </p>
         </div>
-        <div className="chart-frame">
-          <svg viewBox="0 0 760 260" className="candlestick-chart" role="img" aria-label="K 线图">
-            {candleGeometry.map((candle) => (
-              <g key={candle.trade_date}>
-                <line
-                  x1={candle.x}
-                  x2={candle.x}
-                  y1={candle.wickTop}
-                  y2={candle.wickBottom}
-                  stroke="#3f3a33"
-                  strokeWidth="1.5"
-                />
-                <rect
-                  x={candle.x - 4}
-                  y={Math.min(candle.bodyTop, candle.bodyBottom)}
-                  width="8"
-                  height={Math.max(3, Math.abs(candle.bodyBottom - candle.bodyTop))}
-                  fill={candle.bullish ? "#0e5a52" : "#8b2f24"}
-                  rx="2"
-                />
-              </g>
-            ))}
-          </svg>
+        <div className="semantic-boundary-grid">
+          <article className="semantic-boundary-card semantic-boundary-card--official">
+            <p className="status-label">正式筛选信号</p>
+            <h3>最佳 RPS {formatNumber(bestRpsValue)}</h3>
+            <p className="status-copy">
+              当前权威判定是“最佳 RPS {officialRpsStatus} 阈值 {detail.rule_breakdown.rps_condition.threshold}”。
+              这部分直接来自已保存的筛选判定结果，会驱动入选或未入选结论。
+            </p>
+          </article>
+          <article className="semantic-boundary-card semantic-boundary-card--explanatory">
+            <p className="status-label">仅解释用途</p>
+            <h3>RPS 历史与图表提示</h3>
+            <p className="status-copy">
+              图中的 RPS 历史只用于回看后端已存事实，帮助理解走势与阈值位置；
+              它不会单独新增“官方”事件标签，也不会覆盖正式筛选结果。
+            </p>
+          </article>
         </div>
-      </section>
-
-      <section className="chart-panel">
-        <div className="chart-panel__header">
-          <p className="eyebrow">RPS 面板</p>
-          <h2>50 / 120 / 250 日 RPS 及阈值对比。</h2>
-        </div>
-        <div className="chart-frame">
-          <svg viewBox="0 0 760 180" className="rps-chart" role="img" aria-label="RPS 面板">
-            <line x1="0" x2="760" y1="18" y2="18" stroke="#c96b2c" strokeDasharray="6 6" strokeWidth="1.5" />
-            <text x="12" y="14" className="chart-label">
-              阈值 {detail.rule_breakdown.rps_condition.threshold}
-            </text>
-            {rpsLines.map((line) => (
-              <polyline
-                key={line.key}
-                points={line.points}
-                fill="none"
-                stroke={line.color}
-                strokeWidth={line.meetsThreshold ? 3.5 : 2}
-                strokeDasharray={line.dash}
-              />
-            ))}
-          </svg>
-        </div>
-        <div className="rps-legend">
-          {rpsLines.map((line) => (
-            <article key={line.key} className="legend-card">
-              <p className="status-label">{line.label}</p>
-              <h3>{line.latestValue !== null ? formatNumber(String(line.latestValue)) : "不可用"}</h3>
-              <p className="status-copy">
-                {line.meetsThreshold ? "达到阈值" : "未达到阈值"}。
-                线型不同，避免仅以颜色传达状态。
-              </p>
-            </article>
-          ))}
-        </div>
+        <StockDetailCharts
+          candlesticks={detail.candlesticks}
+          indicatorHistory={detail.indicator_history}
+          rpsThreshold={detail.rule_breakdown.rps_condition.threshold}
+        />
       </section>
 
       <section className="chart-panel">
@@ -322,7 +211,8 @@ export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
           <h2>来自原始筛选任务的精确入选值。</h2>
           <p className="hero-text">
             {qualificationSummary} 本区块镜像已存的规则判断，使入选原因在个股
-            分析流程中始终可见。
+            分析流程中始终可见。若图表上出现辅助说明，它们只能作为解释性观察，
+            不能反向改写这里的正式结论。
           </p>
         </div>
 

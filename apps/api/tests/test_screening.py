@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import create_engine, select
@@ -13,6 +13,10 @@ from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
 from stockanalyse_api.domain.screens.models import ScreenRun, ScreenRunResult
 from stockanalyse_api.services.factor_materialization import materialize_derived_indicator_facts
+from stockanalyse_api.services.rps_semantics import (
+    APPROVED_RPS_DEFINITION_VERSION,
+    LEGACY_UNRECORDED_RPS_DEFINITION_VERSION,
+)
 from stockanalyse_api.services.screening import execute_screen_run, get_latest_screen_run, get_screen_run
 from stockanalyse_api.services.strategy_config import get_active_strategy_configuration, save_strategy_configuration
 
@@ -104,10 +108,12 @@ class ScreeningTests(unittest.TestCase):
         self.assertEqual(summary.total_candidates, 3)
         self.assertEqual(summary.qualified_count, 1)
         self.assertEqual(summary.parameter_set["version"], 2)
+        self.assertEqual(summary.rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
         self.assertEqual(len(summary.qualified_results), 1)
         self.assertEqual(summary.qualified_results[0]["symbol"], "7203")
         self.assertEqual(len(results), 3)
         self.assertTrue(any(result.passed for result in results))
+        self.assertEqual(runs[0].rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
 
     def test_get_screen_run_returns_traceable_result_values(self) -> None:
         self._seed_market_data()
@@ -120,6 +126,7 @@ class ScreeningTests(unittest.TestCase):
         assert fetched is not None
         self.assertEqual(fetched.id, created.id)
         self.assertEqual(fetched.parameter_set["rps_threshold"], 90)
+        self.assertEqual(fetched.rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
         self.assertEqual(fetched.qualified_results[0]["rps_condition_passed"], True)
         self.assertEqual(fetched.qualified_results[0]["high_proximity_condition_passed"], True)
         self.assertIsNotNone(fetched.qualified_results[0]["best_rps_value"])
@@ -142,6 +149,36 @@ class ScreeningTests(unittest.TestCase):
         self.assertIsNotNone(latest)
         assert latest is not None
         self.assertEqual(latest.id, second.id)
+        self.assertEqual(latest.rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
+
+    def test_execute_screen_run_requires_derived_facts_without_persisting_run(self) -> None:
+        with self.session_factory() as session:
+            get_active_strategy_configuration(session)
+            with self.assertRaises(ValueError):
+                execute_screen_run(session)
+            runs = session.execute(select(ScreenRun)).scalars().all()
+
+        self.assertEqual(runs, [])
+
+    def test_get_screen_run_returns_explicit_legacy_marker_when_version_is_missing(self) -> None:
+        with self.session_factory() as session:
+            configuration = get_active_strategy_configuration(session)
+            run = ScreenRun(
+                strategy_configuration_id=configuration.id,
+                trade_date=date(2025, 1, 1),
+                executed_at=datetime(2025, 1, 1, tzinfo=UTC),
+                rps_definition_version=None,
+                total_candidates=0,
+                qualified_count=0,
+                status="completed",
+            )
+            session.add(run)
+            session.commit()
+            fetched = get_screen_run(session, run.id)
+
+        self.assertIsNotNone(fetched)
+        assert fetched is not None
+        self.assertEqual(fetched.rps_definition_version, LEGACY_UNRECORDED_RPS_DEFINITION_VERSION)
 
 
 if __name__ == "__main__":

@@ -1,19 +1,19 @@
-# Story 5.2: Execute Reproducible Backtests from Stored Inputs
+# 故事 5.2: Execute Reproducible Backtests from Stored Inputs
 
-Status: done
+状态: done
 
-## Story
+## 用户故事
 
-As a user,  
+作为用户，  
 I want backtests to run from the same stored facts used by screening,  
-so that the results are reproducible and trustworthy.
+以便the results are reproducible and trustworthy。
 
-## Acceptance Criteria
+## 验收标准
 
-1. Given a backtest run with a historical range and parameter set, when the system executes the backtest, then it uses the same normalized dataset and parameterized conditions as the screen logic.
-2. Given the same historical range, parameter set, and stored dataset, when the backtest is run again, then the system returns the same result.
+1. 假设a backtest run with a historical range and parameter set，当the system executes the backtest，那么it uses the same normalized dataset and parameterized conditions as the screen logic。
+2. 假设the same historical range, parameter set, and stored dataset，当the backtest is run again，那么the system returns the same result。
 
-## Tasks / Subtasks
+## 任务 / 子任务
 
 - [x] Reuse screening-aligned condition evaluation for backtesting. (AC: 1, 2)
   - [x] Extract shared stored-facts rule evaluation logic from screening.
@@ -31,19 +31,19 @@ so that the results are reproducible and trustworthy.
   - [x] Add backend tests covering completed execution and deterministic re-run results.
   - [x] Run backend unit tests, compile validation, Alembic upgrade, frontend lint, and frontend build.
 
-## Dev Notes
+## 开发备注
 
 - Story 5.2 must use the same parameterized condition logic as screening rather than a parallel approximation, otherwise trust and reproducibility guarantees weaken immediately. [Source: _bmad-output/planning-artifacts/prd.md:202,206,438-439,492]
 - Architecture expects backtests to run against stored inputs and remain first-class persisted records with explicit status transitions. [Source: _bmad-output/planning-artifacts/architecture.md:58,60,380,450,470,642,649,807]
 - Story 5.3 will consume the persisted outputs added here for result review and comparison. This story should focus on execution correctness and durable summary persistence, not comparative presentation. [Source: _bmad-output/planning-artifacts/epics.md:526-540]
 
-## Dev Agent Record
+## 开发代理记录
 
-### Agent Model Used
+### 使用的代理模型
 
 GPT-5.4
 
-### Debug Log References
+### 调试日志参考
 
 - Extracted shared screening-aligned indicator evaluation logic and reused it during backtest execution.
 - Extended `backtest_runs` with persisted execution summary fields and checksum.
@@ -53,13 +53,13 @@ GPT-5.4
 - Verified with `PYTHONPATH=src python3 -m alembic -c alembic.ini upgrade head`.
 - Verified with `npm run lint` and `npm run build`.
 
-### Completion Notes List
+### 完成说明
 
 - Backtests now execute from stored derived facts using the same parameterized rule evaluation as screening.
 - Completed runs persist deterministic summary output and checksum so identical inputs can be verified as identical results.
 - The `/backtests` workflow now supports both launch and execute, and is ready for Story 5.3 to focus on review and comparison.
 
-### File List
+### 文件清单
 
 - _bmad-output/implementation-artifacts/5-2-execute-reproducible-backtests-from-stored-inputs.md
 - apps/api/migrations/versions/20260414_0010_add_backtest_run_summary_fields.py
@@ -71,6 +71,6 @@ GPT-5.4
 - apps/api/tests/test_backtesting.py
 - apps/web/src/components/backtests/BacktestLaunchPanel.tsx
 
-### Change Log
+### 变更日志
 
 - 2026-04-14: Added stored-facts backtest execution with deterministic summary persistence.

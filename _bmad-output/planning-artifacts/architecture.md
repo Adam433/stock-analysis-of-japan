@@ -251,6 +251,7 @@ The initial architecture should prefer a simple local relational database for MV
 - validate provider payloads before persistence
 - mark stale, partial, and unavailable data states explicitly
 - preserve run-time traceability from each qualified result back to stored values and parameters
+- apply the frozen RPS semantic contract in `_bmad-output/planning-artifacts/rps-semantics-contract.md` across derived facts, stock detail payloads, and backtest inputs
 
 **Migration Approach:**
 
@@ -293,6 +294,7 @@ The initial architecture should prefer a simple local relational database for MV
 **Core API Boundaries:**
 
 - screening configuration and execution
+- screening execution may default to the latest derived-fact trade date, but future historical replay must select only from persisted derived-fact dates
 - stock result list and stock detail retrieval
 - chart data retrieval
 - watchlist management
@@ -303,6 +305,7 @@ The initial architecture should prefer a simple local relational database for MV
 
 - every API response involved in screening, charting, or backtesting must make incomplete-data or failed-run states explicit
 - backend responses must preserve traceability context for investigation workflows
+- chart and explainability payloads must preserve the distinction between authoritative screening signals and explanatory-only visual annotations
 
 **Communication Style:**
 
@@ -638,6 +641,7 @@ stockAnalyse/
 - `normalization` transforms provider data into canonical records
 - `factor_materialization` computes stored derived facts such as `rps_50`, `rps_120`, `rps_250`, and `high_proximity_ratio`
 - `screening` executes parameterized screen runs from stored facts
+- future screening date selection must reuse persisted derived-fact dates rather than query raw market data ad hoc
 - `chart_data` assembles stock detail and chart-ready payloads
 - `backtesting` runs reproducible historical simulations against stored inputs
 - `health` exposes data freshness and operational status

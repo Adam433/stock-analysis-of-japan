@@ -469,7 +469,8 @@ textarea:focus-visible {
 
 .stock-detail-badges,
 .detail-snapshot-grid,
-.rps-legend {
+.rps-legend,
+.semantic-boundary-grid {
   display: grid;
   gap: 16px;
 }
@@ -489,7 +490,6 @@ textarea:focus-visible {
 
 .chart-frame {
   margin-top: 18px;
-  overflow-x: auto;
   border-radius: 24px;
   background:
     linear-gradient(180deg, rgba(14, 90, 82, 0.06), transparent 30%),
@@ -497,11 +497,13 @@ textarea:focus-visible {
   padding: 16px;
 }
 
-.candlestick-chart,
-.rps-chart {
+.chart-canvas {
   width: 100%;
-  min-width: 720px;
-  height: auto;
+  min-height: 220px;
+}
+
+.chart-empty-copy {
+  margin-top: 12px;
 }
 
 .chart-label {
@@ -519,6 +521,33 @@ textarea:focus-visible {
 .legend-card h3 {
   margin: 10px 0 0;
   font-size: 1.6rem;
+}
+
+.legend-card--warning {
+  background: linear-gradient(180deg, rgba(255, 241, 207, 0.7), rgba(255, 255, 255, 0.76));
+}
+
+.semantic-boundary-grid {
+  margin-top: 18px;
+}
+
+.semantic-boundary-card {
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 18px;
+}
+
+.semantic-boundary-card h3 {
+  margin: 10px 0 0;
+  font-size: 1.5rem;
+}
+
+.semantic-boundary-card--official {
+  background: linear-gradient(180deg, rgba(227, 243, 234, 0.9), rgba(255, 255, 255, 0.78));
+}
+
+.semantic-boundary-card--explanatory {
+  background: linear-gradient(180deg, rgba(255, 241, 207, 0.7), rgba(255, 255, 255, 0.78));
 }
 
 .explainability-grid {
@@ -683,7 +712,8 @@ textarea:focus-visible {
 
   .stock-detail-badges,
   .detail-snapshot-grid,
-  .rps-legend {
+  .rps-legend,
+  .semantic-boundary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

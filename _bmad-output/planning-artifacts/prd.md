@@ -113,8 +113,8 @@ Technical success requires:
 - Japan equities only
 - End-of-day historical data ingestion and update workflow
 - Strategy parameter input from the web UI
-- RPS calculation and visualization for 50-day, 120-day, and 250-day periods
-- threshold-based highlighting for RPS conditions
+- RPS calculation and visualization for 50-day, 120-day, and 250-day periods using one approved business definition across screening, charting, and backtesting
+- threshold-based highlighting for RPS conditions using traceable backend-derived indicator history rather than fabricated frontend geometry
 - 52-week-high proximity screening
 - candlestick chart with RPS panel below the main chart
 - screen results list
@@ -146,7 +146,7 @@ Technical success requires:
 
 The primary user is a self-directed investor using the product to research Japan equities after the market close. The user opens the web app with a specific strategy in mind and adjusts the screening parameters for RPS and proximity to 52-week highs. The user runs the screen and receives a list of matching stocks.
 
-The user opens an individual stock from the result list and reviews the candlestick chart together with the RPS panel. The product shows not only that the stock passed, but why it passed. The user can inspect the exact condition values, including the relevant RPS values, threshold states, and the stock's proximity to its 52-week high. This is the critical trust-building moment: the product turns a screening output into something the user can verify visually and numerically.
+The user opens an individual stock from the result list and reviews the candlestick chart together with the RPS panel. The product shows not only that the stock passed, but why it passed. The user can inspect the exact condition values, including the relevant RPS values, threshold states, and the stock's proximity to its 52-week high. Any displayed RPS history must come from the same approved semantic definition used by screening and backtesting, so the chart remains a trustworthy verification surface rather than an illustrative approximation. This is the critical trust-building moment: the product turns a screening output into something the user can verify visually and numerically.
 
 If the setup looks valid, the user adds the stock to a watchlist and records a note, the observation reason, and the date it was added. The journey succeeds when the user leaves the session with a smaller set of candidates worth monitoring and enough context to remember why each one matters.
 
@@ -154,7 +154,7 @@ If the setup looks valid, the user adds the stock to a watchlist and records a n
 
 The primary user sometimes sees a stock in the result list that appears wrong, weak, or inconsistent with the intended method. Instead of abandoning the screen, the user opens the stock detail view to investigate.
 
-The product shows the exact rule breakdown for the stock. The user can see which conditions passed, which thresholds were used, and the underlying values that caused the stock to qualify. The user reviews the chart, RPS behavior, and near-52-week-high context to determine whether the problem is in the strategy definition, the selected parameters, or the data itself.
+The product shows the exact rule breakdown for the stock. The user can see which conditions passed, which thresholds were used, and the underlying values that caused the stock to qualify. The user reviews the chart, RPS behavior, and near-52-week-high context to determine whether the problem is in the strategy definition, the selected parameters, or the data itself. If the UI shows observational annotations on the RPS chart, the product must distinguish them clearly from the official screening signals.
 
 This journey succeeds when the user can explain why the stock qualified and decide what action to take next: keep it, reject it, or refine the strategy. The emotional outcome is confidence rather than doubt.
 
@@ -395,8 +395,8 @@ The watchlist workflow must behave like a research notebook rather than a bookma
 
 ### Indicator & Signal Evaluation
 
-- FR15: The product can calculate 50-day, 120-day, and 250-day RPS-related values for supported securities.
-- FR16: The product can determine whether at least one supported RPS line satisfies the strategy threshold condition.
+- FR15: The product can calculate 50-day, 120-day, and 250-day RPS-related values for supported securities using a documented business definition, a fixed ranking universe policy, and a consistent normalization rule.
+- FR16: The product can determine whether at least one supported RPS line satisfies the strategy threshold condition using the same approved definition and data semantics used by charting and backtesting.
 - FR17: The product can calculate each security's proximity to its 52-week high.
 - FR18: The product can determine whether a security satisfies the configured 52-week-high proximity condition.
 - FR19: The product can evaluate whether a security passes the full MVP strategy based on the active conditions.
@@ -411,12 +411,13 @@ The watchlist workflow must behave like a research notebook rather than a bookma
 - FR25: The product can show the underlying values used to determine whether each condition passed.
 - FR26: The user can tell from the result detail why a stock qualified for the screen.
 - FR27: The product can associate each result set with the run date and parameter set that produced it.
+- FR55: The user can select an available historical trade date for a screening run when reviewing past market states.
 
 ### Chart Review & Explainability
 
 - FR28: The user can view a candlestick chart for a supported security.
-- FR29: The user can view RPS information in a panel below the main price chart.
-- FR30: The product can visually distinguish RPS conditions that meet the configured threshold.
+- FR29: The user can view RPS information in a panel below the main price chart using traceable backend-derived indicator history.
+- FR30: The product can visually distinguish RPS conditions that meet the configured threshold while keeping official screening signals separate from explanatory-only chart annotations.
 - FR31: The user can inspect chart-adjacent summaries of the strategy condition values.
 - FR32: The user can review the stock's 52-week-high proximity state from the stock detail workflow.
 - FR33: The product can present chart review and condition breakdown information as part of the same stock analysis flow.
@@ -494,3 +495,4 @@ The watchlist workflow must behave like a research notebook rather than a bookma
 - The system shall distinguish complete data, partial data, and unavailable data states in a way the user can inspect.
 - The system shall preserve traceability from each qualified stock result back to the stored values and thresholds that produced it.
 - The system shall keep future broker integration concerns isolated from the MVP research data workflows so that research reproducibility is not degraded.
+- The authoritative MVP definition for RPS semantics, ranking universe, price policy, and non-computable handling is frozen in `_bmad-output/planning-artifacts/rps-semantics-contract.md`.

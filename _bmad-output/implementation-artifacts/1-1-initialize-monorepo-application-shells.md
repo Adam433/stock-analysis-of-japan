@@ -1,23 +1,23 @@
-# Story 1.1: Initialize Monorepo Application Shells
+# 故事 1.1: Initialize Monorepo Application Shells
 
-Status: done
+状态: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
-## Story
+## 用户故事
 
 As a developer,  
 I want a monorepo with separate web and API applications initialized,  
-so that all subsequent features have a stable implementation foundation.
+以便all subsequent features have a stable implementation foundation。
 
-## Acceptance Criteria
+## 验收标准
 
-1. Given a fresh repository, when the project is initialized, then separate `apps/web` and `apps/api` applications exist following the approved architecture structure.
-2. Given a fresh repository, when the project is initialized, then the frontend uses the approved Next.js TypeScript starter conventions.
-3. Given a fresh repository, when the project is initialized, then the backend uses the approved custom Python project structure.
-4. Given the initialized repository, when a developer reviews the root structure, then shared configuration, data, scripts, and `_bmad-output` locations are present or reserved according to the architecture document.
+1. 假设a fresh repository，当the project is initialized，那么separate `apps/web` and `apps/api` applications exist following the approved architecture structure。
+2. 假设a fresh repository，当the project is initialized，那么the frontend uses the approved Next.js TypeScript starter conventions。
+3. 假设a fresh repository，当the project is initialized，那么the backend uses the approved custom Python project structure。
+4. 假设the initialized repository，当a developer reviews the root structure，那么shared configuration, data, scripts, and `_bmad-output` locations are present or reserved according to the architecture document。
 
-## Tasks / Subtasks
+## 任务 / 子任务
 
 - [x] Create the monorepo root scaffolding without extending legacy prototype code. (AC: 1, 4)
   - [x] Add or update root workspace files needed for a two-app monorepo, including a `pnpm-workspace.yaml`.
@@ -40,7 +40,7 @@ so that all subsequent features have a stable implementation foundation.
   - [x] Verify the backend project metadata is valid and the package layout is importable or runnable via `uv`.
   - [x] Document any deviations required to keep the starter tools aligned with the architecture.
 
-## Dev Notes
+## 开发备注
 
 - This story is foundation-only. It creates app shells and repo structure, not business features.
 - The product is a local-first Japan-equity research tool whose MVP depends on a trustworthy data and application foundation. Keep this story narrowly focused on scaffolding that enables later ingestion, screening, chart, watchlist, and backtest work. [Source: _bmad-output/planning-artifacts/prd.md:38-42]
@@ -140,13 +140,13 @@ so that all subsequent features have a stable implementation foundation.
 - uv project initialization docs: https://docs.astral.sh/uv/concepts/projects/init/
 - uv CLI reference: https://docs.astral.sh/uv/reference/cli/
 
-## Dev Agent Record
+## 开发代理记录
 
-### Agent Model Used
+### 使用的代理模型
 
 GPT-5.4
 
-### Debug Log References
+### 调试日志参考
 
 - `node -e "JSON.parse(...)"` validated root and web JSON configuration files.
 - `python3 apps/api/src/stockanalyse_api/main.py` verified the backend scaffold entrypoint.
@@ -154,7 +154,7 @@ GPT-5.4
 - Next.js build succeeded with `next build --webpack`; Turbopack build was avoided in the verification script because the sandbox previously blocked Turbopack child-process behavior.
 - Post-review follow-up: switched root workspace execution to npm, pinned frontend dependency versions, and removed stale legacy tests.
 
-### Completion Notes List
+### 完成说明
 
 - Ultimate context engine analysis completed - comprehensive developer guide created.
 - Resolved the backend scaffold ambiguity by preferring a packaged `src` layout consistent with the approved architecture tree.
@@ -166,7 +166,7 @@ GPT-5.4
 - Verified frontend lint/build and backend bootstrap entrypoint successfully.
 - Post-review fixes applied: reproducible dependency versions, tracked workspace lockfile strategy, and removed obsolete top-level tests.
 
-### File List
+### 文件清单
 
 - _bmad-output/implementation-artifacts/1-1-initialize-monorepo-application-shells.md
 - .gitignore
@@ -211,7 +211,7 @@ GPT-5.4
 - scripts/maintenance/.gitkeep
 - package-lock.json
 
-### Change Log
+### 变更日志
 
 - 2026-04-13: Implemented Story 1.1 monorepo scaffolding for `apps/web` and `apps/api`, added workspace files, reserved shared directories, and completed smoke verification.
 - 2026-04-13: Applied review follow-up fixes to pin frontend dependency versions, align root scripts with npm workspaces, and remove legacy test artifacts.
