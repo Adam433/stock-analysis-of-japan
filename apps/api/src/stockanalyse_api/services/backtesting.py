@@ -70,6 +70,8 @@ def _serialize(run: BacktestRun, configuration: StrategyConfiguration) -> Backte
             "id": configuration.id,
             "version": configuration.version,
             "rps_threshold": configuration.rps_threshold,
+            "selected_rps_windows": [int(part) for part in configuration.selected_rps_windows.split(",") if part],
+            "min_rps_lines_required": configuration.min_rps_lines_required,
             "high_proximity_threshold_pct": f"{configuration.high_proximity_threshold_pct:.2f}",
         },
     )

@@ -16,7 +16,6 @@ class UniverseManifestSnapshot:
     universe_filter: str
     symbol_count: int
     updated_at: str | None
-    source_path: str
 
 
 @dataclass(slots=True)
@@ -59,7 +58,6 @@ def _read_universe_manifest_snapshot(path: Path) -> UniverseManifestSnapshot | N
         universe_filter="tse_common_stock",
         symbol_count=len(symbols),
         updated_at=updated_at,
-        source_path=str(path),
     )
 
 

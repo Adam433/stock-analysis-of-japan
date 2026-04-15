@@ -16,16 +16,10 @@ async function loadStockDetail(
   instrumentId: string,
   screenRunId: string | undefined,
 ): Promise<{ data: StockDetailResponse["stock_detail"] | null; error: string | null }> {
-  if (!screenRunId) {
-    return {
-      data: null,
-      error: "缺少 screen_run_id，无法将个股详情与对应的筛选结果对齐。",
-    };
-  }
-
   try {
+    const query = screenRunId ? `?screen_run_id=${screenRunId}` : "";
     const response = await fetch(
-      `${apiBaseUrl}/stocks/${instrumentId}/detail?screen_run_id=${screenRunId}`,
+      `${apiBaseUrl}/stocks/${instrumentId}/detail${query}`,
       { cache: "no-store" },
     );
 

@@ -15,6 +15,8 @@ class StrategyConfiguration(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     rps_threshold: Mapped[int] = mapped_column(Integer, nullable=False)
+    selected_rps_windows: Mapped[str] = mapped_column(String(64), nullable=False, default="50,120,250")
+    min_rps_lines_required: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     high_proximity_threshold_pct: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
 

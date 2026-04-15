@@ -9,6 +9,8 @@ from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
 from stockanalyse_api.domain.screens.models import ScreenRun, ScreenRunResult, StrategyConfiguration
 
+DEFAULT_STOCK_DETAIL_CANDLE_WINDOW = 250
+
 
 @dataclass(slots=True)
 class StockDetailPayload:
@@ -23,12 +25,64 @@ class StockDetailPayload:
         return asdict(self)
 
 
-def get_stock_detail_payload(session, *, instrument_id: int, screen_run_id: int) -> StockDetailPayload | None:
+def resolve_latest_stock_detail_screen_run_id(session, *, instrument_id: int) -> int | None:
+    latest_passed_run_id = session.execute(
+        select(ScreenRunResult.screen_run_id)
+        .join(ScreenRun, ScreenRun.id == ScreenRunResult.screen_run_id)
+        .where(
+            ScreenRunResult.instrument_id == instrument_id,
+            ScreenRunResult.passed.is_(True),
+        )
+        .order_by(ScreenRun.trade_date.desc(), ScreenRun.executed_at.desc(), ScreenRun.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if latest_passed_run_id is not None:
+        return latest_passed_run_id
+
+    return session.execute(
+        select(ScreenRunResult.screen_run_id)
+        .join(ScreenRun, ScreenRun.id == ScreenRunResult.screen_run_id)
+        .where(ScreenRunResult.instrument_id == instrument_id)
+        .order_by(ScreenRun.trade_date.desc(), ScreenRun.executed_at.desc(), ScreenRun.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def get_stock_detail_payload(
+    session,
+    *,
+    instrument_id: int,
+    screen_run_id: int | None = None,
+) -> StockDetailPayload | None:
     instrument = session.get(Instrument, instrument_id)
-    screen_run = session.get(ScreenRun, screen_run_id)
+    resolved_screen_run_id = screen_run_id or resolve_latest_stock_detail_screen_run_id(
+        session,
+        instrument_id=instrument_id,
+    )
+    if resolved_screen_run_id is None:
+        return None
+
+    screen_run = session.get(ScreenRun, resolved_screen_run_id)
     if instrument is None or screen_run is None:
         return None
 
+    return _build_stock_detail_payload(
+        session,
+        instrument=instrument,
+        screen_run=screen_run,
+        instrument_id=instrument_id,
+        screen_run_id=resolved_screen_run_id,
+    )
+
+
+def _build_stock_detail_payload(
+    session,
+    *,
+    instrument: Instrument,
+    screen_run: ScreenRun,
+    instrument_id: int,
+    screen_run_id: int,
+) -> StockDetailPayload | None:
     result = session.execute(
         select(ScreenRunResult)
         .where(
@@ -57,7 +111,7 @@ def get_stock_detail_payload(session, *, instrument_id: int, screen_run_id: int)
             MarketDataDaily.trade_date <= screen_run.trade_date,
         )
         .order_by(MarketDataDaily.trade_date.desc())
-        .limit(120)
+        .limit(DEFAULT_STOCK_DETAIL_CANDLE_WINDOW)
     ).scalars().all()
     candle_rows.reverse()
 

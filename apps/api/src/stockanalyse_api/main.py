@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,10 +11,22 @@ from stockanalyse_api.api.routes import screening_router
 from stockanalyse_api.api.routes import stocks_router
 from stockanalyse_api.api.routes import strategy_config_router
 from stockanalyse_api.api.routes import watchlist_router
+from stockanalyse_api.services.operations.auto_refresh import AutoRefreshRuntime
 
 
-def create_app() -> FastAPI:
-    app = FastAPI(title="stockAnalyse API")
+def create_app(*, auto_refresh_runtime: AutoRefreshRuntime | None = None) -> FastAPI:
+    runtime = auto_refresh_runtime or AutoRefreshRuntime()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        app.state.auto_refresh_runtime = runtime
+        await runtime.start()
+        try:
+            yield
+        finally:
+            await runtime.stop()
+
+    app = FastAPI(title="stockAnalyse API", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[

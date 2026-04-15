@@ -875,3 +875,64 @@ The highest-risk consistency points are covered: naming, API format, data semant
 - initialize the frontend and backend application shells
 - establish the backend data model and migration path
 - implement ingestion, normalization, and derived-facts materialization before chart and backtest UX
+
+## 2026-04-15 Follow-Up Architecture Addendum
+
+This addendum records approved scope adjustments discovered during real usage after the initial planning set was completed.
+
+### Chart Data Serving Boundaries
+
+- Stock detail chart payloads must provide enough historical depth for routine pattern review rather than only a narrow recent slice.
+- The preferred default is a larger backend-defined history window.
+- If payload size or response latency becomes a constraint, the backend may instead expose a bounded incremental loading contract for older chart history.
+- The frontend must not infer authoritative chart history windows on its own.
+
+### Chart Readability Rules
+
+- RPS line labels must not cover the most recent plotted values where the user validates the latest setup.
+- Label placement is a presentation concern, but the backend remains the source of truth for the plotted lines and official threshold state.
+- End-of-day chart date presentation should use localized date-only formatting in the frontend contract surface.
+
+### Screening Parameterization Boundaries
+
+- The approved RPS business definition remains fixed.
+- What becomes configurable is the active set of approved RPS lookback windows and the minimum number of selected lines that must satisfy the threshold.
+- This change does not authorize arbitrary user-defined factor semantics.
+- Implementation must choose one bounded strategy:
+  - pre-materialize an approved set of windows, or
+  - compute additional approved windows from stored prices on demand, or
+  - support a constrained hybrid approach
+- The selected strategy must preserve consistency across screening, chart review, and backtesting.
+
+### Operations and Refresh Automation
+
+- Refresh execution state can no longer be treated as purely manual or observational.
+- The backend runtime may initialize or advance refresh execution status automatically at startup.
+- If the backend remains running, it must support a daily automation path that advances refresh execution status on the expected cadence.
+- This automation must be designed to coexist safely with:
+  - SQLite locking behavior
+  - existing manual maintenance commands
+  - explicit refresh jobs
+
+### Data Health Semantics
+
+- Data health responses must report these concepts separately:
+  - stored market-data coverage
+  - approved common-stock universe size
+  - universe manifest last-updated timestamp
+  - refresh execution state
+- Raw local filesystem paths are implementation details and should not be the primary trust signal in user-facing health summaries.
+- Common-stock universe counts must be derived from the approved manifest semantics rather than incidental display formatting or partial subsets.
+
+### Watchlist Workflow Continuity
+
+- Watchlist entries are not terminal records; they are part of the research workflow.
+- The architecture therefore treats watchlist-to-stock-detail navigation as a first-class continuity path rather than a convenience-only link.
+
+### Impacted Domains
+
+- `operations` / `services/health`
+- `screens` and derived-indicator evaluation
+- `chart_data`
+- `watchlists`
+- shared frontend shell and stock-detail components

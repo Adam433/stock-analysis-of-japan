@@ -11,10 +11,14 @@ type StrategyConfigurationResponse = {
     version: number;
     rps_threshold: number;
     high_proximity_threshold_pct: string;
+    selected_rps_windows: number[];
+    min_rps_lines_required: number;
   };
   validation?: {
     rps_threshold: { min: number; max: number; default: number };
     high_proximity_threshold_pct: { min: string; max: string; default: string };
+    selected_rps_windows: { approved: number[]; default: number[] };
+    min_rps_lines_required: { min: number; max: number; default: number };
   };
 };
 
@@ -36,6 +40,8 @@ type ScreenRun = {
     version: number;
     rps_threshold: number;
     high_proximity_threshold_pct: string;
+    selected_rps_windows: number[];
+    min_rps_lines_required: number;
   };
   qualified_results: Array<{
     instrument_id: number;
@@ -54,6 +60,15 @@ type ScreenRun = {
 
 type LoadLatestRunResult = {
   data: ScreenRun | null;
+  error: string | null;
+};
+
+type ScreeningTradeDateOption = {
+  trade_date: string;
+};
+
+type LoadTradeDatesResult = {
+  data: ScreeningTradeDateOption[];
   error: string | null;
 };
 
@@ -112,11 +127,43 @@ async function loadLatestScreenRun(apiBaseUrl: string): Promise<LoadLatestRunRes
   }
 }
 
+async function loadScreeningTradeDates(apiBaseUrl: string): Promise<LoadTradeDatesResult> {
+  try {
+    const response = await fetch(`${apiBaseUrl}/screen/trade-dates`, {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return {
+        data: [],
+        error: `无法加载筛选交易日列表（${response.status}）。`,
+      };
+    }
+
+    const payload = (await response.json()) as { trade_dates: ScreeningTradeDateOption[] };
+    return {
+      data: payload.trade_dates,
+      error: null,
+    };
+  } catch {
+    return {
+      data: [],
+      error: "筛选交易日接口不可达，将继续默认使用最新可用交易日。",
+    };
+  }
+}
+
 export default async function ScreenConfigurationPage() {
   const apiBaseUrl = await resolveApiBaseUrl();
-  const [{ data, error }, { data: latestRun, error: latestRunError }, { health, error: healthError }] = await Promise.all([
+  const [
+    { data, error },
+    { data: latestRun, error: latestRunError },
+    { data: tradeDates, error: tradeDateError },
+    { health, error: healthError },
+  ] = await Promise.all([
     loadStrategyConfiguration(apiBaseUrl),
     loadLatestScreenRun(apiBaseUrl),
+    loadScreeningTradeDates(apiBaseUrl),
     loadMarketDataHealth(apiBaseUrl),
   ]);
 
@@ -138,6 +185,8 @@ export default async function ScreenConfigurationPage() {
         initialError={error}
         initialRun={latestRun}
         initialRunError={latestRunError}
+        initialTradeDates={tradeDates}
+        initialTradeDateError={tradeDateError}
       />
     </main>
   );

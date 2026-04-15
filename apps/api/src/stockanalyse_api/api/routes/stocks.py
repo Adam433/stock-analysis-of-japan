@@ -9,7 +9,7 @@ router = APIRouter(prefix="/stocks", tags=["stocks"])
 
 
 @router.get("/{instrument_id}/detail")
-def read_stock_detail(instrument_id: int, screen_run_id: int) -> dict[str, object]:
+def read_stock_detail(instrument_id: int, screen_run_id: int | None = None) -> dict[str, object]:
     with SessionLocal() as session:
         payload = get_stock_detail_payload(
             session,
@@ -18,6 +18,6 @@ def read_stock_detail(instrument_id: int, screen_run_id: int) -> dict[str, objec
         )
 
     if payload is None:
-        raise HTTPException(status_code=404, detail="Stock detail payload not found for the given run.")
+        raise HTTPException(status_code=404, detail="Stock detail payload not found for the given instrument context.")
 
     return {"stock_detail": payload.to_dict()}

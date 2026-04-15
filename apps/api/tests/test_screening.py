@@ -17,7 +17,12 @@ from stockanalyse_api.services.rps_semantics import (
     APPROVED_RPS_DEFINITION_VERSION,
     LEGACY_UNRECORDED_RPS_DEFINITION_VERSION,
 )
-from stockanalyse_api.services.screening import execute_screen_run, get_latest_screen_run, get_screen_run
+from stockanalyse_api.services.screening import (
+    execute_screen_run,
+    get_latest_screen_run,
+    get_screen_run,
+    list_available_screening_trade_dates,
+)
 from stockanalyse_api.services.strategy_config import get_active_strategy_configuration, save_strategy_configuration
 
 
@@ -92,6 +97,8 @@ class ScreeningTests(unittest.TestCase):
             save_strategy_configuration(
                 session,
                 rps_threshold=90,
+                selected_rps_windows=[50, 120, 250],
+                min_rps_lines_required=1,
                 high_proximity_threshold_pct=Decimal("5.00"),
             )
             materialize_derived_indicator_facts(session)
@@ -108,6 +115,8 @@ class ScreeningTests(unittest.TestCase):
         self.assertEqual(summary.total_candidates, 3)
         self.assertEqual(summary.qualified_count, 1)
         self.assertEqual(summary.parameter_set["version"], 2)
+        self.assertEqual(summary.parameter_set["selected_rps_windows"], [50, 120, 250])
+        self.assertEqual(summary.parameter_set["min_rps_lines_required"], 1)
         self.assertEqual(summary.rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
         self.assertEqual(len(summary.qualified_results), 1)
         self.assertEqual(summary.qualified_results[0]["symbol"], "7203")
@@ -126,6 +135,7 @@ class ScreeningTests(unittest.TestCase):
         assert fetched is not None
         self.assertEqual(fetched.id, created.id)
         self.assertEqual(fetched.parameter_set["rps_threshold"], 90)
+        self.assertEqual(fetched.parameter_set["selected_rps_windows"], [50, 120, 250])
         self.assertEqual(fetched.rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
         self.assertEqual(fetched.qualified_results[0]["rps_condition_passed"], True)
         self.assertEqual(fetched.qualified_results[0]["high_proximity_condition_passed"], True)
@@ -150,6 +160,51 @@ class ScreeningTests(unittest.TestCase):
         assert latest is not None
         self.assertEqual(latest.id, second.id)
         self.assertEqual(latest.rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
+
+    def test_execute_screen_run_accepts_explicit_available_trade_date(self) -> None:
+        self._seed_market_data()
+
+        with self.session_factory() as session:
+            available_dates = list_available_screening_trade_dates(session)
+            selected_trade_date = date.fromisoformat(available_dates[-1].trade_date)
+            summary = execute_screen_run(session, trade_date=selected_trade_date)
+
+        self.assertEqual(summary.trade_date, selected_trade_date.isoformat())
+
+    def test_execute_screen_run_respects_selected_windows_and_minimum_count(self) -> None:
+        self._seed_market_data()
+
+        with self.session_factory() as session:
+            save_strategy_configuration(
+                session,
+                rps_threshold=90,
+                selected_rps_windows=[50, 120],
+                min_rps_lines_required=2,
+                high_proximity_threshold_pct=Decimal("5.00"),
+            )
+            summary = execute_screen_run(session)
+
+        self.assertEqual(summary.parameter_set["selected_rps_windows"], [50, 120])
+        self.assertEqual(summary.parameter_set["min_rps_lines_required"], 2)
+
+    def test_execute_screen_run_rejects_unavailable_trade_date(self) -> None:
+        self._seed_market_data()
+
+        with self.session_factory() as session:
+            with self.assertRaisesRegex(
+                ValueError,
+                "Selected screening trade date is not available in derived indicator facts.",
+            ):
+                execute_screen_run(session, trade_date=date(1999, 1, 1))
+
+    def test_list_available_screening_trade_dates_returns_descending_dates(self) -> None:
+        self._seed_market_data()
+
+        with self.session_factory() as session:
+            trade_dates = list_available_screening_trade_dates(session)
+
+        self.assertGreater(len(trade_dates), 1)
+        self.assertGreaterEqual(trade_dates[0].trade_date, trade_dates[-1].trade_date)
 
     def test_execute_screen_run_requires_derived_facts_without_persisting_run(self) -> None:
         with self.session_factory() as session:

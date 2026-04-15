@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy import select
@@ -13,6 +13,7 @@ from stockanalyse_api.services.rps_semantics import (
     APPROVED_RPS_DEFINITION_VERSION,
     normalize_rps_definition_version,
 )
+from stockanalyse_api.services.strategy_config import _deserialize_selected_rps_windows
 
 
 @dataclass(slots=True)
@@ -32,12 +33,27 @@ class ScreenRunSummary:
         return asdict(self)
 
 
+@dataclass(slots=True)
+class ScreeningTradeDateOption:
+    trade_date: str
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
 def _quantize(value: Decimal, pattern: str) -> Decimal:
     return value.quantize(Decimal(pattern), rounding=ROUND_HALF_UP)
 
 
 def _latest_trade_date(session) -> datetime.date | None:
     return session.execute(select(DerivedIndicatorDaily.trade_date).order_by(DerivedIndicatorDaily.trade_date.desc()).limit(1)).scalar_one_or_none()
+
+
+def list_available_screening_trade_dates(session) -> list[ScreeningTradeDateOption]:
+    trade_dates = session.execute(
+        select(DerivedIndicatorDaily.trade_date).distinct().order_by(DerivedIndicatorDaily.trade_date.desc())
+    ).scalars().all()
+    return [ScreeningTradeDateOption(trade_date=trade_date.isoformat()) for trade_date in trade_dates]
 
 
 def _active_configuration(session) -> StrategyConfiguration:
@@ -53,11 +69,22 @@ def _active_configuration(session) -> StrategyConfiguration:
 
 
 def evaluate_indicator_snapshot(indicator_row: DerivedIndicatorDaily, configuration: StrategyConfiguration) -> dict[str, object]:
-    rps_values = [
-        value for value in (indicator_row.rps_50, indicator_row.rps_120, indicator_row.rps_250) if value is not None
+    selected_windows = _deserialize_selected_rps_windows(configuration.selected_rps_windows)
+    rps_value_by_window = {
+        50: indicator_row.rps_50,
+        120: indicator_row.rps_120,
+        250: indicator_row.rps_250,
+    }
+    selected_rps_values = [
+        rps_value_by_window[window] for window in selected_windows if rps_value_by_window[window] is not None
     ]
-    best_rps_value = max(rps_values) if rps_values else None
-    rps_condition_passed = best_rps_value is not None and best_rps_value >= configuration.rps_threshold
+    satisfied_windows = [
+        window
+        for window in selected_windows
+        if rps_value_by_window[window] is not None and rps_value_by_window[window] >= configuration.rps_threshold
+    ]
+    selected_best_rps_value = max(selected_rps_values) if selected_rps_values else None
+    rps_condition_passed = len(satisfied_windows) >= configuration.min_rps_lines_required
 
     proximity_limit = Decimal("1") - (configuration.high_proximity_threshold_pct / Decimal("100"))
     high_proximity_ratio = indicator_row.high_proximity_ratio
@@ -70,8 +97,11 @@ def evaluate_indicator_snapshot(indicator_row: DerivedIndicatorDaily, configurat
         max_drawdown_from_high_pct = _quantize((Decimal("1") - high_proximity_ratio) * Decimal("100"), "0.01")
 
     return {
-        "best_rps_value": best_rps_value,
+        "best_rps_value": selected_best_rps_value,
         "rps_condition_passed": rps_condition_passed,
+        "selected_rps_windows": selected_windows,
+        "min_rps_lines_required": configuration.min_rps_lines_required,
+        "satisfied_rps_window_count": len(satisfied_windows),
         "high_proximity_ratio": high_proximity_ratio,
         "high_proximity_condition_passed": high_proximity_condition_passed,
         "max_drawdown_from_high_pct": max_drawdown_from_high_pct,
@@ -79,24 +109,26 @@ def evaluate_indicator_snapshot(indicator_row: DerivedIndicatorDaily, configurat
     }
 
 
-def execute_screen_run(session) -> ScreenRunSummary:
+def execute_screen_run(session, *, trade_date: date | None = None) -> ScreenRunSummary:
     configuration = _active_configuration(session)
-    trade_date = _latest_trade_date(session)
-    if trade_date is None:
+    selected_trade_date = trade_date or _latest_trade_date(session)
+    if selected_trade_date is None:
         raise ValueError("No derived indicator facts are available for screening.")
 
     indicators = session.execute(
         select(DerivedIndicatorDaily, Instrument)
         .join(Instrument, Instrument.id == DerivedIndicatorDaily.instrument_id)
-        .where(DerivedIndicatorDaily.trade_date == trade_date)
+        .where(DerivedIndicatorDaily.trade_date == selected_trade_date)
         .order_by(Instrument.symbol.asc())
     ).all()
     if not indicators:
+        if trade_date is not None:
+            raise ValueError("Selected screening trade date is not available in derived indicator facts.")
         raise ValueError("No derived indicator facts are available for the latest trade date.")
 
     screen_run = ScreenRun(
         strategy_configuration_id=configuration.id,
-        trade_date=trade_date,
+        trade_date=selected_trade_date,
         executed_at=datetime.now(UTC),
         rps_definition_version=APPROVED_RPS_DEFINITION_VERSION,
         total_candidates=len(indicators),
@@ -122,7 +154,7 @@ def execute_screen_run(session) -> ScreenRunSummary:
         result = ScreenRunResult(
             screen_run_id=screen_run.id,
             instrument_id=instrument.id,
-            trade_date=trade_date,
+            trade_date=selected_trade_date,
             passed=passed,
             rps_50=indicator_row.rps_50,
             rps_120=indicator_row.rps_120,
@@ -143,7 +175,7 @@ def execute_screen_run(session) -> ScreenRunSummary:
                     "instrument_id": instrument.id,
                     "symbol": instrument.symbol,
                     "exchange": instrument.exchange,
-                    "trade_date": trade_date.isoformat(),
+                    "trade_date": selected_trade_date.isoformat(),
                     "best_rps_value": f"{best_rps_value:.2f}" if best_rps_value is not None else None,
                     "rps_threshold": configuration.rps_threshold,
                     "high_proximity_ratio": f"{high_proximity_ratio:.6f}" if high_proximity_ratio is not None else None,
@@ -160,7 +192,7 @@ def execute_screen_run(session) -> ScreenRunSummary:
     return ScreenRunSummary(
         id=screen_run.id,
         strategy_configuration_id=configuration.id,
-        trade_date=trade_date.isoformat(),
+        trade_date=selected_trade_date.isoformat(),
         executed_at=screen_run.executed_at.isoformat(),
         rps_definition_version=normalize_rps_definition_version(screen_run.rps_definition_version),
         total_candidates=screen_run.total_candidates,
@@ -170,6 +202,8 @@ def execute_screen_run(session) -> ScreenRunSummary:
             "id": configuration.id,
             "version": configuration.version,
             "rps_threshold": configuration.rps_threshold,
+            "selected_rps_windows": _deserialize_selected_rps_windows(configuration.selected_rps_windows),
+            "min_rps_lines_required": configuration.min_rps_lines_required,
             "high_proximity_threshold_pct": f"{configuration.high_proximity_threshold_pct:.2f}",
         },
         qualified_results=qualified_results,
@@ -219,6 +253,8 @@ def get_screen_run(session, screen_run_id: int) -> ScreenRunSummary | None:
             "id": configuration.id,
             "version": configuration.version,
             "rps_threshold": configuration.rps_threshold,
+            "selected_rps_windows": _deserialize_selected_rps_windows(configuration.selected_rps_windows),
+            "min_rps_lines_required": configuration.min_rps_lines_required,
             "high_proximity_threshold_pct": f"{configuration.high_proximity_threshold_pct:.2f}",
         },
         qualified_results=qualified_results,

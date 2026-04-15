@@ -98,6 +98,8 @@ class BacktestingTests(unittest.TestCase):
             save_strategy_configuration(
                 session,
                 rps_threshold=90,
+                selected_rps_windows=[50, 120, 250],
+                min_rps_lines_required=1,
                 high_proximity_threshold_pct=Decimal("5.00"),
             )
             materialize_derived_indicator_facts(session)
@@ -115,6 +117,8 @@ class BacktestingTests(unittest.TestCase):
         self.assertEqual(run.end_date, "2024-12-31")
         self.assertEqual(run.rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
         self.assertEqual(run.parameter_set["version"], 1)
+        self.assertEqual(run.parameter_set["selected_rps_windows"], [50, 120, 250])
+        self.assertEqual(run.parameter_set["min_rps_lines_required"], 1)
 
     def test_launch_backtest_run_rejects_invalid_date_range(self) -> None:
         with self.session_factory() as session:

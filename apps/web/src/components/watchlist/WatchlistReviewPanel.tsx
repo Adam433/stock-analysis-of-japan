@@ -68,10 +68,17 @@ export function WatchlistReviewPanel({
               <div className="result-card__title">
                 <div>
                   <p className="status-label">{entry.exchange}</p>
-                  <h3>{entry.symbol}</h3>
+                  <h3>
+                    <Link href={`/stocks/${entry.instrument_id}`} className="result-link">
+                      {entry.symbol}
+                    </Link>
+                  </h3>
                   <p className="status-copy">{entry.name ?? "未命名标的"}</p>
                 </div>
                 <div className="result-card__actions">
+                  <Link href={`/stocks/${entry.instrument_id}`} className="watchlist-link-button">
+                    查看详情
+                  </Link>
                   <Link href={`/screen`} className="watchlist-link-button">
                     返回筛选
                   </Link>

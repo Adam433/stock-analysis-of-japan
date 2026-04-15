@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
@@ -60,6 +61,7 @@ def materialize_derived_indicator_facts(
     session,
     *,
     commit_every_dates: int = DEFAULT_MATERIALIZE_COMMIT_EVERY_DATES,
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
 ) -> dict[str, int]:
     price_history: dict[int, deque[PricePoint]] = defaultdict(
         lambda: deque(maxlen=MAX_HISTORY_WINDOW)
@@ -112,6 +114,15 @@ def materialize_derived_indicator_facts(
         processed_trade_dates += 1
         if processed_trade_dates % commit_every_dates == 0:
             session.commit()
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "trade_date": trade_date.isoformat(),
+                        "processed_trade_dates": processed_trade_dates,
+                        "inserted": inserted,
+                        "updated": updated,
+                    }
+                )
 
         current_date_facts = {}
         current_date_returns = {lookback: {} for lookback in RPS_LOOKBACKS}
@@ -165,4 +176,14 @@ def materialize_derived_indicator_facts(
 
     flush_trade_date(current_trade_date)
     session.commit()
+    if progress_callback is not None and current_trade_date is not None:
+        progress_callback(
+            {
+                "trade_date": current_trade_date.isoformat(),
+                "processed_trade_dates": processed_trade_dates,
+                "inserted": inserted,
+                "updated": updated,
+                "final": True,
+            }
+        )
     return {"inserted": inserted, "updated": updated}

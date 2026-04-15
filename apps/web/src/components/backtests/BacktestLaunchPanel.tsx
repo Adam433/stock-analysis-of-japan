@@ -29,6 +29,8 @@ type BacktestRun = {
     version: number;
     rps_threshold: number;
     high_proximity_threshold_pct: string;
+    selected_rps_windows: number[];
+    min_rps_lines_required: number;
   };
 };
 
@@ -48,6 +50,10 @@ function formatTimestamp(value: string | null): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function formatRpsWindows(windows: number[]): string {
+  return windows.map((window) => `${window} 日`).join(" / ");
 }
 
 export function BacktestLaunchPanel({
@@ -326,6 +332,10 @@ export function BacktestLaunchPanel({
                       RPS {run.parameter_set.rps_threshold} / 距高点{" "}
                       {run.parameter_set.high_proximity_threshold_pct}%
                     </p>
+                    <p className="status-copy">
+                      窗口 {formatRpsWindows(run.parameter_set.selected_rps_windows)} ｜ 至少满足{" "}
+                      {run.parameter_set.min_rps_lines_required} 条
+                    </p>
                   </article>
                 ))}
             </div>
@@ -381,7 +391,9 @@ export function BacktestLaunchPanel({
                       <ul className="signal-list">
                         <li>
                           参数集：RPS {run.parameter_set.rps_threshold} / 距高点{" "}
-                          {run.parameter_set.high_proximity_threshold_pct}%
+                          {run.parameter_set.high_proximity_threshold_pct}% / 窗口{" "}
+                          {formatRpsWindows(run.parameter_set.selected_rps_windows)} / 至少满足{" "}
+                          {run.parameter_set.min_rps_lines_required} 条
                         </li>
                         <li>
                           RPS 语义：{run.rps_definition_version ?? "历史未记录"} ｜ 数据集范围：

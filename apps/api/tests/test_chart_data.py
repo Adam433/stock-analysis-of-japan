@@ -100,6 +100,8 @@ class ChartDataTests(unittest.TestCase):
             save_strategy_configuration(
                 session,
                 rps_threshold=90,
+                selected_rps_windows=[50, 120, 250],
+                min_rps_lines_required=1,
                 high_proximity_threshold_pct=Decimal("5.00"),
             )
             materialize_derived_indicator_facts(session)
@@ -127,9 +129,11 @@ class ChartDataTests(unittest.TestCase):
         self.assertEqual(payload.rule_breakdown["rps_condition"]["threshold"], 90)
         self.assertIsNotNone(payload.rule_breakdown["rps_condition"]["best_rps_value"])
         self.assertEqual(payload.latest_indicator_snapshot["trade_date"], payload.screen_run["trade_date"])
-        self.assertGreaterEqual(len(payload.candlesticks), 100)
+        self.assertEqual(len(payload.candlesticks), 250)
+        self.assertEqual(payload.candlesticks[0]["trade_date"], "2025-01-11")
         self.assertEqual(payload.candlesticks[-1]["trade_date"], payload.screen_run["trade_date"])
-        self.assertGreaterEqual(len(payload.indicator_history), 10)
+        self.assertGreaterEqual(len(payload.indicator_history), 200)
+        self.assertEqual(payload.indicator_history[0]["trade_date"], payload.candlesticks[0]["trade_date"])
         self.assertEqual(payload.indicator_history[-1]["trade_date"], payload.screen_run["trade_date"])
         self.assertIsNotNone(payload.indicator_history[-1]["rps_50"])
         self.assertEqual(
@@ -156,6 +160,20 @@ class ChartDataTests(unittest.TestCase):
             )
 
         self.assertIsNone(payload)
+
+    def test_get_stock_detail_payload_without_explicit_run_uses_latest_available_context(self) -> None:
+        instrument_id, screen_run_id = self._seed_screen_context()
+
+        with self.session_factory() as session:
+            payload = get_stock_detail_payload(
+                session,
+                instrument_id=instrument_id,
+            )
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(payload.screen_run["id"], screen_run_id)
+        self.assertEqual(payload.instrument["id"], instrument_id)
 
     def test_chart_detail_trade_date_stays_aligned_with_single_day_backtest_dataset_context(self) -> None:
         instrument_id, screen_run_id = self._seed_screen_context()

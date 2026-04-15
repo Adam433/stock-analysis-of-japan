@@ -29,11 +29,11 @@ FR8: The product can preserve the parameter values used for each backtest run.
 FR9: The product can maintain a Japan equity universe for screening and backtesting.
 FR10: The product can store end-of-day historical price data for supported securities.
 FR11: The product can update historical market data for the supported universe.
-FR12: The product can expose the freshness state of the stored market data.
+FR12: The product can expose the freshness state, universe manifest freshness, and refresh execution state of the stored market data.
 FR13: The product can identify when market data for a security or date range is incomplete or unavailable.
 FR14: The product can keep screening, charting, and backtesting aligned to the same stored market dataset.
-FR15: The product can calculate 50-day, 120-day, and 250-day RPS-related values for supported securities.
-FR16: The product can determine whether at least one supported RPS line satisfies the strategy threshold condition.
+FR15: The product can calculate approved RPS-related values for supported securities for the configured lookback windows required by screening, chart review, and backtesting.
+FR16: The product can determine whether at least a user-configured minimum number of selected RPS lines satisfy the strategy threshold condition.
 FR17: The product can calculate each security's proximity to its 52-week high.
 FR18: The product can determine whether a security satisfies the configured 52-week-high proximity condition.
 FR19: The product can evaluate whether a security passes the full MVP strategy based on the active conditions.
@@ -45,15 +45,15 @@ FR24: The product can show the exact rule breakdown for a screened security.
 FR25: The product can show the underlying values used to determine whether each condition passed.
 FR26: The user can tell from the result detail why a stock qualified for the screen.
 FR27: The product can associate each result set with the run date and parameter set that produced it.
-FR28: The user can view a candlestick chart for a supported security.
-FR29: The user can view RPS information in a panel below the main price chart.
+FR28: The user can view a candlestick chart for a supported security with sufficient historical context for routine chart review.
+FR29: The user can view RPS information in a panel below the main price chart without important recent data being obscured by fixed labels.
 FR30: The product can visually distinguish RPS conditions that meet the configured threshold.
 FR31: The user can inspect chart-adjacent summaries of the strategy condition values.
 FR32: The user can review the stock's 52-week-high proximity state from the stock detail workflow.
 FR33: The product can present chart review and condition breakdown information as part of the same stock analysis flow.
 FR34: The user can add a screened security to a watchlist.
 FR35: The user can remove a security from a watchlist.
-FR36: The user can view the securities currently stored in the watchlist.
+FR36: The user can view the securities currently stored in the watchlist and navigate from an entry into the corresponding stock detail workflow.
 FR37: The user can record a note for a watchlist entry.
 FR38: The user can record an observation reason for a watchlist entry.
 FR39: The product can retain the date when a security was added to the watchlist.
@@ -65,13 +65,20 @@ FR44: The product can return a reproducible backtest result for the same histori
 FR45: The user can review the result of a completed backtest.
 FR46: The product can associate a backtest result with the parameter set and historical range that produced it.
 FR47: The user can use backtest outputs to compare strategy adjustments across runs.
-FR48: The user can see whether market data is current enough for routine post-close use.
-FR49: The user can see when a data update has failed, is incomplete, or may affect output trustworthiness.
+FR48: The user can see whether market data and the approved universe manifest are current enough for routine post-close use.
+FR49: The user can see when a data update has failed, is incomplete, stale, or has not been automatically advanced as expected.
 FR50: The user can identify whether a suspicious screen or backtest result may be caused by stale or incomplete data.
 FR51: The product can expose enough run and data context to investigate unexpected outputs.
 FR52: The product can keep research workflows separate from any future broker integration workflows.
 FR53: The product can support future addition of new strategy conditions without invalidating the core workflow structure.
 FR54: The product can support future expansion from Japan equities to other supported markets.
+FR55: The user can select an available historical trade date for a screening run when reviewing past market states.
+FR56: The user can configure which approved RPS lookback windows participate in the active screening rule.
+FR57: The user can configure how many selected RPS lines must satisfy the threshold condition for a security to qualify.
+FR58: The backend can trigger or maintain refresh execution state automatically at startup and on the expected daily cadence.
+FR59: The product can display the last-updated timestamp of the approved universe manifest without exposing unnecessary local file path details in the primary UI.
+FR60: The product can present chart dates in a localized, date-only format appropriate for the primary user workflow.
+FR61: The user can navigate directly from a watchlist entry to the corresponding stock detail workflow.
 
 ### NonFunctional Requirements
 
@@ -124,7 +131,7 @@ NFR24: The system shall keep future broker integration concerns isolated from th
 
 ### UX Design Requirements
 
-No UX Design document was provided for extraction.
+- Use the lightweight UX supplement at `_bmad-output/planning-artifacts/ux-followups-2026-04-15.md` for chart history, chart readability, shared navigation, data health hierarchy, screening parameter controls, and watchlist drill-down behavior.
 
 ### FR Coverage Map
 
@@ -186,28 +193,34 @@ FR48: Epic 1 - Japan equity universe and data backbone
 FR49: Epic 1 - Japan equity universe and data backbone
 FR50: Epic 1 - Japan equity universe and data backbone
 FR51: Epic 1 - Japan equity universe and data backbone
+FR58: Epic 1 - Japan equity universe and data backbone
+FR59: Epic 1 - Japan equity universe and data backbone
 
 FR52: Epic 6 - Product hardening and extension boundaries
 FR53: Epic 6 - Product hardening and extension boundaries
 FR54: Epic 6 - Product hardening and extension boundaries
+FR56: Epic 2 - Indicator materialization and screening execution
+FR57: Epic 2 - Indicator materialization and screening execution
+FR60: Epic 3 - Stock detail, chart review, and explainability
+FR61: Epic 4 - Watchlist and research workflow continuity
 
 ## Epic List
 
 ### Epic 1: Project Foundation and Historical Data Backbone
 Establish the monorepo structure, frontend and backend application shells, database and migration setup, Japan equity universe model, end-of-day market data ingestion, normalization, and operational data freshness visibility so all later product flows run on a trustworthy data foundation.
-**FRs covered:** FR9, FR10, FR11, FR12, FR13, FR14, FR48, FR49, FR50, FR51
+**FRs covered:** FR9, FR10, FR11, FR12, FR13, FR14, FR48, FR49, FR50, FR51, FR58, FR59
 
 ### Epic 2: Indicator Materialization and Screening Execution
 Enable the user to define strategy parameters, compute MVP indicators, execute Japan equity screens, and persist explainable screen runs based on stored derived facts rather than ad hoc UI calculations.
-**FRs covered:** FR1, FR2, FR3, FR4, FR5, FR6, FR7, FR15, FR16, FR17, FR18, FR19, FR20, FR21, FR22, FR24, FR25, FR27, FR55
+**FRs covered:** FR1, FR2, FR3, FR4, FR5, FR6, FR7, FR15, FR16, FR17, FR18, FR19, FR20, FR21, FR22, FR24, FR25, FR27, FR55, FR56, FR57
 
 ### Epic 3: Stock Detail, Chart Review, and Explainability
 Enable the user to open a screened stock, inspect candlestick data, review RPS panels, validate 52-week-high proximity, and understand exactly why the stock qualified.
-**FRs covered:** FR23, FR26, FR28, FR29, FR30, FR31, FR32, FR33
+**FRs covered:** FR23, FR26, FR28, FR29, FR30, FR31, FR32, FR33, FR60
 
 ### Epic 4: Watchlist and Research Workflow Continuity
 Enable the user to capture qualified stocks into a watchlist, preserve research context through notes and observation reasons, and revisit watchlist entries as part of the daily review workflow.
-**FRs covered:** FR34, FR35, FR36, FR37, FR38, FR39, FR40
+**FRs covered:** FR34, FR35, FR36, FR37, FR38, FR39, FR40, FR61
 
 ### Epic 5: Backtesting and Strategy Iteration
 Enable the user to run reproducible historical backtests using the same stored data and parameterized conditions as the screen, inspect results, and compare strategy adjustments across runs.
@@ -296,6 +309,48 @@ So that I can trust or question screening and backtest outputs appropriately.
 **Given** a refresh fails or only partially completes
 **When** the user views the product status
 **Then** the failed or partial state is visible and not masked as normal success
+
+### Story 1.6: Correct Universe Manifest Freshness Display and Common-Stock Count Semantics
+
+As a user,
+I want the data health view to report the approved universe manifest clearly and correctly,
+So that I can trust the displayed common-stock coverage and manifest freshness signals.
+
+**FRs implemented:** FR12, FR48, FR49, FR50, FR51, FR59
+
+**Acceptance Criteria:**
+
+**Given** the data health summary is rendered
+**When** the product shows universe-related trust information
+**Then** it displays the approved common-stock universe count using the correct manifest semantics
+**And** it displays the manifest last-updated timestamp as the primary freshness signal
+
+**Given** the manifest source is a local file
+**When** the main data health summary is shown
+**Then** the UI does not rely on exposing the raw local filesystem path as the primary user-facing trust indicator
+
+### Story 1.7: Maintain Refresh Execution State Automatically on Startup and Daily Cadence
+
+As a user,
+I want refresh execution state to advance automatically when the backend starts and continues running,
+So that the product's operational trust view reflects reality without relying on manual intervention.
+
+**FRs implemented:** FR12, FR48, FR49, FR51, FR58
+
+**Acceptance Criteria:**
+
+**Given** the backend service starts
+**When** the runtime initializes
+**Then** the system can create or advance refresh execution state according to the approved automation rules
+
+**Given** the backend remains running across the expected refresh cadence
+**When** the daily automation point is reached
+**Then** the refresh execution state advances automatically
+**And** the resulting status is visible through the data health workflow
+
+**Given** an automatic refresh transition fails or is skipped
+**When** the user inspects product status
+**Then** the state is surfaced explicitly rather than appearing as a silent success
 
 ## Epic 2: Indicator Materialization and Screening Execution
 
@@ -438,6 +493,30 @@ So that I can replay the screen against a past market state rather than always u
 **When** a screen run is launched
 **Then** the product continues to default to the latest available derived-fact trade date
 
+### Story 2.8: Parameterize RPS Windows and Minimum Satisfied-Line Count
+
+As a user,
+I want to choose which approved RPS windows participate in the strategy and how many must pass,
+So that the screening rule matches the way I actually iterate on the method.
+
+**FRs implemented:** FR3, FR5, FR6, FR7, FR15, FR16, FR19, FR20, FR56, FR57
+
+**Acceptance Criteria:**
+
+**Given** the screening configuration workflow
+**When** the user defines the active RPS rule
+**Then** the product accepts a selectable set of approved RPS lookback windows
+**And** the product accepts a minimum satisfied-line count for those selected windows
+
+**Given** the user configures the active RPS rule
+**When** the configuration is validated
+**Then** the system prevents impossible combinations such as requiring more passing lines than the number of selected windows
+
+**Given** a configured screen run is executed
+**When** the backend evaluates the strategy
+**Then** it uses the selected approved RPS windows and the configured minimum satisfied-line count
+**And** the persisted run context records those rule inputs clearly enough for later investigation
+
 ## Epic 3: Stock Detail, Chart Review, and Explainability
 
 Enable the user to open a screened stock, inspect candlestick data, review RPS panels, validate 52-week-high proximity, and understand exactly why the stock qualified.
@@ -541,6 +620,33 @@ So that I do not mistake a helpful chart cue for a rule that actually drove qual
 **When** a displayed state is not part of official screen logic
 **Then** the product labels it as explanatory-only and does not imply that it affected qualification
 
+### Story 3.6: Expand Stock Detail Chart History and Improve Chart Readability
+
+As a user,
+I want the stock detail charts to show enough history and remain readable near the latest data,
+So that I can use the detail page as a trustworthy review surface instead of fighting the visualization.
+
+**FRs implemented:** FR28, FR29, FR30, FR31, FR33, FR60
+
+**Acceptance Criteria:**
+
+**Given** the stock detail page loads
+**When** the candlestick chart is rendered
+**Then** it displays enough historical context for routine chart review instead of only a narrow recent slice
+**And** any later incremental loading behavior follows a defined backend-supported contract
+
+**Given** the RPS panel is rendered
+**When** the latest visible data is inspected
+**Then** fixed labels do not obscure the most recent important plotted values
+
+**Given** chart-adjacent dates are displayed in the stock detail workflow
+**When** the user reviews them
+**Then** they use a localized date-only format appropriate for end-of-day analysis
+
+**Given** shared page shell elements are reused around the stock detail workflow
+**When** the user navigates between major pages
+**Then** the top navigation remains structurally consistent and does not collapse into descriptive page copy
+
 ## Epic 4: Watchlist and Research Workflow Continuity
 
 Enable the user to capture qualified stocks into a watchlist, preserve research context through notes and observation reasons, and revisit watchlist entries as part of the daily review workflow.
@@ -598,6 +704,24 @@ So that my daily research workflow continues across sessions.
 **Given** a watchlist entry is displayed
 **When** the user reviews it
 **Then** the saved note, observation reason, and added date are visible
+
+### Story 4.4: Navigate from Watchlist Entries to Stock Detail
+
+As a user,
+I want each watchlist entry to lead directly to the corresponding stock detail view,
+So that I can continue the research workflow without manually re-searching the symbol.
+
+**FRs implemented:** FR36, FR40, FR61
+
+**Acceptance Criteria:**
+
+**Given** one or more watchlist entries are displayed
+**When** the user selects the stock symbol or primary detail affordance
+**Then** the product opens the corresponding stock detail workflow for that canonical instrument
+
+**Given** a watchlist entry contains saved note and observation context
+**When** the user drills into stock detail
+**Then** the navigation preserves enough context that the user can continue analysis without losing the relationship to the watchlist review flow
 
 ## Epic 5: Backtesting and Strategy Iteration
 

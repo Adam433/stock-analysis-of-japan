@@ -37,7 +37,6 @@ type MarketDataHealthResponse = {
     universe_filter: string;
     symbol_count: number;
     updated_at: string | null;
-    source_path: string;
   } | null;
 };
 
@@ -171,7 +170,9 @@ export default async function HomePage() {
           <p className="status-meta">
             {universeManifest
               ? `普通股清单：${universeManifest.symbol_count} 只 ｜ 更新于 ${formatTimestamp(universeManifest.updated_at)}`
-              : `部分行：${health?.partial_rows ?? "-"} ｜ 不可用行：${health?.unavailable_rows ?? "-"}`}
+              : health
+                ? "普通股清单：缺失 ｜ 更新时间：缺失"
+                : `部分行：${health?.partial_rows ?? "-"} ｜ 不可用行：${health?.unavailable_rows ?? "-"}`}
           </p>
         </article>
 
@@ -248,7 +249,7 @@ export default async function HomePage() {
           </p>
           <p className="status-copy">
             {universeManifest
-              ? `Universe 清单来源：${universeManifest.source_path}`
+              ? `普通股清单更新时间：${formatTimestamp(universeManifest.updated_at)}`
               : "尚未生成东京证券交易所普通股清单。"}
           </p>
         </article>

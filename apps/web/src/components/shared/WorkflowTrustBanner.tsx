@@ -6,6 +6,17 @@ type WorkflowTrustBannerProps = {
   error: string | null;
 };
 
+function formatTimestamp(value: string | null): string {
+  if (!value) {
+    return "缺失";
+  }
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
 function bannerTone(health: MarketDataHealthResponse | null, error: string | null): string {
   if (error || !health) {
     return "workflow-banner--bad";
@@ -60,8 +71,9 @@ export function WorkflowTrustBanner({
               {health.last_refresh?.status ?? "缺失"}。
             </p>
             <p className="status-copy">
-              东京证券交易所普通股清单 {health.universe_manifest?.symbol_count ?? 0} 只，更新时间{" "}
-              {health.universe_manifest?.updated_at ?? "缺失"}。
+              {health.universe_manifest
+                ? `东京证券交易所普通股清单 ${health.universe_manifest.symbol_count} 只，更新时间 ${formatTimestamp(health.universe_manifest.updated_at)}。`
+                : "东京证券交易所普通股清单缺失，更新时间缺失。"}
             </p>
           </>
         )}

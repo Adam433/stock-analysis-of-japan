@@ -98,6 +98,8 @@ function applySharedChartTheme(chart: IChartApi) {
       borderColor: "rgba(27, 24, 20, 0.08)",
       timeVisible: true,
       secondsVisible: false,
+      rightOffset: 8,
+      fixRightEdge: false,
     },
     crosshair: {
       mode: CrosshairMode.Normal,
@@ -185,19 +187,19 @@ export function StockDetailCharts({
     const rps50Series = rpsChart.addSeries(LineSeries, {
       color: "#0e5a52",
       lineWidth: 3,
-      title: "RPS 50",
+      lastValueVisible: false,
     });
     const rps120Series = rpsChart.addSeries(LineSeries, {
       color: "#c96b2c",
       lineWidth: 2,
       lineStyle: LineStyle.Dashed,
-      title: "RPS 120",
+      lastValueVisible: false,
     });
     const rps250Series = rpsChart.addSeries(LineSeries, {
       color: "#8b2f24",
       lineWidth: 2,
       lineStyle: LineStyle.Dotted,
-      title: "RPS 250",
+      lastValueVisible: false,
     });
 
     rps50Series.setData(buildLineData(indicatorHistory, "rps_50"));

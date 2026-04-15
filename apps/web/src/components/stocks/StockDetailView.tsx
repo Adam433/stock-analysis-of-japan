@@ -92,11 +92,26 @@ function formatTimestamp(value: string): string {
   }).format(new Date(value));
 }
 
+function formatDateOnly(value: string): string {
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    dateStyle: "long",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, day)));
+}
+
 export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
   const bestRpsValue = detail.rule_breakdown.rps_condition.best_rps_value;
   const maxDrawdown = detail.rule_breakdown.high_proximity_condition.max_drawdown_from_high_pct;
   const highProximityRatio = detail.rule_breakdown.high_proximity_condition.high_proximity_ratio;
   const officialRpsStatus = detail.rule_breakdown.rps_condition.passed ? "已通过" : "未通过";
+  const visibleHistoryStartDate = detail.candlesticks[0]?.trade_date ?? detail.screen_run.trade_date;
+  const visibleHistoryEndDate =
+    detail.candlesticks.at(-1)?.trade_date ?? detail.screen_run.trade_date;
   const qualificationSummary = detail.rule_breakdown.passed
     ? `入选：最佳 RPS ${formatNumber(bestRpsValue)} 已突破 ${
         detail.rule_breakdown.rps_condition.threshold
@@ -131,7 +146,7 @@ export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
           <div className="screen-summary-card">
             <p className="status-label">参数集</p>
             <h2>v{detail.screen_run.strategy_configuration_version ?? "?"}</h2>
-            <p className="status-copy">交易日 {detail.screen_run.trade_date}</p>
+            <p className="status-copy">交易日 {formatDateOnly(detail.screen_run.trade_date)}</p>
           </div>
           <div className="screen-summary-card">
             <p className="status-label">观察列表</p>
@@ -179,6 +194,20 @@ export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
             图上的橙色阈值线与 RPS 历史序列用于帮助复核走势；当前 MVP 的正式 RPS
             规则仍只以 `rule_breakdown` 中的最佳 RPS、阈值和通过判定为准。
           </p>
+        </div>
+        <div className="detail-snapshot-grid chart-context-grid">
+          <article className="run-metadata-card">
+            <p className="status-label">筛选交易日</p>
+            <h3>{formatDateOnly(detail.screen_run.trade_date)}</h3>
+            <p className="status-copy">与本次筛选绑定的权威交易日。</p>
+          </article>
+          <article className="run-metadata-card">
+            <p className="status-label">默认历史范围</p>
+            <h3>
+              {formatDateOnly(visibleHistoryStartDate)} 至 {formatDateOnly(visibleHistoryEndDate)}
+            </h3>
+            <p className="status-copy">首屏默认提供更长的历史窗口，便于多月走势复盘。</p>
+          </article>
         </div>
         <div className="semantic-boundary-grid">
           <article className="semantic-boundary-card semantic-boundary-card--official">

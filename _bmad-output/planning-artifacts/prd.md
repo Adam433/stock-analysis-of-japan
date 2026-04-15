@@ -113,12 +113,13 @@ Technical success requires:
 - Japan equities only
 - End-of-day historical data ingestion and update workflow
 - Strategy parameter input from the web UI
-- RPS calculation and visualization for 50-day, 120-day, and 250-day periods using one approved business definition across screening, charting, and backtesting
+- RPS calculation and visualization using one approved business definition across screening, charting, and backtesting, while allowing the active strategy to select from an approved set of configurable lookback windows
 - threshold-based highlighting for RPS conditions using traceable backend-derived indicator history rather than fabricated frontend geometry
 - 52-week-high proximity screening
 - candlestick chart with RPS panel below the main chart
 - screen results list
 - watchlist management
+- direct navigation from watchlist entries into the stock detail workflow
 - historical backtesting for the supported strategy conditions
 - reproducible backtest outputs for the same parameter set
 
@@ -170,7 +171,7 @@ This journey succeeds when the user can move from intuition to evidence. The pro
 
 Even in a single-user product, the system has an operational journey. End-of-day data for Japan equities must update reliably. If an update fails, produces stale data, or leaves part of the universe incomplete, the user needs clear visibility into that state.
 
-The product exposes data freshness or update status clearly enough that the user knows whether current screen and backtest outputs are trustworthy. If needed, the user can re-run an update or identify that a screen result may be based on incomplete data.
+The product exposes data freshness or update status clearly enough that the user knows whether current screen and backtest outputs are trustworthy. If needed, the user can re-run an update or identify that a screen result may be based on incomplete data. The same operational view must also communicate whether the approved universe manifest is current and whether refresh execution has advanced automatically as expected.
 
 This journey succeeds when the product avoids silent failure. The user should not have to guess whether suspicious output is caused by strategy logic or broken data.
 
@@ -186,7 +187,7 @@ These journeys reveal the need for the following capability areas:
 - watchlist creation and maintenance
 - watchlist notes, observation reason, and added date
 - reproducible backtesting with adjustable parameters
-- visibility into data freshness and update health
+- visibility into data freshness, universe manifest freshness, and refresh execution health
 - investigation workflow for suspicious or unexpected results
 
 ## Domain-Specific Requirements
@@ -237,7 +238,7 @@ The web application should behave like an interactive single-page experience for
 
 The application must keep chart rendering, condition breakdowns, and screening outputs synchronized.
 
-Because the product is end-of-day driven rather than real-time, the frontend does not require streaming infrastructure. It does require clear status communication for data freshness, backtest progress, and failed or incomplete updates.
+Because the product is end-of-day driven rather than real-time, the frontend does not require streaming infrastructure. It does require clear status communication for data freshness, universe manifest freshness, refresh execution status, backtest progress, and failed or incomplete updates.
 
 ### Browser Matrix
 
@@ -295,25 +296,25 @@ The watchlist workflow must behave like a research notebook rather than a bookma
 
 - run a Japan equity screen with configurable strategy parameters
 - inspect why a stock passed by viewing chart, indicators, and rule breakdown
-- save candidates to a watchlist with note, reason, and added date
+- save candidates to a watchlist with note, reason, added date, and direct drill-down to stock detail
 - rerun the strategy as a backtest and refine parameters based on results
-- verify whether current outputs are trustworthy based on data freshness and update status
+- verify whether current outputs are trustworthy based on data freshness, universe manifest freshness, and refresh execution status
 
 **Must-Have Capabilities:**
 
 - Japan equities only
 - end-of-day data ingestion, storage, and refresh workflow
 - parameterized screening UI
-- RPS 50/120/250 calculation and display
+- configurable approved RPS window calculation and display
 - threshold highlighting and pass/fail logic for RPS conditions
 - 52-week-high proximity calculation and pass/fail logic
 - stock result list and stock detail workflow
 - candlestick chart with RPS panel below the main chart
 - explicit rule breakdown with exact values for each qualified stock
-- watchlist management with note, observation reason, and added date
+- watchlist management with note, observation reason, added date, and direct stock-detail access
 - historical backtesting for the MVP strategy conditions
 - reproducible backtest outputs
-- visible data freshness and update health status
+- visible data freshness, universe manifest freshness, and update health status
 
 ### Post-MVP Features
 
@@ -389,14 +390,14 @@ The watchlist workflow must behave like a research notebook rather than a bookma
 - FR9: The product can maintain a Japan equity universe for screening and backtesting.
 - FR10: The product can store end-of-day historical price data for supported securities.
 - FR11: The product can update historical market data for the supported universe.
-- FR12: The product can expose the freshness state of the stored market data.
+- FR12: The product can expose the freshness state, universe manifest freshness, and refresh execution state of the stored market data.
 - FR13: The product can identify when market data for a security or date range is incomplete or unavailable.
 - FR14: The product can keep screening, charting, and backtesting aligned to the same stored market dataset.
 
 ### Indicator & Signal Evaluation
 
-- FR15: The product can calculate 50-day, 120-day, and 250-day RPS-related values for supported securities using a documented business definition, a fixed ranking universe policy, and a consistent normalization rule.
-- FR16: The product can determine whether at least one supported RPS line satisfies the strategy threshold condition using the same approved definition and data semantics used by charting and backtesting.
+- FR15: The product can calculate approved RPS-related values for supported securities for the configured lookback windows required by screening, chart review, and backtesting, while preserving a documented business definition, a fixed ranking universe policy, and a consistent normalization rule.
+- FR16: The product can determine whether at least a user-configured minimum number of selected RPS lines satisfy the strategy threshold condition using the same approved definition and data semantics used by charting and backtesting.
 - FR17: The product can calculate each security's proximity to its 52-week high.
 - FR18: The product can determine whether a security satisfies the configured 52-week-high proximity condition.
 - FR19: The product can evaluate whether a security passes the full MVP strategy based on the active conditions.
@@ -415,8 +416,8 @@ The watchlist workflow must behave like a research notebook rather than a bookma
 
 ### Chart Review & Explainability
 
-- FR28: The user can view a candlestick chart for a supported security.
-- FR29: The user can view RPS information in a panel below the main price chart using traceable backend-derived indicator history.
+- FR28: The user can view a candlestick chart for a supported security with sufficient historical context for routine chart review.
+- FR29: The user can view RPS information in a panel below the main price chart using traceable backend-derived indicator history without important recent data being obscured by fixed labels.
 - FR30: The product can visually distinguish RPS conditions that meet the configured threshold while keeping official screening signals separate from explanatory-only chart annotations.
 - FR31: The user can inspect chart-adjacent summaries of the strategy condition values.
 - FR32: The user can review the stock's 52-week-high proximity state from the stock detail workflow.
@@ -426,7 +427,7 @@ The watchlist workflow must behave like a research notebook rather than a bookma
 
 - FR34: The user can add a screened security to a watchlist.
 - FR35: The user can remove a security from a watchlist.
-- FR36: The user can view the securities currently stored in the watchlist.
+- FR36: The user can view the securities currently stored in the watchlist and navigate from an entry into the corresponding stock detail workflow.
 - FR37: The user can record a note for a watchlist entry.
 - FR38: The user can record an observation reason for a watchlist entry.
 - FR39: The product can retain the date when a security was added to the watchlist.
@@ -444,10 +445,16 @@ The watchlist workflow must behave like a research notebook rather than a bookma
 
 ### Data Health & Operational Visibility
 
-- FR48: The user can see whether market data is current enough for routine post-close use.
-- FR49: The user can see when a data update has failed, is incomplete, or may affect output trustworthiness.
+- FR48: The user can see whether market data and the approved universe manifest are current enough for routine post-close use.
+- FR49: The user can see when a data update has failed, is incomplete, stale, or has not been automatically advanced as expected.
 - FR50: The user can identify whether a suspicious screen or backtest result may be caused by stale or incomplete data.
 - FR51: The product can expose enough run and data context to investigate unexpected outputs.
+- FR56: The user can configure which approved RPS lookback windows participate in the active screening rule.
+- FR57: The user can configure how many selected RPS lines must satisfy the threshold condition for a security to qualify.
+- FR58: The backend can trigger or maintain refresh execution state automatically at startup and on the expected daily cadence.
+- FR59: The product can display the last-updated timestamp of the approved universe manifest without exposing unnecessary local file path details in the primary UI.
+- FR60: The product can present chart dates in a localized, date-only format appropriate for the primary user workflow.
+- FR61: The user can navigate directly from a watchlist entry to the corresponding stock detail workflow.
 
 ### Product Boundary & Future Extension
 

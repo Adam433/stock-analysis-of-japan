@@ -255,7 +255,26 @@ class MarketDataHealthTests(unittest.TestCase):
 
         self.assertEqual(health.universe_manifest.symbol_count, 2)
         self.assertEqual(health.universe_manifest.universe_filter, "tse_common_stock")
-        self.assertEqual(health.universe_manifest.source_path, str(manifest_path))
+        self.assertIsNotNone(health.universe_manifest.updated_at)
+
+    def test_health_reports_missing_universe_manifest_cleanly(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest_path = Path(temp_dir) / "missing_symbols.txt"
+
+            import os
+
+            original = os.environ.get("STOCKANALYSE_TSE_COMMON_STOCK_SYMBOLS_PATH")
+            os.environ["STOCKANALYSE_TSE_COMMON_STOCK_SYMBOLS_PATH"] = str(manifest_path)
+            try:
+                with self.session_factory() as session:
+                    health = get_market_data_health(session, today=date(2026, 4, 12))
+            finally:
+                if original is None:
+                    os.environ.pop("STOCKANALYSE_TSE_COMMON_STOCK_SYMBOLS_PATH", None)
+                else:
+                    os.environ["STOCKANALYSE_TSE_COMMON_STOCK_SYMBOLS_PATH"] = original
+
+        self.assertIsNone(health.universe_manifest)
 
 
 if __name__ == "__main__":
