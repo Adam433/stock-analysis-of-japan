@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 
-type WatchlistEntry = {
+type WatchlistEntryPayload = {
   instrument_id: number;
   note: string | null;
   observation_reason: string | null;
@@ -74,7 +74,7 @@ export function WatchlistToggleButton({
           throw new Error(`无法加载观察列表（${response.status}）。`);
         }
 
-        const payload = (await response.json()) as { entries: WatchlistEntry[] };
+        const payload = (await response.json()) as { entries: WatchlistEntryPayload[] };
         const entry = payload.entries.find((item) => item.instrument_id === instrumentId);
         if (!cancelled) {
           setIsInWatchlist(Boolean(entry));
@@ -112,7 +112,7 @@ export function WatchlistToggleButton({
           throw new Error(`无法加载观察列表（${response.status}）。`);
         }
 
-        const payload = (await response.json()) as { entries: WatchlistEntry[] };
+        const payload = (await response.json()) as { entries: WatchlistEntryPayload[] };
         const entry = payload.entries.find((item) => item.instrument_id === instrumentId);
         if (!cancelled && entry) {
           setNote(entry.note ?? "");
@@ -132,6 +132,10 @@ export function WatchlistToggleButton({
   }, [addedDate, apiBaseUrl, instrumentId, isEditorOpen, isInWatchlist, loadOnMount]);
 
   async function handleToggle() {
+    if (isInWatchlist && !window.confirm(`确定要将 ${symbol} 从观察列表移除吗？`)) {
+      return;
+    }
+
     setToggleState("saving");
     setMessage(isInWatchlist ? `正在将 ${symbol} 从观察列表移除……` : `正在将 ${symbol} 加入观察列表……`);
 
@@ -162,7 +166,7 @@ export function WatchlistToggleButton({
       onToggleComplete?.(nextValue);
 
       if (nextValue) {
-        const payload = (await response.json()) as { entry: WatchlistEntry };
+        const payload = (await response.json()) as { entry: WatchlistEntryPayload };
         setAddedDate(payload.entry.added_date);
         setNote(payload.entry.note ?? "");
         setObservationReason(payload.entry.observation_reason ?? "");
@@ -200,7 +204,7 @@ export function WatchlistToggleButton({
         throw new Error(payload.detail ?? `请求失败（${response.status}）`);
       }
 
-      const payload = (await response.json()) as { entry: WatchlistEntry };
+      const payload = (await response.json()) as { entry: WatchlistEntryPayload };
       setAddedDate(payload.entry.added_date);
       setNote(payload.entry.note ?? "");
       setObservationReason(payload.entry.observation_reason ?? "");

@@ -2,107 +2,13 @@
 
 import { StockDetailCharts } from "@/components/stocks/StockDetailCharts";
 import { WatchlistToggleButton } from "@/components/watchlist/WatchlistToggleButton";
-
-type Candlestick = {
-  trade_date: string;
-  open: string | null;
-  high: string | null;
-  low: string | null;
-  close: string | null;
-  adj_close: string | null;
-  volume: number | null;
-  data_status: string;
-};
-
-type StockDetailPayload = {
-  instrument: {
-    id: number;
-    symbol: string;
-    exchange: string;
-    name: string | null;
-    currency: string;
-  };
-  screen_run: {
-    id: number;
-    trade_date: string;
-    executed_at: string;
-    status: string;
-    strategy_configuration_version: number | null;
-  };
-  rule_breakdown: {
-    passed: boolean;
-    rps_condition: {
-      passed: boolean;
-      best_rps_value: string | null;
-      threshold: number;
-      rps_50: string | null;
-      rps_120: string | null;
-      rps_250: string | null;
-    };
-    high_proximity_condition: {
-      passed: boolean;
-      high_proximity_ratio: string | null;
-      threshold_pct: string;
-      max_drawdown_from_high_pct: string | null;
-    };
-  };
-  latest_indicator_snapshot: {
-    trade_date: string;
-    rps_50: string | null;
-    rps_120: string | null;
-    rps_250: string | null;
-    fifty_two_week_high: string | null;
-    high_proximity_ratio: string | null;
-  };
-  candlesticks: Candlestick[];
-  indicator_history: {
-    trade_date: string;
-    rps_50: string | null;
-    rps_120: string | null;
-    rps_250: string | null;
-    high_proximity_ratio: string | null;
-  }[];
-};
+import { formatNumber, formatPercent, formatTimestamp, formatDateOnly } from "@/lib/formatters";
+import type { StockDetailPayload } from "@/lib/types";
 
 type StockDetailViewProps = {
   apiBaseUrl: string;
   detail: StockDetailPayload;
 };
-
-function formatNumber(value: string | null, digits = 2): string {
-  if (!value) {
-    return "不可用";
-  }
-
-  return Number(value).toFixed(digits);
-}
-
-function formatPercent(value: string | null, digits = 2): string {
-  if (!value) {
-    return "不可用";
-  }
-
-  return `${Number(value).toFixed(digits)}%`;
-}
-
-function formatTimestamp(value: string): string {
-  return new Intl.DateTimeFormat("zh-CN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
-
-function formatDateOnly(value: string): string {
-  const [year, month, day] = value.split("-").map(Number);
-  if (!year || !month || !day) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat("zh-CN", {
-    dateStyle: "long",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(year, month - 1, day)));
-}
 
 export function StockDetailView({ apiBaseUrl, detail }: StockDetailViewProps) {
   const bestRpsValue = detail.rule_breakdown.rps_condition.best_rps_value;

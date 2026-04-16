@@ -2,37 +2,8 @@
 
 import { FormEvent, useState } from "react";
 
-type BacktestRun = {
-  id: number;
-  strategy_configuration_id: number;
-  status: string;
-  start_date: string;
-  end_date: string;
-  started_at: string;
-  completed_at: string | null;
-  rps_definition_version: string | null;
-  dataset_trade_date_start: string | null;
-  dataset_trade_date_end: string | null;
-  dataset_checksum: string | null;
-  error_message: string | null;
-  result_summary: {
-    trade_dates_evaluated: number;
-    total_candidates_evaluated: number;
-    qualifying_observations: number;
-    unique_qualified_instruments: number;
-    first_qualified_trade_date: string | null;
-    last_qualified_trade_date: string | null;
-    result_checksum: string | null;
-  };
-  parameter_set: {
-    id: number;
-    version: number;
-    rps_threshold: number;
-    high_proximity_threshold_pct: string;
-    selected_rps_windows: number[];
-    min_rps_lines_required: number;
-  };
-};
+import { formatTimestamp, formatRpsWindows } from "@/lib/formatters";
+import type { BacktestRun } from "@/lib/types";
 
 type BacktestLaunchPanelProps = {
   apiBaseUrl: string;
@@ -41,29 +12,15 @@ type BacktestLaunchPanelProps = {
   initialError: string | null;
 };
 
-function formatTimestamp(value: string | null): string {
-  if (!value) {
-    return "尚未完成";
-  }
-
-  return new Intl.DateTimeFormat("zh-CN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
-
-function formatRpsWindows(windows: number[]): string {
-  return windows.map((window) => `${window} 日`).join(" / ");
-}
-
 export function BacktestLaunchPanel({
   apiBaseUrl,
   initialRun,
   initialRuns,
   initialError,
 }: BacktestLaunchPanelProps) {
-  const [startDate, setStartDate] = useState("2024-01-01");
-  const [endDate, setEndDate] = useState("2024-12-31");
+  const currentYear = new Date().getFullYear();
+  const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
+  const [endDate, setEndDate] = useState(`${currentYear}-12-31`);
   const [latestRun, setLatestRun] = useState<BacktestRun | null>(initialRun);
   const [runs, setRuns] = useState<BacktestRun[]>(initialRuns);
   const [message, setMessage] = useState(
@@ -242,11 +199,11 @@ export function BacktestLaunchPanel({
             </article>
             <article className="run-metadata-card">
               <p className="status-label">开始时间</p>
-              <h3>{formatTimestamp(latestRun.started_at)}</h3>
+              <h3>{formatTimestamp(latestRun.started_at, "尚未完成")}</h3>
             </article>
             <article className="run-metadata-card">
               <p className="status-label">完成时间</p>
-              <h3>{formatTimestamp(latestRun.completed_at)}</h3>
+              <h3>{formatTimestamp(latestRun.completed_at, "尚未完成")}</h3>
             </article>
             <article className="run-metadata-card">
               <p className="status-label">数据集范围</p>

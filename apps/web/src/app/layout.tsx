@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -13,7 +14,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        <a href="#main-content" className="skip-link">跳转到主要内容</a>
+        <ErrorBoundary>{children}</ErrorBoundary>
+      </body>
     </html>
   );
 }

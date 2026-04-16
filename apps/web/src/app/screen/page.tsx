@@ -3,59 +3,13 @@ import Link from "next/link";
 import { WorkflowTrustBanner } from "@/components/shared/WorkflowTrustBanner";
 import { StrategyConfigPanel } from "@/components/screen/StrategyConfigPanel";
 import { resolveApiBaseUrl } from "@/lib/apiBaseUrl";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { loadMarketDataHealth } from "@/lib/marketDataHealth";
-
-type StrategyConfigurationResponse = {
-  configuration: {
-    id: number;
-    version: number;
-    rps_threshold: number;
-    high_proximity_threshold_pct: string;
-    selected_rps_windows: number[];
-    min_rps_lines_required: number;
-  };
-  validation?: {
-    rps_threshold: { min: number; max: number; default: number };
-    high_proximity_threshold_pct: { min: string; max: string; default: string };
-    selected_rps_windows: { approved: number[]; default: number[] };
-    min_rps_lines_required: { min: number; max: number; default: number };
-  };
-};
+import type { StrategyConfigurationResponse, ScreenRun } from "@/lib/types";
 
 type LoadStrategyConfigurationResult = {
   data: StrategyConfigurationResponse | null;
   error: string | null;
-};
-
-type ScreenRun = {
-  id: number;
-  strategy_configuration_id: number;
-  trade_date: string;
-  executed_at: string;
-  total_candidates: number;
-  qualified_count: number;
-  status: string;
-  parameter_set: {
-    id: number;
-    version: number;
-    rps_threshold: number;
-    high_proximity_threshold_pct: string;
-    selected_rps_windows: number[];
-    min_rps_lines_required: number;
-  };
-  qualified_results: Array<{
-    instrument_id: number;
-    symbol: string;
-    exchange: string;
-    trade_date: string;
-    best_rps_value: string | null;
-    rps_threshold: number;
-    high_proximity_ratio: string | null;
-    high_proximity_threshold_pct: string;
-    max_drawdown_from_high_pct: string | null;
-    rps_condition_passed: boolean;
-    high_proximity_condition_passed: boolean;
-  }>;
 };
 
 type LoadLatestRunResult = {
@@ -78,7 +32,7 @@ async function loadStrategyConfiguration(
   apiBaseUrl: string,
 ): Promise<LoadStrategyConfigurationResult> {
   try {
-    const response = await fetch(`${apiBaseUrl}/screen/configuration`, {
+    const response = await fetchWithRetry(`${apiBaseUrl}/screen/configuration`, {
       cache: "no-store",
     });
 
@@ -103,7 +57,7 @@ async function loadStrategyConfiguration(
 
 async function loadLatestScreenRun(apiBaseUrl: string): Promise<LoadLatestRunResult> {
   try {
-    const response = await fetch(`${apiBaseUrl}/screen/runs/latest`, {
+    const response = await fetchWithRetry(`${apiBaseUrl}/screen/runs/latest`, {
       cache: "no-store",
     });
 
@@ -129,7 +83,7 @@ async function loadLatestScreenRun(apiBaseUrl: string): Promise<LoadLatestRunRes
 
 async function loadScreeningTradeDates(apiBaseUrl: string): Promise<LoadTradeDatesResult> {
   try {
-    const response = await fetch(`${apiBaseUrl}/screen/trade-dates`, {
+    const response = await fetchWithRetry(`${apiBaseUrl}/screen/trade-dates`, {
       cache: "no-store",
     });
 
@@ -168,7 +122,7 @@ export default async function ScreenConfigurationPage() {
   ]);
 
   return (
-    <main className="dashboard-shell">
+    <main id="main-content" className="dashboard-shell">
       <nav className="top-nav">
         <Link href="/">数据健康</Link>
         <span>/</span>

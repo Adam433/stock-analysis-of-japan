@@ -4,18 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { WatchlistToggleButton } from "@/components/watchlist/WatchlistToggleButton";
-
-type WatchlistEntry = {
-  id: number;
-  instrument_id: number;
-  symbol: string;
-  exchange: string;
-  name: string | null;
-  note: string | null;
-  observation_reason: string | null;
-  added_date: string;
-  added_at: string;
-};
+import type { WatchlistEntry } from "@/lib/types";
 
 type WatchlistReviewPanelProps = {
   apiBaseUrl: string;

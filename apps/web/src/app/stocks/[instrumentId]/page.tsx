@@ -3,10 +3,12 @@ import Link from "next/link";
 import { WorkflowTrustBanner } from "@/components/shared/WorkflowTrustBanner";
 import { StockDetailView } from "@/components/stocks/StockDetailView";
 import { resolveApiBaseUrl } from "@/lib/apiBaseUrl";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { loadMarketDataHealth } from "@/lib/marketDataHealth";
+import type { StockDetailPayload } from "@/lib/types";
 
 type StockDetailResponse = {
-  stock_detail: Parameters<typeof StockDetailView>[0]["detail"];
+  stock_detail: StockDetailPayload;
 };
 
 export const dynamic = "force-dynamic";
@@ -18,7 +20,7 @@ async function loadStockDetail(
 ): Promise<{ data: StockDetailResponse["stock_detail"] | null; error: string | null }> {
   try {
     const query = screenRunId ? `?screen_run_id=${screenRunId}` : "";
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `${apiBaseUrl}/stocks/${instrumentId}/detail${query}`,
       { cache: "no-store" },
     );
@@ -60,7 +62,7 @@ export default async function StockDetailPage({
   ]);
 
   return (
-    <main className="dashboard-shell">
+    <main id="main-content" className="dashboard-shell">
       <nav className="top-nav">
         <Link href="/">数据健康</Link>
         <span>/</span>

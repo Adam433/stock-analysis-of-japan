@@ -4,41 +4,8 @@ import {
   describeApiBaseUrlResolution,
   resolveApiBaseUrl,
 } from "@/lib/apiBaseUrl";
-import { loadMarketDataHealth } from "@/lib/marketDataHealth";
-
-type RefreshPayload = {
-  status: string;
-  provider: string;
-  universe_scope: string;
-  universe_filter: string;
-  requested_symbol_count: number;
-  started_at: string;
-  completed_at: string | null;
-  rows_processed: number;
-  rows_inserted: number;
-  rows_updated: number;
-  partial_rows: number;
-  unavailable_rows: number;
-  latest_trade_date: string | null;
-  error_message: string | null;
-  requested_symbols: string[];
-};
-
-type MarketDataHealthResponse = {
-  freshness_state: string;
-  latest_trade_date: string | null;
-  age_in_days: number | null;
-  coverage_status: string;
-  total_instruments: number;
-  partial_rows: number;
-  unavailable_rows: number;
-  last_refresh: RefreshPayload | null;
-  universe_manifest: {
-    universe_filter: string;
-    symbol_count: number;
-    updated_at: string | null;
-  } | null;
-};
+import { formatTimestamp } from "@/lib/formatters";
+import { loadMarketDataHealth, type MarketDataHealthResponse } from "@/lib/marketDataHealth";
 
 type MarketDataHealthResult =
   | { kind: "ok"; health: MarketDataHealthResponse }
@@ -66,17 +33,6 @@ async function getMarketDataHealth(apiBaseUrl: string): Promise<MarketDataHealth
     kind: "error",
     message: error ?? "健康检查接口调用失败。",
   };
-}
-
-function formatTimestamp(value: string | null): string {
-  if (!value) {
-    return "暂无";
-  }
-
-  return new Intl.DateTimeFormat("zh-CN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
 }
 
 function toneClassForStatus(status: string): string {
@@ -114,7 +70,7 @@ export default async function HomePage() {
     healthResult.kind === "ok" ? toneClassForStatus(refreshStatus) : "status-card--neutral";
 
   return (
-    <main className="dashboard-shell">
+    <main id="main-content" className="dashboard-shell">
       <section className="hero-panel">
         <div className="hero-copy">
           <p className="eyebrow">stockAnalyse</p>
@@ -170,9 +126,7 @@ export default async function HomePage() {
           <p className="status-meta">
             {universeManifest
               ? `普通股清单：${universeManifest.symbol_count} 只 ｜ 更新于 ${formatTimestamp(universeManifest.updated_at)}`
-              : health
-                ? "普通股清单：缺失 ｜ 更新时间：缺失"
-                : `部分行：${health?.partial_rows ?? "-"} ｜ 不可用行：${health?.unavailable_rows ?? "-"}`}
+              : "普通股清单：缺失 ｜ 更新时间：缺失"}
           </p>
         </article>
 

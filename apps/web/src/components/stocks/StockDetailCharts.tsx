@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   CandlestickSeries,
   ColorType,
@@ -13,17 +13,7 @@ import {
   type LineData,
   type Time,
 } from "lightweight-charts";
-
-type Candlestick = {
-  trade_date: string;
-  open: string | null;
-  high: string | null;
-  low: string | null;
-  close: string | null;
-  adj_close: string | null;
-  volume: number | null;
-  data_status: string;
-};
+import type { Candlestick } from "@/lib/types";
 
 type IndicatorHistoryRow = {
   trade_date: string;
@@ -143,6 +133,12 @@ export function StockDetailCharts({
 
   const hasIndicatorHistory = indicatorHistory.length > 0;
 
+  const candleData = useMemo(() => buildCandles(candlesticks), [candlesticks]);
+  const rps50Data = useMemo(() => buildLineData(indicatorHistory, "rps_50"), [indicatorHistory]);
+  const rps120Data = useMemo(() => buildLineData(indicatorHistory, "rps_120"), [indicatorHistory]);
+  const rps250Data = useMemo(() => buildLineData(indicatorHistory, "rps_250"), [indicatorHistory]);
+  const thresholdData = useMemo(() => buildThresholdData(indicatorHistory, rpsThreshold), [indicatorHistory, rpsThreshold]);
+
   useEffect(() => {
     const priceContainer = priceContainerRef.current;
     const rpsContainer = rpsContainerRef.current;
@@ -173,7 +169,7 @@ export function StockDetailCharts({
       priceLineVisible: true,
       lastValueVisible: true,
     });
-    priceSeries.setData(buildCandles(candlesticks));
+    priceSeries.setData(candleData);
 
     const thresholdSeries = rpsChart.addSeries(LineSeries, {
       color: "#c96b2c",
@@ -182,7 +178,7 @@ export function StockDetailCharts({
       lastValueVisible: false,
       priceLineVisible: false,
     });
-    thresholdSeries.setData(buildThresholdData(indicatorHistory, rpsThreshold));
+    thresholdSeries.setData(thresholdData);
 
     const rps50Series = rpsChart.addSeries(LineSeries, {
       color: "#0e5a52",
@@ -202,9 +198,9 @@ export function StockDetailCharts({
       lastValueVisible: false,
     });
 
-    rps50Series.setData(buildLineData(indicatorHistory, "rps_50"));
-    rps120Series.setData(buildLineData(indicatorHistory, "rps_120"));
-    rps250Series.setData(buildLineData(indicatorHistory, "rps_250"));
+    rps50Series.setData(rps50Data);
+    rps120Series.setData(rps120Data);
+    rps250Series.setData(rps250Data);
 
     priceChart.timeScale().fitContent();
     rpsChart.timeScale().fitContent();
@@ -223,7 +219,7 @@ export function StockDetailCharts({
       priceChart.remove();
       rpsChart.remove();
     };
-  }, [candlesticks, indicatorHistory, rpsThreshold]);
+  }, [candleData, rps50Data, rps120Data, rps250Data, thresholdData]);
 
   return (
     <>

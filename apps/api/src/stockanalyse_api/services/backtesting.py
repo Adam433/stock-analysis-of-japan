@@ -83,7 +83,8 @@ def launch_backtest_run(session, *, start_date: date, end_date: date) -> Backtes
 
     configuration_snapshot = get_active_strategy_configuration(session)
     configuration = session.get(StrategyConfiguration, configuration_snapshot.id)
-    assert configuration is not None
+    if configuration is None:
+        raise ValueError(f"StrategyConfiguration with id={configuration_snapshot.id} not found.")
 
     run = BacktestRun(
         strategy_configuration_id=configuration.id,
@@ -122,18 +123,16 @@ def get_latest_backtest_run(session) -> BacktestRunSummary | None:
     return get_backtest_run(session, run_id)
 
 
-def list_backtest_runs(session) -> list[BacktestRunSummary]:
-    runs = session.execute(
-        select(BacktestRun).order_by(BacktestRun.started_at.desc(), BacktestRun.id.desc())
-    ).scalars().all()
+def list_backtest_runs(session, *, limit: int = 50, offset: int = 0) -> list[BacktestRunSummary]:
+    rows = session.execute(
+        select(BacktestRun, StrategyConfiguration)
+        .join(StrategyConfiguration, StrategyConfiguration.id == BacktestRun.strategy_configuration_id)
+        .order_by(BacktestRun.started_at.desc(), BacktestRun.id.desc())
+        .limit(limit)
+        .offset(offset)
+    ).all()
 
-    summaries: list[BacktestRunSummary] = []
-    for run in runs:
-        configuration = session.get(StrategyConfiguration, run.strategy_configuration_id)
-        if configuration is None:
-            continue
-        summaries.append(_serialize(run, configuration))
-    return summaries
+    return [_serialize(run, configuration) for run, configuration in rows]
 
 
 def execute_backtest_run(session, run_id: int) -> BacktestRunSummary:

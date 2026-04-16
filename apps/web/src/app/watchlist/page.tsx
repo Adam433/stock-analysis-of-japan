@@ -3,19 +3,9 @@ import Link from "next/link";
 import { WorkflowTrustBanner } from "@/components/shared/WorkflowTrustBanner";
 import { WatchlistReviewPanel } from "@/components/watchlist/WatchlistReviewPanel";
 import { resolveApiBaseUrl } from "@/lib/apiBaseUrl";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { loadMarketDataHealth } from "@/lib/marketDataHealth";
-
-type WatchlistEntry = {
-  id: number;
-  instrument_id: number;
-  symbol: string;
-  exchange: string;
-  name: string | null;
-  note: string | null;
-  observation_reason: string | null;
-  added_date: string;
-  added_at: string;
-};
+import type { WatchlistEntry } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +13,7 @@ async function loadWatchlist(
   apiBaseUrl: string,
 ): Promise<{ entries: WatchlistEntry[]; error: string | null }> {
   try {
-    const response = await fetch(`${apiBaseUrl}/watchlist`, { cache: "no-store" });
+    const response = await fetchWithRetry(`${apiBaseUrl}/watchlist`, { cache: "no-store" });
     if (!response.ok) {
       return {
         entries: [],
@@ -49,7 +39,7 @@ export default async function WatchlistPage() {
   ]);
 
   return (
-    <main className="dashboard-shell">
+    <main id="main-content" className="dashboard-shell">
       <nav className="top-nav">
         <Link href="/">数据健康</Link>
         <span>/</span>

@@ -69,7 +69,8 @@ class LocalCsvDirectoryProvider:
                     )
 
     def _load_supported_symbols(self) -> list[str]:
-        assert self.symbols_file is not None
+        if self.symbols_file is None:
+            raise ValueError("symbols_file must be set before loading supported symbols.")
 
         symbols: list[str] = []
         for raw_line in self.symbols_file.read_text(encoding="utf-8").splitlines():

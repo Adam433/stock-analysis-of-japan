@@ -41,9 +41,9 @@ def read_latest_backtest_run() -> dict[str, object]:
 
 
 @router.get("/runs")
-def read_backtest_runs() -> dict[str, object]:
+def read_backtest_runs(limit: int = 50, offset: int = 0) -> dict[str, object]:
     with SessionLocal() as session:
-        runs = list_backtest_runs(session)
+        runs = list_backtest_runs(session, limit=limit, offset=offset)
     return {"backtest_runs": [run.to_dict() for run in runs]}
 
 

@@ -4,58 +4,8 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 
 import { WatchlistToggleButton } from "@/components/watchlist/WatchlistToggleButton";
-
-type StrategyConfiguration = {
-  id: number;
-  version: number;
-  rps_threshold: number;
-  high_proximity_threshold_pct: string;
-  selected_rps_windows: number[];
-  min_rps_lines_required: number;
-};
-
-type StrategyConfigurationResponse = {
-  configuration: StrategyConfiguration;
-  validation?: {
-    rps_threshold: { min: number; max: number; default: number };
-    high_proximity_threshold_pct: { min: string; max: string; default: string };
-    selected_rps_windows: { approved: number[]; default: number[] };
-    min_rps_lines_required: { min: number; max: number; default: number };
-  };
-};
-
-type ScreenRunResult = {
-  instrument_id: number;
-  symbol: string;
-  exchange: string;
-  trade_date: string;
-  best_rps_value: string | null;
-  rps_threshold: number;
-  high_proximity_ratio: string | null;
-  high_proximity_threshold_pct: string;
-  max_drawdown_from_high_pct: string | null;
-  rps_condition_passed: boolean;
-  high_proximity_condition_passed: boolean;
-};
-
-type ScreenRun = {
-  id: number;
-  strategy_configuration_id: number;
-  trade_date: string;
-  executed_at: string;
-  total_candidates: number;
-  qualified_count: number;
-  status: string;
-  parameter_set: {
-    id: number;
-    version: number;
-    rps_threshold: number;
-    high_proximity_threshold_pct: string;
-    selected_rps_windows: number[];
-    min_rps_lines_required: number;
-  };
-  qualified_results: ScreenRunResult[];
-};
+import { formatTimestamp, formatRpsWindows } from "@/lib/formatters";
+import type { StrategyConfigurationResponse, ScreenRun, ScreenRunResult } from "@/lib/types";
 
 type ScreeningTradeDateOption = {
   trade_date: string;
@@ -73,17 +23,6 @@ type StrategyConfigPanelProps = {
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 type RunState = "idle" | "running" | "ready" | "error";
-
-function formatTimestamp(value: string): string {
-  return new Intl.DateTimeFormat("zh-CN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
-
-function formatRpsWindows(windows: number[]): string {
-  return windows.map((window) => `${window} 日`).join(" / ");
-}
 
 export function StrategyConfigPanel({
   apiBaseUrl,

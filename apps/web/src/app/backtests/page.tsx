@@ -3,17 +3,17 @@ import Link from "next/link";
 import { WorkflowTrustBanner } from "@/components/shared/WorkflowTrustBanner";
 import { BacktestLaunchPanel } from "@/components/backtests/BacktestLaunchPanel";
 import { resolveApiBaseUrl } from "@/lib/apiBaseUrl";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { loadMarketDataHealth } from "@/lib/marketDataHealth";
-
-type BacktestRun = Parameters<typeof BacktestLaunchPanel>[0]["initialRun"];
+import type { BacktestRun } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 async function loadLatestBacktestRun(
   apiBaseUrl: string,
-): Promise<{ data: BacktestRun; error: string | null }> {
+): Promise<{ data: BacktestRun | null; error: string | null }> {
   try {
-    const response = await fetch(`${apiBaseUrl}/backtests/runs/latest`, {
+    const response = await fetchWithRetry(`${apiBaseUrl}/backtests/runs/latest`, {
       cache: "no-store",
     });
     if (!response.ok) {
@@ -35,9 +35,9 @@ async function loadLatestBacktestRun(
 
 async function loadBacktestRuns(
   apiBaseUrl: string,
-): Promise<{ data: NonNullable<Parameters<typeof BacktestLaunchPanel>[0]["initialRuns"]>; error: string | null }> {
+): Promise<{ data: BacktestRun[]; error: string | null }> {
   try {
-    const response = await fetch(`${apiBaseUrl}/backtests/runs`, {
+    const response = await fetchWithRetry(`${apiBaseUrl}/backtests/runs`, {
       cache: "no-store",
     });
     if (!response.ok) {
@@ -47,7 +47,7 @@ async function loadBacktestRuns(
       };
     }
 
-    const payload = (await response.json()) as { backtest_runs: NonNullable<Parameters<typeof BacktestLaunchPanel>[0]["initialRuns"]> };
+    const payload = (await response.json()) as { backtest_runs: BacktestRun[] };
     return { data: payload.backtest_runs, error: null };
   } catch {
     return {
@@ -66,7 +66,7 @@ export default async function BacktestsPage() {
   ]);
 
   return (
-    <main className="dashboard-shell">
+    <main id="main-content" className="dashboard-shell">
       <nav className="top-nav">
         <Link href="/">数据健康</Link>
         <span>/</span>
