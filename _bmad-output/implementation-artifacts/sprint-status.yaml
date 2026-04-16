@@ -1,5 +1,5 @@
 # generated: 2026-04-13T00:00:00+09:00
-# last_updated: 2026-04-14T09:00:00+09:00
+# last_updated: 2026-04-16T00:35:00+09:00
 # project: stockAnalyse
 # project_key: NOKEY
 # tracking_system: file-system
@@ -34,46 +34,52 @@
 # - Developer typically creates next story after previous one is 'done' to incorporate learnings
 
 generated: 2026-04-13T00:00:00+09:00
-last_updated: 2026-04-14T23:59:00+09:00
+last_updated: 2026-04-16T00:35:00+09:00
 project: stockAnalyse
 project_key: NOKEY
 tracking_system: file-system
 story_location: /Users/adam/Documents/GitHub/stockAnalyse/_bmad-output/implementation-artifacts
 
 development_status:
-  epic-1: in-progress
+  epic-1: done
   1-1-initialize-monorepo-application-shells: done
   1-2-establish-database-schema-and-migration-workflow: done
   1-3-ingest-and-normalize-japan-equity-end-of-day-data: done
   1-4-expose-data-freshness-and-refresh-status: done
-  1-5-fix-homepage-refresh-messaging-and-support-full-universe-ingestion: in-progress
+  1-5-fix-homepage-refresh-messaging-and-support-full-universe-ingestion: done
+  1-6-correct-universe-manifest-freshness-display-and-common-stock-count-semantics: done
+  1-7-maintain-refresh-execution-state-automatically-on-startup-and-daily-cadence: done
   epic-1-retrospective: done
-  epic-2: in-progress
+  epic-2: done
   2-1-create-strategy-configuration-workflow: done
   2-2-materialize-rps-and-52-week-high-derived-facts: done
   2-3-execute-screen-runs-and-persist-results: done
   2-4-display-screen-result-list-with-qualification-summary: done
   2-5-freeze-rps-business-definition-and-derived-fact-contract: done
   2-6-persist-rps-definition-version-with-screen-runs: done
-  2-7-select-screening-trade-date-from-available-derived-fact-dates: backlog
+  2-7-select-screening-trade-date-from-available-derived-fact-dates: done
+  2-8-parameterize-rps-windows-and-minimum-satisfied-line-count: done
   epic-2-retrospective: done
-  epic-3: in-progress
+  epic-3: done
   3-1-serve-stock-detail-and-chart-data-from-stored-facts: done
   3-2-build-stock-detail-page-with-candlestick-and-rps-panels: done
   3-3-show-rule-breakdown-and-exact-qualifying-values: done
   3-4-replace-manual-stock-detail-svg-with-lightweight-charts: done
-  3-5-clarify-rps-chart-semantics-and-explainability-boundaries: review
-  epic-3-retrospective: optional
+  3-5-clarify-rps-chart-semantics-and-explainability-boundaries: done
+  3-6-expand-stock-detail-chart-history-and-improve-chart-readability: done
+  epic-3-retrospective: done
   epic-4: done
   4-1-add-and-remove-qualified-stocks-from-the-watchlist: done
   4-2-persist-watchlist-notes-observation-reasons-and-added-dates: done
   4-3-view-and-review-the-watchlist: done
+  4-4-navigate-from-watchlist-entries-to-stock-detail: done
   epic-4-retrospective: done
-  epic-5: in-progress
+  epic-5: done
   5-1-launch-and-persist-backtest-runs: done
   5-2-execute-reproducible-backtests-from-stored-inputs: done
   5-3-review-backtest-results-and-compare-strategy-adjustments: done
-  5-4-verify-backtest-alignment-with-approved-rps-semantics: review
+  5-4-verify-backtest-alignment-with-approved-rps-semantics: done
+  5-5-persist-rps-definition-version-with-backtest-runs: done
   epic-5-retrospective: done
   epic-6: done
   6-1-enforce-trust-accessibility-and-error-state-standards: done

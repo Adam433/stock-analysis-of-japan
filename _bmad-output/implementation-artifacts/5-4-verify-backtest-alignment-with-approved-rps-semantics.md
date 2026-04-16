@@ -1,6 +1,6 @@
 # 故事 5.4: 验证回测与已批准 RPS 语义保持一致
 
-状态: review
+状态: done
 
 ## 用户故事
 
@@ -67,8 +67,9 @@
 
 - `PYTHONPATH=src python3 -m unittest tests.test_backtesting tests.test_screening tests.test_chart_data`
 - `PYTHONPATH=src python3 -m alembic -c alembic.ini upgrade head`
-- `npm run lint`
+- `npm --prefix apps/web run lint`
 - `git diff --check -- apps/api/src/stockanalyse_api/domain/backtests/models.py apps/api/src/stockanalyse_api/services/backtesting.py apps/api/migrations/versions/20260415_0015_add_backtest_run_dataset_context.py apps/api/tests/test_backtesting.py apps/api/tests/test_chart_data.py apps/web/src/components/backtests/BacktestLaunchPanel.tsx _bmad-output/implementation-artifacts/5-4-verify-backtest-alignment-with-approved-rps-semantics.md _bmad-output/implementation-artifacts/sprint-status.yaml`
+- 2026-04-16 re-review: no new alignment issues found; persisted dataset context and single-day screening/backtest consistency checks still pass.
 
 ## 文件清单
 

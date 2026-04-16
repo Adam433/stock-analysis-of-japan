@@ -1,6 +1,6 @@
 # 故事 3.5: 澄清 RPS 图表语义与可解释性边界
 
-状态: review
+状态: done
 
 ## 用户故事
 
@@ -69,8 +69,9 @@
 ## 验证记录
 
 - `PYTHONPATH=src python3 -m unittest tests.test_chart_data`
-- `npm run lint`
+- `npm --prefix apps/web run lint`
 - `git diff --check -- apps/web/src/components/stocks/StockDetailCharts.tsx apps/web/src/components/stocks/StockDetailView.tsx apps/web/src/app/globals.css apps/api/tests/test_chart_data.py`
+- 2026-04-16 re-review: no additional findings; semantic boundary copy and payload-backed chart assertions remain aligned.
 
 ## 文件清单
 

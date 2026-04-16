@@ -1,6 +1,6 @@
 # 故事 1.5: Fix Homepage Refresh Messaging and Support Full-Universe Ingestion
 
-状态: in-progress
+状态: done
 
 ## 用户故事
 
@@ -77,3 +77,9 @@ I want the homepage trust signals to describe refresh state accurately and the d
 - A remote `yahoo_finance_chart` provider is now available for full-universe backfill and nightly incremental updates, which removes the previous dependency on local CSV presence for missing symbols.
 - Screening and backtesting still depend on `derived_indicator_daily`, so the operational pipeline must materialize derived facts after each market-data refresh. Without that step, `/screen/runs` fails even when raw market data is present.
 - The original derived-facts materialization path was not operationally viable on the large local SQLite dataset because it loaded the full history into memory and held one long transaction. The materialization path now needs to run in trade-date batches so screening can recover without blocking the local environment indefinitely.
+
+## 验证记录
+
+- `PYTHONPATH=src python3 -m unittest tests.test_market_data_health`
+- `npm --prefix apps/web run lint`
+- 2026-04-16 closeout review: homepage refresh-state copy still distinguishes "no refresh recorded", stored-data coverage, and real API connectivity failure as required.
