@@ -3,7 +3,7 @@
 ### P0 — 必须立即修复
 
 - [x] **1. config.ini 明文数据库密码** — 已确认 .gitignore 已排除 *.ini，未被 git 跟踪
-- [ ] **2. 前端零测试覆盖** — apps/web/tests/ 全是 .gitkeep，无任何测试（暂缓）
+- [x] **2. 前端零测试覆盖** — 已补 `vitest` 基建、页面/组件/状态/工具层测试与 smoke 测试，`apps/web/tests` 已形成有效覆盖
 
 ### P1 — 尽快处理
 
