@@ -425,6 +425,10 @@ textarea:focus-visible {
   justify-items: end;
 }
 
+.result-card__actions .lifecycle-badge {
+  margin-top: 0;
+}
+
 .result-pass-flag {
   margin: 0;
   border-radius: 999px;
@@ -432,6 +436,30 @@ textarea:focus-visible {
   background: var(--good-bg);
   color: var(--good-fg);
   font-size: 0.9rem;
+}
+
+.lifecycle-badge {
+  margin: 10px 0 0;
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+}
+
+.lifecycle-badge--portfolio {
+  background: rgba(14, 90, 82, 0.12);
+  color: var(--good-fg);
+}
+
+.lifecycle-badge--legacy {
+  background: rgba(181, 104, 41, 0.16);
+  color: var(--accent-strong);
+}
+
+.lifecycle-copy {
+  margin-top: 14px;
 }
 
 .result-summary-grid {
@@ -452,6 +480,15 @@ textarea:focus-visible {
 .empty-state {
   margin: 18px 0 0;
   color: var(--muted);
+}
+
+.legacy-runs-section {
+  margin-top: 28px;
+}
+
+.result-card--legacy {
+  border-color: rgba(181, 104, 41, 0.35);
+  background: linear-gradient(180deg, rgba(255, 244, 223, 0.68), rgba(255, 255, 255, 0.78));
 }
 
 .result-link {

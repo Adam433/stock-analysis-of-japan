@@ -1,5 +1,5 @@
 # generated: 2026-04-13T00:00:00+09:00
-# last_updated: 2026-04-16T00:35:00+09:00
+# last_updated: 2026-04-17T10:56:27+09:00
 # project: stockAnalyse
 # project_key: NOKEY
 # tracking_system: file-system
@@ -34,7 +34,7 @@
 # - Developer typically creates next story after previous one is 'done' to incorporate learnings
 
 generated: 2026-04-13T00:00:00+09:00
-last_updated: 2026-04-16T00:35:00+09:00
+last_updated: 2026-04-17T10:56:27+09:00
 project: stockAnalyse
 project_key: NOKEY
 tracking_system: file-system
@@ -74,12 +74,21 @@ development_status:
   4-3-view-and-review-the-watchlist: done
   4-4-navigate-from-watchlist-entries-to-stock-detail: done
   epic-4-retrospective: done
-  epic-5: done
+  epic-5: in-progress  # reopened 2026-04-17: v3 patch 重塑为 portfolio-return 模型，新增 5.1-5.6 portfolio-return 系列
   5-1-launch-and-persist-backtest-runs: done
   5-2-execute-reproducible-backtests-from-stored-inputs: done
   5-3-review-backtest-results-and-compare-strategy-adjustments: done
   5-4-verify-backtest-alignment-with-approved-rps-semantics: done
   5-5-persist-rps-definition-version-with-backtest-runs: done
+  5-6-anchor-portfolio-return-backtest-definition: review
+  # v3 patch (2026-04-17): Stories 5.1-5.5 重做为 portfolio-return 模型；
+  # 旧 keys (5-1-launch-and-persist-backtest-runs 等) 保留为 done 作为 condition-hit 模型的历史事实，
+  # 新 keys 在下方追加并 ready-for-dev。Story 5.6 anchor 是这 5 个 stories 的 semantic source，必须先做。
+  5-1-launch-portfolio-return-backtest-from-screen-run: review
+  5-2-execute-portfolio-return-backtest-with-entry-holding-stop-loss: ready-for-dev
+  5-3-review-portfolio-return-backtest-results-and-compare: ready-for-dev
+  5-4-verify-backtest-alignment-via-source-screen-run: ready-for-dev
+  5-5-reference-screen-run-provenance-without-restoring-strategy: ready-for-dev
   epic-5-retrospective: done
   epic-6: done
   6-1-enforce-trust-accessibility-and-error-state-standards: done

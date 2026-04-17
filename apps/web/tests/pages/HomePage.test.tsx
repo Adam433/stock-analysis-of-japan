@@ -66,6 +66,7 @@ describe("HomePage", () => {
     render(await HomePage());
 
     expect(screen.getByText("日股数据的运营可信视图。")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "策略配置" })).toHaveAttribute("href", "/screen");
     expect(screen.getByText("API 基址：http://localhost:8000")).toBeInTheDocument();
     expect(screen.getByText("fresh")).toBeInTheDocument();
     expect(screen.getByText("complete")).toBeInTheDocument();

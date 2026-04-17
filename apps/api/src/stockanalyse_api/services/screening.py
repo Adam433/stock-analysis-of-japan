@@ -84,7 +84,7 @@ def evaluate_indicator_snapshot(indicator_row: DerivedIndicatorDaily, configurat
         if rps_value_by_window[window] is not None and rps_value_by_window[window] >= configuration.rps_threshold
     ]
     selected_best_rps_value = max(selected_rps_values) if selected_rps_values else None
-    rps_condition_passed = len(satisfied_windows) >= configuration.min_rps_lines_required
+    rps_condition_passed = len(satisfied_windows) == len(selected_windows)
 
     proximity_limit = Decimal("1") - (configuration.high_proximity_threshold_pct / Decimal("100"))
     high_proximity_ratio = indicator_row.high_proximity_ratio
@@ -100,7 +100,6 @@ def evaluate_indicator_snapshot(indicator_row: DerivedIndicatorDaily, configurat
         "best_rps_value": selected_best_rps_value,
         "rps_condition_passed": rps_condition_passed,
         "selected_rps_windows": selected_windows,
-        "min_rps_lines_required": configuration.min_rps_lines_required,
         "satisfied_rps_window_count": len(satisfied_windows),
         "high_proximity_ratio": high_proximity_ratio,
         "high_proximity_condition_passed": high_proximity_condition_passed,
@@ -203,7 +202,6 @@ def execute_screen_run(session, *, trade_date: date | None = None) -> ScreenRunS
             "version": configuration.version,
             "rps_threshold": configuration.rps_threshold,
             "selected_rps_windows": _deserialize_selected_rps_windows(configuration.selected_rps_windows),
-            "min_rps_lines_required": configuration.min_rps_lines_required,
             "high_proximity_threshold_pct": f"{configuration.high_proximity_threshold_pct:.2f}",
         },
         qualified_results=qualified_results,
@@ -254,7 +252,6 @@ def get_screen_run(session, screen_run_id: int) -> ScreenRunSummary | None:
             "version": configuration.version,
             "rps_threshold": configuration.rps_threshold,
             "selected_rps_windows": _deserialize_selected_rps_windows(configuration.selected_rps_windows),
-            "min_rps_lines_required": configuration.min_rps_lines_required,
             "high_proximity_threshold_pct": f"{configuration.high_proximity_threshold_pct:.2f}",
         },
         qualified_results=qualified_results,

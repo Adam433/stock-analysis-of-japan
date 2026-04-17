@@ -26,14 +26,12 @@ function buildConfigurationResponse(
       rps_threshold: 90,
       high_proximity_threshold_pct: "5.00",
       selected_rps_windows: [50, 120, 250],
-      min_rps_lines_required: 2,
       ...overrides,
     },
     validation: {
       rps_threshold: { min: 0, max: 100, default: 90 },
       high_proximity_threshold_pct: { min: "0.00", max: "100.00", default: "5.00" },
       selected_rps_windows: { approved: [50, 120, 250], default: [50, 120, 250] },
-      min_rps_lines_required: { min: 1, max: 3, default: 1 },
     },
   };
 }
@@ -53,7 +51,6 @@ function buildScreenRun(overrides: Partial<ScreenRun> = {}): ScreenRun {
       rps_threshold: 90,
       high_proximity_threshold_pct: "5.00",
       selected_rps_windows: [50, 120, 250],
-      min_rps_lines_required: 2,
     },
     qualified_results: [
       {
@@ -91,7 +88,7 @@ describe("StrategyConfigPanel", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows a validation error before saving when no approved RPS window is selected", async () => {
+  it("shows a validation error before saving when no RPS period is selected for screening", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ entries: [] }), { status: 200 }),
@@ -114,7 +111,7 @@ describe("StrategyConfigPanel", () => {
     await user.click(screen.getByRole("checkbox", { name: "250 日" }));
     await user.click(screen.getByRole("button", { name: "保存参数集" }));
 
-    expect(screen.getByText("至少需要选择一个批准的 RPS 窗口。")).toBeInTheDocument();
+    expect(screen.getByText("至少需要选择一个纳入筛选的 RPS 周期。")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -156,7 +153,6 @@ describe("StrategyConfigPanel", () => {
         rps_threshold: 95,
         high_proximity_threshold_pct: "5.00",
         selected_rps_windows: [50, 120, 250],
-        min_rps_lines_required: 2,
       }),
     });
     expect(screen.getByText("v5")).toBeInTheDocument();
@@ -205,5 +201,35 @@ describe("StrategyConfigPanel", () => {
       "/stocks/61?screen_run_id=8",
     );
     expect(screen.getByText("观察 7203")).toBeInTheDocument();
+  });
+
+  it("blocks launching a screen run when there are unsaved parameter changes", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ entries: [{ instrument_id: 61 }] }), { status: 200 }),
+    );
+
+    render(
+      <StrategyConfigPanel
+        apiBaseUrl="http://localhost:8000"
+        initialData={buildConfigurationResponse()}
+        initialError={null}
+        initialRun={null}
+        initialRunError={null}
+        initialTradeDates={[{ trade_date: "2026-04-15" }]}
+        initialTradeDateError={null}
+      />,
+    );
+
+    fireEvent.change(getInput("rps_threshold"), { target: { value: "95" } });
+
+    expect(
+      screen.getByText("当前有未保存的参数改动。保存后，新的参数集才会用于下一次筛选。"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "启动筛选" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "启动筛选" }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

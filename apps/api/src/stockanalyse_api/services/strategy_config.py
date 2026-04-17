@@ -11,7 +11,6 @@ DEFAULT_RPS_THRESHOLD = 90
 DEFAULT_HIGH_PROXIMITY_THRESHOLD_PCT = Decimal("5.00")
 APPROVED_RPS_WINDOWS = (50, 120, 250)
 DEFAULT_SELECTED_RPS_WINDOWS = list(APPROVED_RPS_WINDOWS)
-DEFAULT_MIN_RPS_LINES_REQUIRED = 1
 MIN_THRESHOLD = Decimal("0")
 MAX_THRESHOLD = Decimal("100")
 
@@ -22,7 +21,6 @@ class StrategyConfigurationSnapshot:
     version: int
     rps_threshold: int
     selected_rps_windows: list[int]
-    min_rps_lines_required: int
     high_proximity_threshold_pct: str
 
     def to_dict(self) -> dict[str, object]:
@@ -35,7 +33,6 @@ def _serialize(configuration: StrategyConfiguration) -> StrategyConfigurationSna
         version=configuration.version,
         rps_threshold=configuration.rps_threshold,
         selected_rps_windows=_deserialize_selected_rps_windows(configuration.selected_rps_windows),
-        min_rps_lines_required=configuration.min_rps_lines_required,
         high_proximity_threshold_pct=f"{configuration.high_proximity_threshold_pct:.2f}",
     )
 
@@ -66,16 +63,8 @@ def _validate_selected_rps_windows(values: list[int]) -> list[int]:
         raise ValueError("selected_rps_windows must not be empty.")
     unique_values = sorted(set(values), key=lambda window: APPROVED_RPS_WINDOWS.index(window) if window in APPROVED_RPS_WINDOWS else 999)
     if any(window not in APPROVED_RPS_WINDOWS for window in unique_values):
-        raise ValueError("selected_rps_windows must be chosen from the approved RPS windows.")
+        raise ValueError("selected_rps_windows must be chosen from the supported RPS windows.")
     return unique_values
-
-
-def _validate_min_rps_lines_required(value: int, *, selected_rps_windows: list[int]) -> int:
-    if value < 1:
-        raise ValueError("min_rps_lines_required must be at least 1.")
-    if value > len(selected_rps_windows):
-        raise ValueError("min_rps_lines_required cannot exceed the number of selected_rps_windows.")
-    return value
 
 
 def get_active_strategy_configuration(session) -> StrategyConfigurationSnapshot:
@@ -91,7 +80,7 @@ def get_active_strategy_configuration(session) -> StrategyConfigurationSnapshot:
             version=1,
             rps_threshold=DEFAULT_RPS_THRESHOLD,
             selected_rps_windows=serialize_selected_rps_windows(DEFAULT_SELECTED_RPS_WINDOWS),
-            min_rps_lines_required=DEFAULT_MIN_RPS_LINES_REQUIRED,
+            min_rps_lines_required=1,
             high_proximity_threshold_pct=DEFAULT_HIGH_PROXIMITY_THRESHOLD_PCT,
             is_active=True,
         )
@@ -107,15 +96,10 @@ def save_strategy_configuration(
     *,
     rps_threshold: int,
     selected_rps_windows: list[int],
-    min_rps_lines_required: int,
     high_proximity_threshold_pct: Decimal,
 ) -> StrategyConfigurationSnapshot:
     validated_rps_threshold = _validate_rps_threshold(rps_threshold)
     validated_selected_rps_windows = _validate_selected_rps_windows(selected_rps_windows)
-    validated_min_rps_lines_required = _validate_min_rps_lines_required(
-        min_rps_lines_required,
-        selected_rps_windows=validated_selected_rps_windows,
-    )
     validated_high_proximity_threshold_pct = _validate_high_proximity_threshold_pct(
         high_proximity_threshold_pct
     )
@@ -136,7 +120,7 @@ def save_strategy_configuration(
         version=next_version,
         rps_threshold=validated_rps_threshold,
         selected_rps_windows=serialize_selected_rps_windows(validated_selected_rps_windows),
-        min_rps_lines_required=validated_min_rps_lines_required,
+        min_rps_lines_required=1,
         high_proximity_threshold_pct=validated_high_proximity_threshold_pct,
         is_active=True,
     )

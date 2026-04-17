@@ -13,6 +13,8 @@ from stockanalyse_api.services.backtesting import (
     list_backtest_runs,
     launch_backtest_run,
 )
+from stockanalyse_api.services.portfolio_backtest import launch_portfolio_return_backtest
+from stockanalyse_api.services.portfolio_backtest_defaults import get_portfolio_backtest_defaults
 
 router = APIRouter(prefix="/backtests", tags=["backtests"])
 
@@ -22,11 +24,46 @@ class BacktestRunCreateRequest(BaseModel):
     end_date: date
 
 
+class PortfolioReturnBacktestRunCreateRequest(BaseModel):
+    screen_run_id: int
+    holding_days: int | None = None
+    stop_loss_pct: float | None = None
+    portfolio_cap: int | None = None
+    entry_deferral_window_days: int | None = None
+
+
+@router.get("/defaults")
+def read_portfolio_return_backtest_defaults() -> dict[str, object]:
+    return {"defaults": get_portfolio_backtest_defaults()}
+
+
 @router.post("/runs")
 def create_backtest_run(payload: BacktestRunCreateRequest) -> dict[str, object]:
     try:
         with SessionLocal() as session:
             run = launch_backtest_run(session, start_date=payload.start_date, end_date=payload.end_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {"backtest_run": run.to_dict()}
+
+
+@router.post("/portfolio-return/runs")
+def create_portfolio_return_backtest_run(
+    payload: PortfolioReturnBacktestRunCreateRequest,
+) -> dict[str, object]:
+    try:
+        with SessionLocal() as session:
+            run = launch_portfolio_return_backtest(
+                session,
+                screen_run_id=payload.screen_run_id,
+                holding_days=payload.holding_days,
+                stop_loss_pct=payload.stop_loss_pct,
+                portfolio_cap=payload.portfolio_cap,
+                entry_deferral_window_days=payload.entry_deferral_window_days,
+            )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

@@ -7,8 +7,10 @@ export function apiPaths(baseUrl: string) {
     screenTradeDates: `${baseUrl}/screen/trade-dates`,
     watchlist: `${baseUrl}/watchlist`,
     watchlistEntry: (instrumentId: number) => `${baseUrl}/watchlist/${instrumentId}`,
+    backtestDefaults: `${baseUrl}/backtests/defaults`,
     backtestRuns: `${baseUrl}/backtests/runs`,
     backtestRunsLatest: `${baseUrl}/backtests/runs/latest`,
+    portfolioReturnBacktestRuns: `${baseUrl}/backtests/portfolio-return/runs`,
     backtestRunExecute: (runId: number) => `${baseUrl}/backtests/runs/${runId}/execute`,
     stockDetail: (instrumentId: string | number, screenRunId?: string) => {
       const query = screenRunId ? `?screen_run_id=${screenRunId}` : "";

@@ -5,9 +5,14 @@ import { BacktestLaunchPanel } from "@/components/backtests/BacktestLaunchPanel"
 import { resolveApiBaseUrl } from "@/lib/apiBaseUrl";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import { loadMarketDataHealth } from "@/lib/marketDataHealth";
-import type { BacktestRun } from "@/lib/types";
+import type { BacktestRun, ScreenRun } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+type LoadScreenRunContextResult = {
+  data: ScreenRun | null;
+  error: string | null;
+};
 
 async function loadLatestBacktestRun(
   apiBaseUrl: string,
@@ -57,13 +62,84 @@ async function loadBacktestRuns(
   }
 }
 
-export default async function BacktestsPage() {
+async function loadScreenRunContext(
+  apiBaseUrl: string,
+  requestedScreenRunId: string | undefined,
+): Promise<LoadScreenRunContextResult> {
+  const trimmedScreenRunId = requestedScreenRunId?.trim();
+  if (trimmedScreenRunId && !/^\d+$/.test(trimmedScreenRunId)) {
+    return {
+      data: null,
+      error: "screen_run_id 必须是整数。",
+    };
+  }
+
+  const endpoint = trimmedScreenRunId
+    ? `${apiBaseUrl}/screen/runs/${trimmedScreenRunId}`
+    : `${apiBaseUrl}/screen/runs/latest`;
+
+  try {
+    const response = await fetchWithRetry(endpoint, {
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      return {
+        data: null,
+        error: trimmedScreenRunId
+          ? `无法加载指定的 screen run（${response.status}）。`
+          : `无法加载最近一次 screen run（${response.status}）。`,
+      };
+    }
+
+    const payload = (await response.json()) as { screen_run: ScreenRun | null };
+    if (payload.screen_run === null) {
+      return {
+        data: null,
+        error: trimmedScreenRunId
+          ? "指定的 screen run 不存在。"
+          : "尚无已完成的 screen run，完成一次筛选后即可启动 portfolio-return 回测。",
+      };
+    }
+
+    return {
+      data: payload.screen_run,
+      error: payload.screen_run.status === "completed"
+        ? null
+        : `当前 screen run #${payload.screen_run.id} 状态为 ${payload.screen_run.status}，只能从 completed 结果启动回测。`,
+    };
+  } catch {
+    return {
+      data: null,
+      error: trimmedScreenRunId
+        ? "指定 screen run 接口不可达，请检查后端服务与 API 地址。"
+        : "最近一次 screen run 接口不可达，请检查后端服务与 API 地址。",
+    };
+  }
+}
+
+export default async function BacktestsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ screen_run_id?: string }>;
+}) {
   const apiBaseUrl = await resolveApiBaseUrl();
-  const [{ data, error }, { data: runs, error: runsError }, { health, error: healthError }] = await Promise.all([
+  const resolvedSearchParams = await searchParams;
+  const [
+    { data, error },
+    { data: runs, error: runsError },
+    { data: screenRun, error: screenRunError },
+    { health, error: healthError },
+  ] = await Promise.all([
     loadLatestBacktestRun(apiBaseUrl),
     loadBacktestRuns(apiBaseUrl),
+    loadScreenRunContext(apiBaseUrl, resolvedSearchParams.screen_run_id),
     loadMarketDataHealth(apiBaseUrl),
   ]);
+  const visibleRuns = data && runs.every((run) => run.id !== data.id) ? [data, ...runs] : runs;
+  const legacyRunCount = visibleRuns.filter(
+    (run) => run.backtest_lifecycle === "legacy_condition_hit",
+  ).length;
+  const screenRunId = screenRun?.status === "completed" ? screenRun.id : null;
 
   return (
     <main id="main-content" className="dashboard-shell">
@@ -77,11 +153,18 @@ export default async function BacktestsPage() {
         <span>回测</span>
       </nav>
       <WorkflowTrustBanner workflowLabel="回测工作流" health={health} error={healthError} />
+      {legacyRunCount ? (
+        <p className="hero-text">
+          当前页面检测到 {legacyRunCount} 条历史 condition-hit runs；它们会和
+          portfolio-return lifecycle 分开展示，且不会进入跨-run 组合层汇总。
+        </p>
+      ) : null}
       <BacktestLaunchPanel
         apiBaseUrl={apiBaseUrl}
+        screenRunId={screenRunId}
         initialRun={data}
-        initialRuns={runs}
-        initialError={error ?? runsError}
+        initialRuns={visibleRuns}
+        initialError={screenRunError ?? error ?? runsError}
       />
     </main>
   );

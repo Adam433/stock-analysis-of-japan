@@ -101,7 +101,6 @@ class ChartDataTests(unittest.TestCase):
                 session,
                 rps_threshold=90,
                 selected_rps_windows=[50, 120, 250],
-                min_rps_lines_required=1,
                 high_proximity_threshold_pct=Decimal("5.00"),
             )
             materialize_derived_indicator_facts(session)

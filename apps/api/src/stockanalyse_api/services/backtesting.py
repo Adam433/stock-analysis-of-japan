@@ -21,8 +21,10 @@ from stockanalyse_api.services.strategy_config import get_active_strategy_config
 @dataclass(slots=True)
 class BacktestRunSummary:
     id: int
+    source_screen_run_id: int | None
     strategy_configuration_id: int
     status: str
+    backtest_lifecycle: str
     start_date: str
     end_date: str
     started_at: str
@@ -31,6 +33,10 @@ class BacktestRunSummary:
     dataset_trade_date_start: str | None
     dataset_trade_date_end: str | None
     dataset_checksum: str | None
+    effective_holding_days: int | None
+    effective_stop_loss_pct: str | None
+    effective_portfolio_cap: int | None
+    effective_entry_deferral_window_days: int | None
     error_message: str | None
     result_summary: dict[str, object]
     parameter_set: dict[str, object]
@@ -39,11 +45,13 @@ class BacktestRunSummary:
         return asdict(self)
 
 
-def _serialize(run: BacktestRun, configuration: StrategyConfiguration) -> BacktestRunSummary:
+def serialize_backtest_run(run: BacktestRun, configuration: StrategyConfiguration) -> BacktestRunSummary:
     return BacktestRunSummary(
         id=run.id,
+        source_screen_run_id=run.source_screen_run_id,
         strategy_configuration_id=run.strategy_configuration_id,
         status=run.status,
+        backtest_lifecycle=run.backtest_lifecycle,
         start_date=run.start_date.isoformat(),
         end_date=run.end_date.isoformat(),
         started_at=run.started_at.isoformat(),
@@ -52,6 +60,12 @@ def _serialize(run: BacktestRun, configuration: StrategyConfiguration) -> Backte
         dataset_trade_date_start=run.dataset_trade_date_start.isoformat() if run.dataset_trade_date_start is not None else None,
         dataset_trade_date_end=run.dataset_trade_date_end.isoformat() if run.dataset_trade_date_end is not None else None,
         dataset_checksum=run.dataset_checksum,
+        effective_holding_days=run.effective_holding_days,
+        effective_stop_loss_pct=(
+            f"{run.effective_stop_loss_pct:.4f}" if run.effective_stop_loss_pct is not None else None
+        ),
+        effective_portfolio_cap=run.effective_portfolio_cap,
+        effective_entry_deferral_window_days=run.effective_entry_deferral_window_days,
         error_message=run.error_message,
         result_summary={
             "trade_dates_evaluated": run.trade_dates_evaluated,
@@ -71,7 +85,6 @@ def _serialize(run: BacktestRun, configuration: StrategyConfiguration) -> Backte
             "version": configuration.version,
             "rps_threshold": configuration.rps_threshold,
             "selected_rps_windows": [int(part) for part in configuration.selected_rps_windows.split(",") if part],
-            "min_rps_lines_required": configuration.min_rps_lines_required,
             "high_proximity_threshold_pct": f"{configuration.high_proximity_threshold_pct:.2f}",
         },
     )
@@ -93,6 +106,7 @@ def launch_backtest_run(session, *, start_date: date, end_date: date) -> Backtes
         started_at=datetime.now(UTC),
         completed_at=None,
         rps_definition_version=APPROVED_RPS_DEFINITION_VERSION,
+        backtest_lifecycle="portfolio_return",
         status="running",
         error_message=None,
     )
@@ -100,7 +114,7 @@ def launch_backtest_run(session, *, start_date: date, end_date: date) -> Backtes
     session.commit()
     session.refresh(run)
 
-    return _serialize(run, configuration)
+    return serialize_backtest_run(run, configuration)
 
 
 def get_backtest_run(session, run_id: int) -> BacktestRunSummary | None:
@@ -111,7 +125,7 @@ def get_backtest_run(session, run_id: int) -> BacktestRunSummary | None:
     configuration = session.get(StrategyConfiguration, run.strategy_configuration_id)
     if configuration is None:
         return None
-    return _serialize(run, configuration)
+    return serialize_backtest_run(run, configuration)
 
 
 def get_latest_backtest_run(session) -> BacktestRunSummary | None:
@@ -132,7 +146,7 @@ def list_backtest_runs(session, *, limit: int = 50, offset: int = 0) -> list[Bac
         .offset(offset)
     ).all()
 
-    return [_serialize(run, configuration) for run, configuration in rows]
+    return [serialize_backtest_run(run, configuration) for run, configuration in rows]
 
 
 def execute_backtest_run(session, run_id: int) -> BacktestRunSummary:
@@ -217,4 +231,4 @@ def execute_backtest_run(session, run_id: int) -> BacktestRunSummary:
     session.commit()
     session.refresh(run)
 
-    return _serialize(run, configuration)
+    return serialize_backtest_run(run, configuration)

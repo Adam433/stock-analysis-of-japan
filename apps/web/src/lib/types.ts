@@ -4,7 +4,6 @@ export type StrategyConfiguration = {
   rps_threshold: number;
   high_proximity_threshold_pct: string;
   selected_rps_windows: number[];
-  min_rps_lines_required: number;
 };
 
 export type StrategyConfigurationResponse = {
@@ -13,7 +12,6 @@ export type StrategyConfigurationResponse = {
     rps_threshold: { min: number; max: number; default: number };
     high_proximity_threshold_pct: { min: string; max: string; default: string };
     selected_rps_windows: { approved: number[]; default: number[] };
-    min_rps_lines_required: { min: number; max: number; default: number };
   };
 };
 
@@ -45,15 +43,30 @@ export type ScreenRun = {
     rps_threshold: number;
     high_proximity_threshold_pct: string;
     selected_rps_windows: number[];
-    min_rps_lines_required: number;
   };
   qualified_results: ScreenRunResult[];
 };
 
+export type BacktestLifecycle = "portfolio_return" | "legacy_condition_hit";
+export type PortfolioBacktestFieldName =
+  | "holding_days"
+  | "stop_loss_pct"
+  | "portfolio_cap"
+  | "entry_deferral_window_days";
+
+export type PortfolioBacktestDefaults = {
+  holding_days: number;
+  stop_loss_pct: number;
+  portfolio_cap: number;
+  entry_deferral_window_days: number;
+};
+
 export type BacktestRun = {
   id: number;
+  source_screen_run_id: number | null;
   strategy_configuration_id: number;
   status: string;
+  backtest_lifecycle: BacktestLifecycle;
   start_date: string;
   end_date: string;
   started_at: string;
@@ -62,6 +75,10 @@ export type BacktestRun = {
   dataset_trade_date_start: string | null;
   dataset_trade_date_end: string | null;
   dataset_checksum: string | null;
+  effective_holding_days: number | null;
+  effective_stop_loss_pct: string | null;
+  effective_portfolio_cap: number | null;
+  effective_entry_deferral_window_days: number | null;
   error_message: string | null;
   result_summary: {
     trade_dates_evaluated: number;
@@ -78,7 +95,6 @@ export type BacktestRun = {
     rps_threshold: number;
     high_proximity_threshold_pct: string;
     selected_rps_windows: number[];
-    min_rps_lines_required: number;
   };
 };
 

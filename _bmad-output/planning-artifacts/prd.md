@@ -380,10 +380,12 @@ The watchlist workflow must behave like a research notebook rather than a bookma
 - FR2: The user can edit the parameter values of a screening configuration.
 - FR3: The user can define the RPS threshold used by the strategy.
 - FR4: The user can define the 52-week-high proximity threshold used by the strategy.
-- FR5: The user can run the strategy using the currently selected parameter set.
+- FR5: The user can run the strategy using either parameters supplied directly from the current form or a saved configuration version, without requiring the form parameters to be saved as a configuration first.
 - FR6: The user can rerun the strategy after changing parameters.
-- FR7: The product can preserve the parameter values used for each screen run.
+- FR7: The product can preserve an independent parameter snapshot on each screen run that records the exact values used, regardless of whether those values came from an ad-hoc form submission or a saved configuration version.
 - FR8: The product can preserve the parameter values used for each backtest run.
+- FR62: The product distinguishes between the user's current form parameters, the currently active saved configuration, and the parameter snapshot that governed a specific screen run, and exposes this distinction in run-detail and result-list traceability surfaces.
+- FR63: The product can save the current form parameters as a new configuration version through an explicit user action that is independent from launching a screen run, and rejects no-op saves whose values are identical to the latest existing version.
 
 ### Market Data & Universe
 
@@ -397,7 +399,7 @@ The watchlist workflow must behave like a research notebook rather than a bookma
 ### Indicator & Signal Evaluation
 
 - FR15: The product can calculate approved RPS-related values for supported securities for the configured lookback windows required by screening, chart review, and backtesting, while preserving a documented business definition, a fixed ranking universe policy, and a consistent normalization rule.
-- FR16: The product can determine whether at least a user-configured minimum number of selected RPS lines satisfy the strategy threshold condition using the same approved definition and data semantics used by charting and backtesting.
+- FR16: The product can determine whether every user-selected RPS line satisfies the strategy threshold condition using the same approved definition and data semantics used by charting and backtesting.
 - FR17: The product can calculate each security's proximity to its 52-week high.
 - FR18: The product can determine whether a security satisfies the configured 52-week-high proximity condition.
 - FR19: The product can evaluate whether a security passes the full MVP strategy based on the active conditions.
@@ -413,6 +415,9 @@ The watchlist workflow must behave like a research notebook rather than a bookma
 - FR26: The user can tell from the result detail why a stock qualified for the screen.
 - FR27: The product can associate each result set with the run date and parameter set that produced it.
 - FR55: The user can select an available historical trade date for a screening run when reviewing past market states.
+- FR65: The user can review a screened security's price chart, valuation indicators (PE, PB), and fiscal-year net income history directly inside the screening result panel, without navigating to the stock detail page.
+- FR66: The screening result panel can incrementally load the inline analysis data of additional result cards as the user scrolls, rather than loading every card's analysis payload at first render; result sets below an explicit threshold may load all at once.
+- FR67: The product reuses the existing charting library and stock-detail data contracts to render inline screening-result analysis cards, extending those contracts where required for valuation and fiscal-year data, and does not introduce a separate visualization framework for that purpose.
 
 ### Chart Review & Explainability
 
@@ -432,16 +437,23 @@ The watchlist workflow must behave like a research notebook rather than a bookma
 - FR38: The user can record an observation reason for a watchlist entry.
 - FR39: The product can retain the date when a security was added to the watchlist.
 - FR40: The user can review saved watchlist notes, reasons, and added dates later.
+- FR64: When a user adds a stock to the watchlist from a screen result, the product automatically attaches the originating screen_run_id and screen trade date to that watchlist entry; if the same canonical instrument is added from a different screen run, the product updates the entry's attached screen_run_id and trade date to the most recent addition rather than creating a duplicate entry; if the entry is added from a non-screening surface (e.g., stock detail), the screen_run_id is recorded as null and the UI distinguishes that case explicitly.
 
 ### Backtesting
 
-- FR41: The user can launch a historical backtest for the MVP strategy.
+- FR41: The user can launch a portfolio-return backtest that takes a completed screen run as its input and simulates the subsequent performance of the qualified securities under an explicit entry, sizing, holding, and stop-loss policy.
 - FR42: The user can select the historical date range used for a backtest.
 - FR43: The product can run the backtest using the same parameterized conditions used by the screen.
-- FR44: The product can return a reproducible backtest result for the same historical range and parameter set.
-- FR45: The user can review the result of a completed backtest.
-- FR46: The product can associate a backtest result with the parameter set and historical range that produced it.
-- FR47: The user can use backtest outputs to compare strategy adjustments across runs.
+- FR44: The product can return a reproducible backtest result for the same input screen run, holding parameters, stop-loss parameters, and stored dataset, and records a dataset-version identifier on every backtest run so that later corrections to the underlying market data are detectable rather than silently changing historical outputs.
+- FR45: The user can review the result of a completed backtest, including portfolio cumulative return, win rate (defined as the share of closed positions whose realized return is strictly greater than zero), maximum drawdown (defined as the largest peak-to-trough decline of the portfolio equity curve), the portfolio equity curve, and the per-security return distribution.
+- FR46: The product can associate a backtest result with the originating screen_run_id, strategy parameter snapshot, holding parameters, stop-loss parameters, portfolio cap, ranking policy used for cap exclusion, and simulation date range that produced it.
+- FR47: The user can use portfolio-return backtest outputs to compare strategy adjustments across runs, including differences in holding period, stop-loss threshold, portfolio cap, and the source screen run.
+- FR68: The product executes backtest entries at the opening price of the trading day immediately after the screening trade date (T+1 open) and does not use post-close information from the screening day itself to simulate an entry; if T+1 is a non-trading day for that security or its T+1 open price is unavailable, the product defers entry to the next trading day with a valid open price within a configurable entry-deferral window measured in trading days (MVP default = 5 trading days); if a security is suspended, halted, delisted, or undergoes a corporate action that invalidates a tradable open price across the entire deferral window, the product excludes that security from the simulated portfolio and records the exclusion reason on the run.
+- FR69: The product sizes backtest positions using equal weighting across the qualified securities up to a configurable portfolio cap; when the qualified set exceeds the cap, the product retains the top entries ranked by descending RPS composite score (with ticker as a deterministic tie-breaker) as the MVP ranking policy and records the policy identifier on the run; the product allows fractional share sizing as an MVP simplification; the product does not rebalance, re-enter, or add positions once the initial entry is executed; if the qualified set is empty after exclusions, the product produces a fully populated empty-portfolio result rather than failing.
+- FR70: The product enforces a configurable per-security stop-loss threshold measured against each position's own entry price; the breach signal is computed using the daily adjusted close price as the single authoritative input; on breach, the product closes that position at the next trading day's opening price (including any gap below the stop-loss level); if the next trading day is a halt, suspension, or otherwise lacks a valid open, the product defers closure to the next available trading day with a valid open price; the released cash is not redeployed within the same backtest.
+- FR71: The user can configure the backtest holding period (in trading days), per-security stop-loss threshold, portfolio cap, and entry-deferral window (in trading days) at launch time; the MVP ships explicit default values of 20 trading days holding, -8% per-security stop loss, 20-security portfolio cap, and 5 trading days entry-deferral window, validates that holding period is a positive integer, stop-loss threshold lies in (-1, 0), portfolio cap is an integer ≥ 1, and entry-deferral window is an integer ≥ 1, and persists the effective values on every backtest run.
+- FR72: The user can launch a backtest as a single action that both persists the backtest record and executes the simulation; the launch action is debounced so a duplicate click before the first response does not produce a second run; if persistence succeeds but execution does not start, the resulting run is marked as failed with a recoverable status so the user can retry from the same record; the MVP does not expose a separate "execute" action for an already-created run and does not expose a cancel action mid-execution.
+- FR73: The product preserves a `backtest_lifecycle` field on every backtest run record whose values include `portfolio_return` (the MVP default for any run produced by the portfolio-return execution model) and `legacy_condition_hit` (any run that predates the portfolio-return execution model); the schema migration that introduces this field backfills all pre-existing backtest run records with `legacy_condition_hit` rather than leaving the field null, and the result-list, comparison, and aggregation surfaces never mix the two lifecycle classes into a single portfolio-return statistic.
 
 ### Data Health & Operational Visibility
 
@@ -450,7 +462,7 @@ The watchlist workflow must behave like a research notebook rather than a bookma
 - FR50: The user can identify whether a suspicious screen or backtest result may be caused by stale or incomplete data.
 - FR51: The product can expose enough run and data context to investigate unexpected outputs.
 - FR56: The user can configure which approved RPS lookback windows participate in the active screening rule.
-- FR57: The user can configure how many selected RPS lines must satisfy the threshold condition for a security to qualify.
+- FR57: The user can configure which selected RPS lines participate in the threshold condition for a security to qualify.
 - FR58: The backend can trigger or maintain refresh execution state automatically at startup and on the expected daily cadence.
 - FR59: The product can display the last-updated timestamp of the approved universe manifest without exposing unnecessary local file path details in the primary UI.
 - FR60: The product can present chart dates in a localized, date-only format appropriate for the primary user workflow.
@@ -471,6 +483,7 @@ The watchlist workflow must behave like a research notebook rather than a bookma
 - The system shall persist watchlist add, edit, and remove actions within 2 seconds for 95% of requests under normal usage.
 - The system shall present explicit in-progress status for screen and backtest operations that cannot complete within 3 seconds.
 - The system shall avoid hour-scale waits for routine screening and backtesting tasks in the MVP workflow.
+- NFR25: The system shall render the first batch of inline analysis cards on the screening result panel within 3 seconds for result sets up to 50 qualified securities under normal usage; for result sets above 50, the system shall render the result-list skeleton (without inline analysis payloads) within 3 seconds and then progressively populate analysis cards as the user scrolls.
 
 ### Reliability
 

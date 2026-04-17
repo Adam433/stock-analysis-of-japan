@@ -11,13 +11,14 @@ from stockanalyse_api.db.base import Base
 from stockanalyse_api.domain.indicators.models import DerivedIndicatorDaily
 from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
-from stockanalyse_api.domain.screens.models import ScreenRun, ScreenRunResult
+from stockanalyse_api.domain.screens.models import ScreenRun, ScreenRunResult, StrategyConfiguration
 from stockanalyse_api.services.factor_materialization import materialize_derived_indicator_facts
 from stockanalyse_api.services.rps_semantics import (
     APPROVED_RPS_DEFINITION_VERSION,
     LEGACY_UNRECORDED_RPS_DEFINITION_VERSION,
 )
 from stockanalyse_api.services.screening import (
+    evaluate_indicator_snapshot,
     execute_screen_run,
     get_latest_screen_run,
     get_screen_run,
@@ -98,7 +99,6 @@ class ScreeningTests(unittest.TestCase):
                 session,
                 rps_threshold=90,
                 selected_rps_windows=[50, 120, 250],
-                min_rps_lines_required=1,
                 high_proximity_threshold_pct=Decimal("5.00"),
             )
             materialize_derived_indicator_facts(session)
@@ -116,7 +116,6 @@ class ScreeningTests(unittest.TestCase):
         self.assertEqual(summary.qualified_count, 1)
         self.assertEqual(summary.parameter_set["version"], 2)
         self.assertEqual(summary.parameter_set["selected_rps_windows"], [50, 120, 250])
-        self.assertEqual(summary.parameter_set["min_rps_lines_required"], 1)
         self.assertEqual(summary.rps_definition_version, APPROVED_RPS_DEFINITION_VERSION)
         self.assertEqual(len(summary.qualified_results), 1)
         self.assertEqual(summary.qualified_results[0]["symbol"], "7203")
@@ -171,7 +170,7 @@ class ScreeningTests(unittest.TestCase):
 
         self.assertEqual(summary.trade_date, selected_trade_date.isoformat())
 
-    def test_execute_screen_run_respects_selected_windows_and_minimum_count(self) -> None:
+    def test_execute_screen_run_respects_selected_windows(self) -> None:
         self._seed_market_data()
 
         with self.session_factory() as session:
@@ -179,13 +178,37 @@ class ScreeningTests(unittest.TestCase):
                 session,
                 rps_threshold=90,
                 selected_rps_windows=[50, 120],
-                min_rps_lines_required=2,
                 high_proximity_threshold_pct=Decimal("5.00"),
             )
             summary = execute_screen_run(session)
 
         self.assertEqual(summary.parameter_set["selected_rps_windows"], [50, 120])
-        self.assertEqual(summary.parameter_set["min_rps_lines_required"], 2)
+
+    def test_rps_condition_requires_every_selected_window_to_meet_threshold(self) -> None:
+        indicator_row = DerivedIndicatorDaily(
+            instrument_id=1,
+            trade_date=date(2025, 1, 1),
+            rps_50=Decimal("84.00"),
+            rps_120=Decimal("92.00"),
+            rps_250=None,
+            fifty_two_week_high=Decimal("100.00"),
+            high_proximity_ratio=Decimal("0.98"),
+        )
+        configuration = StrategyConfiguration(
+            version=1,
+            rps_threshold=90,
+            selected_rps_windows="50,120",
+            min_rps_lines_required=1,
+            high_proximity_threshold_pct=Decimal("5.00"),
+            is_active=True,
+        )
+
+        evaluation = evaluate_indicator_snapshot(indicator_row, configuration)
+
+        self.assertEqual(evaluation["selected_rps_windows"], [50, 120])
+        self.assertEqual(evaluation["satisfied_rps_window_count"], 1)
+        self.assertFalse(evaluation["rps_condition_passed"])
+        self.assertFalse(evaluation["passed"])
 
     def test_execute_screen_run_rejects_unavailable_trade_date(self) -> None:
         self._seed_market_data()

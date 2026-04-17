@@ -149,12 +149,12 @@ export function StockDetailCharts({
     const priceChart = createChart(priceContainer, {
       width: priceContainer.clientWidth,
       height: 320,
-      autoSize: true,
+      autoSize: false,
     });
     const rpsChart = createChart(rpsContainer, {
       width: rpsContainer.clientWidth,
       height: 220,
-      autoSize: true,
+      autoSize: false,
     });
 
     applySharedChartTheme(priceChart);

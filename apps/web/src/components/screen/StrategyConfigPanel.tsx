@@ -5,7 +5,7 @@ import Link from "next/link";
 
 import { WatchlistToggleButton } from "@/components/watchlist/WatchlistToggleButton";
 import { formatTimestamp, formatRpsWindows } from "@/lib/formatters";
-import type { StrategyConfigurationResponse, ScreenRun, ScreenRunResult } from "@/lib/types";
+import type { StrategyConfiguration, StrategyConfigurationResponse, ScreenRun, ScreenRunResult } from "@/lib/types";
 
 type ScreeningTradeDateOption = {
   trade_date: string;
@@ -34,6 +34,9 @@ export function StrategyConfigPanel({
   initialTradeDateError,
 }: StrategyConfigPanelProps) {
   const [watchlistInstrumentIds, setWatchlistInstrumentIds] = useState<number[]>([]);
+  const [savedConfiguration, setSavedConfiguration] = useState<StrategyConfiguration | null>(
+    initialData?.configuration ?? null,
+  );
   const [rpsThreshold, setRpsThreshold] = useState(initialData?.configuration.rps_threshold ?? 90);
   const [highProximityThresholdPct, setHighProximityThresholdPct] = useState(
     initialData?.configuration.high_proximity_threshold_pct ?? "5.00",
@@ -42,11 +45,6 @@ export function StrategyConfigPanel({
     initialData?.configuration.selected_rps_windows ??
       initialData?.validation?.selected_rps_windows.default ??
       [50, 120, 250],
-  );
-  const [minRpsLinesRequired, setMinRpsLinesRequired] = useState(
-    initialData?.configuration.min_rps_lines_required ??
-      initialData?.validation?.min_rps_lines_required.default ??
-      1,
   );
   const [activeVersion, setActiveVersion] = useState(initialData?.configuration.version ?? 0);
   const [message, setMessage] = useState(
@@ -66,13 +64,20 @@ export function StrategyConfigPanel({
     [50, 120, 250];
   const hasLoadedConfiguration = Boolean(initialData);
   const canRunWithoutTradeDateList = Boolean(initialTradeDateError) && !availableTradeDates.length;
+  const hasUnsavedChanges =
+    savedConfiguration !== null &&
+    (
+      rpsThreshold !== savedConfiguration.rps_threshold ||
+      highProximityThresholdPct !== savedConfiguration.high_proximity_threshold_pct ||
+      selectedRpsWindows.join(",") !== savedConfiguration.selected_rps_windows.join(",")
+    );
 
   useEffect(() => {
     if (initialData) {
+      setSavedConfiguration(initialData.configuration);
       setRpsThreshold(initialData.configuration.rps_threshold);
       setHighProximityThresholdPct(initialData.configuration.high_proximity_threshold_pct);
       setSelectedRpsWindows(initialData.configuration.selected_rps_windows);
-      setMinRpsLinesRequired(initialData.configuration.min_rps_lines_required);
       setActiveVersion(initialData.configuration.version);
     }
   }, [initialData]);
@@ -125,15 +130,7 @@ export function StrategyConfigPanel({
     }
 
     if (!selectedRpsWindows.length) {
-      return "至少需要选择一个批准的 RPS 窗口。";
-    }
-
-    if (
-      Number.isNaN(minRpsLinesRequired) ||
-      minRpsLinesRequired < 1 ||
-      minRpsLinesRequired > selectedRpsWindows.length
-    ) {
-      return "最少满足条数必须在 1 到已选 RPS 窗口数量之间。";
+      return "至少需要选择一个纳入筛选的 RPS 周期。";
     }
 
     return null;
@@ -160,7 +157,6 @@ export function StrategyConfigPanel({
           rps_threshold: rpsThreshold,
           high_proximity_threshold_pct: highProximityThresholdPct,
           selected_rps_windows: selectedRpsWindows,
-          min_rps_lines_required: minRpsLinesRequired,
         }),
       });
 
@@ -170,11 +166,11 @@ export function StrategyConfigPanel({
       }
 
       const payload = (await response.json()) as StrategyConfigurationResponse;
+      setSavedConfiguration(payload.configuration);
       setActiveVersion(payload.configuration.version);
       setRpsThreshold(payload.configuration.rps_threshold);
       setHighProximityThresholdPct(payload.configuration.high_proximity_threshold_pct);
       setSelectedRpsWindows(payload.configuration.selected_rps_windows);
-      setMinRpsLinesRequired(payload.configuration.min_rps_lines_required);
       setSaveState("saved");
       setMessage("配置已保存，新参数集将在下一次筛选中生效。");
     } catch (error) {
@@ -188,6 +184,11 @@ export function StrategyConfigPanel({
   }
 
   async function handleRunScreen() {
+    if (hasUnsavedChanges) {
+      setRunState("error");
+      setRunMessage("当前有未保存的参数改动。请先保存参数集，再启动筛选。");
+      return;
+    }
     setRunState("running");
     setRunMessage(
       selectedTradeDate
@@ -225,12 +226,9 @@ export function StrategyConfigPanel({
 
   function handleToggleRpsWindow(window: number) {
     setSelectedRpsWindows((current) => {
-      const next = current.includes(window)
+      return current.includes(window)
         ? current.filter((value) => value !== window)
         : [...current, window].sort((left, right) => left - right);
-
-      setMinRpsLinesRequired((existing) => Math.min(existing, next.length || 1));
-      return next;
     });
   }
 
@@ -254,7 +252,7 @@ export function StrategyConfigPanel({
         <article className="screen-summary-card">
           <p className="status-label">RPS 规则</p>
           <h2>{hasLoadedConfiguration ? rpsThreshold : "不可用"}</h2>
-          <p className="status-copy">至少一条受支持的 RPS 曲线需达到该阈值。</p>
+          <p className="status-copy">所有纳入筛选的 RPS 曲线都需达到该阈值才视为通过。</p>
         </article>
         <article className="screen-summary-card">
           <p className="status-label">52 周高点规则</p>
@@ -262,14 +260,9 @@ export function StrategyConfigPanel({
           <p className="status-copy">相对 52 周高点允许的最大回撤幅度。</p>
         </article>
         <article className="screen-summary-card">
-          <p className="status-label">RPS 窗口</p>
+          <p className="status-label">纳入筛选的 RPS</p>
           <h2>{hasLoadedConfiguration ? formatRpsWindows(selectedRpsWindows) : "不可用"}</h2>
-          <p className="status-copy">只允许从批准窗口集合里选择，便于后续统一扩展。</p>
-        </article>
-        <article className="screen-summary-card">
-          <p className="status-label">最少满足条数</p>
-          <h2>{hasLoadedConfiguration ? minRpsLinesRequired : "不可用"}</h2>
-          <p className="status-copy">至少有这么多条已选 RPS 线达到阈值才算通过。</p>
+          <p className="status-copy">这里勾选的每个周期都会成为正式筛选条件，并且都必须满足阈值。</p>
         </article>
       </div>
 
@@ -327,7 +320,7 @@ export function StrategyConfigPanel({
         </label>
 
         <fieldset className="strategy-field">
-          <span>批准的 RPS 窗口</span>
+          <span>需要纳入筛选的 RPS</span>
           <div className="strategy-checkbox-grid">
             {approvedRpsWindows.map((window) => (
               <label key={window} className="strategy-checkbox-option">
@@ -340,22 +333,8 @@ export function StrategyConfigPanel({
               </label>
             ))}
           </div>
-          <small>当前只允许选择批准集合中的窗口，新增窗口由后端统一批准后即可出现。</small>
+          <small>勾选哪些周期，就按哪些周期判断；所有被勾选的 RPS 都必须达到阈值。</small>
         </fieldset>
-
-        <label className="strategy-field">
-          <span>最少满足条数</span>
-          <input
-            name="min_rps_lines_required"
-            type="number"
-            min={1}
-            max={Math.max(selectedRpsWindows.length, 1)}
-            value={minRpsLinesRequired}
-            aria-invalid={saveState === "error" && message.includes("最少满足条数")}
-            onChange={(event) => setMinRpsLinesRequired(Number(event.target.value))}
-          />
-          <small>要求至少几条已选 RPS 线超过阈值，最大值等于已选窗口数。</small>
-        </label>
 
         <div className="strategy-actions">
           <div className="strategy-button-row">
@@ -367,6 +346,7 @@ export function StrategyConfigPanel({
               className="strategy-button strategy-button--secondary"
               disabled={
                 !hasLoadedConfiguration ||
+                hasUnsavedChanges ||
                 runState === "running" ||
                 (!availableTradeDates.length && !canRunWithoutTradeDateList)
               }
@@ -376,6 +356,11 @@ export function StrategyConfigPanel({
             </button>
           </div>
           <p className={`strategy-message strategy-message--${saveState}`} role={saveState === "error" ? "alert" : "status"}>{message}</p>
+          {hasUnsavedChanges ? (
+            <p className="strategy-message strategy-message--error" role="status">
+              当前有未保存的参数改动。保存后，新的参数集才会用于下一次筛选。
+            </p>
+          ) : null}
           <p className={`strategy-message strategy-message--${runState}`} role={runState === "error" ? "alert" : "status"}>{runMessage}</p>
         </div>
       </form>
@@ -386,7 +371,7 @@ export function StrategyConfigPanel({
           <h2>入选股票及其直接上下文。</h2>
           <p className="status-copy">
             {latestRun
-              ? `筛选 #${latestRun.id} 于 ${formatTimestamp(latestRun.executed_at)} 执行，使用参数集 v${latestRun.parameter_set.version}，窗口 ${formatRpsWindows(latestRun.parameter_set.selected_rps_windows)}，至少满足 ${latestRun.parameter_set.min_rps_lines_required} 条。`
+              ? `筛选 #${latestRun.id} 于 ${formatTimestamp(latestRun.executed_at)} 执行，使用参数集 v${latestRun.parameter_set.version}，窗口 ${formatRpsWindows(latestRun.parameter_set.selected_rps_windows)}。`
               : "启动一次筛选以填充结果列表。"}
           </p>
         </div>
@@ -407,12 +392,8 @@ export function StrategyConfigPanel({
                 <h3>{latestRun.total_candidates}</h3>
               </article>
               <article className="run-metadata-card">
-                <p className="status-label">RPS 窗口</p>
+                <p className="status-label">纳入筛选的 RPS</p>
                 <h3>{formatRpsWindows(latestRun.parameter_set.selected_rps_windows)}</h3>
-              </article>
-              <article className="run-metadata-card">
-                <p className="status-label">最少满足条数</p>
-                <h3>{latestRun.parameter_set.min_rps_lines_required}</h3>
               </article>
             </div>
 
@@ -471,8 +452,7 @@ export function StrategyConfigPanel({
                       <li>
                         参数集：RPS {latestRun.parameter_set.rps_threshold} / 距高点{" "}
                         {latestRun.parameter_set.high_proximity_threshold_pct}% / 窗口{" "}
-                        {formatRpsWindows(latestRun.parameter_set.selected_rps_windows)} / 至少满足{" "}
-                        {latestRun.parameter_set.min_rps_lines_required} 条
+                        {formatRpsWindows(latestRun.parameter_set.selected_rps_windows)}
                       </li>
                       <li>
                         RPS 条件：{result.rps_condition_passed ? "通过" : "未通过"}

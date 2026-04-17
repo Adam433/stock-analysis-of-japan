@@ -896,7 +896,7 @@ This addendum records approved scope adjustments discovered during real usage af
 ### Screening Parameterization Boundaries
 
 - The approved RPS business definition remains fixed.
-- What becomes configurable is the active set of approved RPS lookback windows and the minimum number of selected lines that must satisfy the threshold.
+- What becomes configurable is the active set of approved RPS lookback windows that participate in screening, and every selected line must satisfy the threshold.
 - This change does not authorize arbitrary user-defined factor semantics.
 - Implementation must choose one bounded strategy:
   - pre-materialize an approved set of windows, or

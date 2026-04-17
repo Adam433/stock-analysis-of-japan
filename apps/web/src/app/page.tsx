@@ -71,18 +71,18 @@ export default async function HomePage() {
 
   return (
     <main id="main-content" className="dashboard-shell">
+      <nav className="top-nav">
+        <span>数据健康</span>
+        <span>/</span>
+        <Link href="/screen">策略配置</Link>
+        <span>/</span>
+        <Link href="/watchlist">观察列表</Link>
+        <span>/</span>
+        <Link href="/backtests">回测</Link>
+      </nav>
       <section className="hero-panel">
         <div className="hero-copy">
           <p className="eyebrow">stockAnalyse</p>
-          <p className="top-nav">
-            <span>数据健康</span>
-            <span>/</span>
-            <Link href="/screen">策略配置</Link>
-            <span>/</span>
-            <Link href="/watchlist">观察列表</Link>
-            <span>/</span>
-            <Link href="/backtests">回测</Link>
-          </p>
           <h1>日股数据的运营可信视图。</h1>
           <p className="hero-text">
             Story 1.4 把外壳转化为实时健康面：数据新鲜度、部分覆盖与失败的刷新任务

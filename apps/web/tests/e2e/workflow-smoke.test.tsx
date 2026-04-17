@@ -79,7 +79,6 @@ describe("workflow smoke", () => {
               rps_threshold: 90,
               high_proximity_threshold_pct: "5.00",
               selected_rps_windows: [50, 120, 250],
-              min_rps_lines_required: 2,
             },
           }),
           { status: 200 },
@@ -145,7 +144,9 @@ describe("workflow smoke", () => {
     expect(screen.getByText("banner:观察列表工作流")).toBeInTheDocument();
     unmountWatchlist();
 
-    const { unmount: unmountBacktests } = render(await BacktestsPage());
+    const { unmount: unmountBacktests } = render(
+      await BacktestsPage({ searchParams: Promise.resolve({}) }),
+    );
     expect(screen.getByText("backtest-panel")).toBeInTheDocument();
     expect(screen.getByText("banner:回测工作流")).toBeInTheDocument();
     unmountBacktests();

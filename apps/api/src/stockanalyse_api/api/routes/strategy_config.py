@@ -9,7 +9,6 @@ from stockanalyse_api.db.session import SessionLocal
 from stockanalyse_api.services.strategy_config import (
     APPROVED_RPS_WINDOWS,
     DEFAULT_HIGH_PROXIMITY_THRESHOLD_PCT,
-    DEFAULT_MIN_RPS_LINES_REQUIRED,
     DEFAULT_RPS_THRESHOLD,
     DEFAULT_SELECTED_RPS_WINDOWS,
     get_active_strategy_configuration,
@@ -24,7 +23,6 @@ class StrategyConfigurationPayload(BaseModel):
 
     rps_threshold: int = Field(ge=0, le=100)
     selected_rps_windows: list[int]
-    min_rps_lines_required: int = Field(ge=1)
     high_proximity_threshold_pct: Decimal = Field(ge=0, le=100)
 
 
@@ -40,11 +38,6 @@ def read_strategy_configuration() -> dict[str, object]:
             "selected_rps_windows": {
                 "approved": list(APPROVED_RPS_WINDOWS),
                 "default": DEFAULT_SELECTED_RPS_WINDOWS,
-            },
-            "min_rps_lines_required": {
-                "min": 1,
-                "max": len(APPROVED_RPS_WINDOWS),
-                "default": DEFAULT_MIN_RPS_LINES_REQUIRED,
             },
             "high_proximity_threshold_pct": {
                 "min": "0.00",
@@ -63,7 +56,6 @@ def update_strategy_configuration(payload: StrategyConfigurationPayload) -> dict
                 session,
                 rps_threshold=payload.rps_threshold,
                 selected_rps_windows=payload.selected_rps_windows,
-                min_rps_lines_required=payload.min_rps_lines_required,
                 high_proximity_threshold_pct=payload.high_proximity_threshold_pct,
             )
     except ValueError as exc:

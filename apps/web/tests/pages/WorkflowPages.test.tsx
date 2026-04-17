@@ -51,10 +51,11 @@ vi.mock("@/components/watchlist/WatchlistReviewPanel", () => ({
 vi.mock("@/components/backtests/BacktestLaunchPanel", () => ({
   BacktestLaunchPanel: (props: {
     apiBaseUrl: string;
+    screenRunId: number | null;
     initialRun: { id: number } | null;
     initialRuns: Array<{ id: number }>;
     initialError: string | null;
-  }) => <div>backtest-panel:{props.apiBaseUrl}:{props.initialRun?.id ?? "none"}:{props.initialRuns.length}:{props.initialError ?? "ok"}</div>,
+  }) => <div>backtest-panel:{props.apiBaseUrl}:{props.screenRunId ?? "none"}:{props.initialRun?.id ?? "none"}:{props.initialRuns.length}:{props.initialError ?? "ok"}</div>,
 }));
 
 describe("Workflow pages", () => {
@@ -78,7 +79,6 @@ describe("Workflow pages", () => {
               rps_threshold: 90,
               high_proximity_threshold_pct: "5.00",
               selected_rps_windows: [50, 120, 250],
-              min_rps_lines_required: 2,
             },
           }),
           { status: 200 },
@@ -86,7 +86,7 @@ describe("Workflow pages", () => {
       )
       .mockResolvedValueOnce(
         new Response(
-          JSON.stringify({ screen_run: { id: 8, trade_date: "2026-04-15", executed_at: "2026-04-16T09:30:00Z", total_candidates: 10, qualified_count: 2, status: "completed", parameter_set: { id: 3, version: 4, rps_threshold: 90, high_proximity_threshold_pct: "5.00", selected_rps_windows: [50], min_rps_lines_required: 1 }, qualified_results: [] } }),
+          JSON.stringify({ screen_run: { id: 8, trade_date: "2026-04-15", executed_at: "2026-04-16T09:30:00Z", total_candidates: 10, qualified_count: 2, status: "completed", parameter_set: { id: 3, version: 4, rps_threshold: 90, high_proximity_threshold_pct: "5.00", selected_rps_windows: [50] }, qualified_results: [] } }),
           { status: 200 },
         ),
       )
@@ -128,12 +128,35 @@ describe("Workflow pages", () => {
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ backtest_runs: [{ id: 9 }, { id: 8 }] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            screen_run: {
+              id: 8,
+              trade_date: "2026-04-15",
+              executed_at: "2026-04-16T09:30:00Z",
+              total_candidates: 10,
+              qualified_count: 2,
+              status: "completed",
+              parameter_set: {
+                id: 3,
+                version: 4,
+                rps_threshold: 90,
+                high_proximity_threshold_pct: "5.00",
+                selected_rps_windows: [50],
+              },
+              qualified_results: [],
+            },
+          }),
+          { status: 200 },
+        ),
       );
     vi.mocked(loadMarketDataHealth).mockResolvedValue({ health: { freshness_state: "fresh" }, error: null } as never);
 
-    render(await BacktestsPage());
+    render(await BacktestsPage({ searchParams: Promise.resolve({}) }));
 
     expect(screen.getByText("banner:回测工作流:health:ok")).toBeInTheDocument();
-    expect(screen.getByText("backtest-panel:http://localhost:8000:9:2:ok")).toBeInTheDocument();
+    expect(screen.getByText("backtest-panel:http://localhost:8000:8:9:2:ok")).toBeInTheDocument();
   });
 });

@@ -10,8 +10,10 @@ describe("apiPaths", () => {
     expect(paths.screenRunsLatest).toBe("http://localhost:8000/screen/runs/latest");
     expect(paths.screenTradeDates).toBe("http://localhost:8000/screen/trade-dates");
     expect(paths.watchlist).toBe("http://localhost:8000/watchlist");
+    expect(paths.backtestDefaults).toBe("http://localhost:8000/backtests/defaults");
     expect(paths.backtestRuns).toBe("http://localhost:8000/backtests/runs");
     expect(paths.backtestRunsLatest).toBe("http://localhost:8000/backtests/runs/latest");
+    expect(paths.portfolioReturnBacktestRuns).toBe("http://localhost:8000/backtests/portfolio-return/runs");
   });
 
   it("builds dynamic endpoint paths with identifiers and optional query", () => {
