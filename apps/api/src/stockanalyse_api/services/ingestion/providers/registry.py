@@ -9,6 +9,9 @@ from stockanalyse_api.services.ingestion.providers.static_provider import Static
 from stockanalyse_api.services.ingestion.providers.yahoo_finance_chart_provider import (
     YahooFinanceChartProvider,
 )
+from stockanalyse_api.services.ingestion.providers.yahoo_finance_fundamentals_provider import (
+    YahooFinanceFundamentalsProvider,
+)
 
 MVP_MARKET_SCOPE = "jp_equities_eod"
 BACKEND_ONLY_BOUNDARY = "backend_only"
@@ -33,6 +36,8 @@ def build_ingestion_provider(
         if symbols_file is None:
             raise ValueError("symbols_file is required for the yahoo_finance_chart provider.")
         provider = YahooFinanceChartProvider(symbols_file=symbols_file)
+    elif provider_name == "yahoo_finance_fundamentals":
+        provider = YahooFinanceFundamentalsProvider()
     else:
         raise ValueError(f"Unsupported provider: {provider_name}")
 

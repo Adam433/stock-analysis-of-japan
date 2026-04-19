@@ -1,6 +1,6 @@
 # 故事 3.7: Inline Screening Result Analysis Cards
 
-状态: ready-for-dev
+状态: review
 
 > **v3 增量补丁（2026-04-17）新增 story**：筛选结果区（`/screen` 页面的"最近一次筛选结果"区域）当前只显示入选股票的文本信息（symbol、RPS、距高点等）。用户在 2026-04-16 页面验收中要求：**在结果卡片内直接展示 K 线与财务概览**，而不必逐只点进个股详情。本 story 在复用 `lightweight-charts` 与现有 stock-detail 数据契约的前提下，为每张结果卡片引入"内联分析区"。滚动增量加载是 Story 3.8 的职责，本 story 只负责单卡片的分析内容与后端契约。
 
@@ -45,7 +45,7 @@
 8. **AC8（Fundamentals 领域 + 持久化）**：新增 fundamentals domain 以承载财年级财务与估值数据：
    - 新增 `apps/api/src/stockanalyse_api/domain/fundamentals/models.py` 定义 `FundamentalsAnnual`（instrument_id, fiscal_year_end_date, fiscal_year_label, net_income, net_income_currency, pe, pb, source, source_as_of_date, data_status）；
    - `data_status` 与 `market_data_daily.data_status` 共用同一语义约定（`complete` / `partial` / `missing`），禁止新造一套 status 词汇；
-   - 新增 Alembic migration `20260417_0019_add_fundamentals_annual.py`（在 Stories 5.6/5.1 v3 新增 migration `20260417_0017/_0018` 之后继续编号）；
+   - 新增 Alembic migration `20260417_0021_add_fundamentals_annual.py`（在 v3 reopen 阶段跟随当前 head revision 继续编号）；
    - `source` 字段用于记录数据来源 provider name，沿用现有 `credential_boundary=backend_only` 的 provider 契约。
 
 9. **AC9（Fundamentals provider + 刷新路径）**：为 fundamentals 提供一条最小可行的数据供给路径：
@@ -67,48 +67,48 @@
 
 ## 任务 / 子任务
 
-- [ ] Fundamentals 领域 + migration（AC: 8）
-  - [ ] 创建 `apps/api/src/stockanalyse_api/domain/fundamentals/__init__.py` 与 `models.py`，定义 `FundamentalsAnnual` 与模块级常量 `FUNDAMENTALS_DATA_STATUS_VALUES = ("complete", "partial", "missing")`（复用 market_data 的 status 语义）
-  - [ ] 创建 migration `apps/api/migrations/versions/20260417_0019_add_fundamentals_annual.py`，`down_revision = "20260417_0018"`（承接 Story 5.1 v3 migration 后的空闲编号），`batch_alter_table` 风格建表；index on `(instrument_id, fiscal_year_end_date)` unique
-  - [ ] 在 `apps/api/src/stockanalyse_api/domain/instruments/models.py` 的 `Instrument` 上加 `fundamentals_annual = relationship("FundamentalsAnnual", back_populates="instrument")` 以保持 ORM 对称（参考已有 `daily_market_data` 关系）
-- [ ] Fundamentals provider + lazy refresh 服务（AC: 9）
-  - [ ] 新建 `apps/api/src/stockanalyse_api/services/ingestion/provider_models.py` 中 `ProviderFundamentalsAnnual` 数据类（字段同 AC8 模型的子集 + source / source_as_of_date）
-  - [ ] 新建 `apps/api/src/stockanalyse_api/services/ingestion/providers/yahoo_finance_fundamentals_provider.py`，`provider_name = "yahoo_finance_fundamentals"`，复用 `yahoo_finance_chart_provider.py` 的 urllib + certifi SSL context 模式（不要另建一套 HTTP 客户端）；目标 endpoint 建议 `https://query1.finance.yahoo.com/v10/finance/quoteSummary/{symbol}?modules=incomeStatementHistory,summaryDetail,defaultKeyStatistics`
-  - [ ] 在 `services/ingestion/providers/registry.py` 注册该 provider
-  - [ ] 新建 `apps/api/src/stockanalyse_api/services/fundamentals_refresh.py`，暴露 `refresh_instrument_fundamentals(session, *, instrument_id: int, provider=None) -> None`：upsert 近 5 个财年；失败时保留既存 `data_status`，仅更新 `source_as_of_date`
-  - [ ] **不**修改 `services/ingestion/refresh_service.py`（daily universe refresh runtime）；fundamentals 走"按需 lazy refresh"路径
-- [ ] Inline analysis 端点（AC: 7）
-  - [ ] 新建 `apps/api/src/stockanalyse_api/services/inline_analysis.py::get_inline_analysis_payload(session, *, instrument_id, screen_run_id, candle_window_days=252, fiscal_year_limit=5)`，复用 `chart_data.py` 中 candlestick 组装逻辑（抽取成公共 helper `_collect_candlesticks(session, instrument_id, trade_date_cutoff, limit)` 若两处都能复用则放到 `chart_data.py` 顶层）
-  - [ ] payload 顶层字段：`instrument`（id/symbol/exchange/name/currency）、`screen_run_ref`（id + trade_date，用于防错判定）、`candlesticks`、`candlestick_window_days_available`、`valuation_by_fiscal_year`、`generated_at`
-  - [ ] 新建路由 `apps/api/src/stockanalyse_api/api/routes/stocks.py` 中 `@router.get("/{instrument_id}/inline-analysis")`，接受 `screen_run_id: int | None = None`；404 when instrument or screen run not found
-  - [ ] 读取时若 `fundamentals_annual` 缺数据或 source_as_of_date > 7 天，调用 `refresh_instrument_fundamentals(...)` 做一次 lazy refresh（容错：失败时返回 `data_status="missing"` 的历史记录而不 500）
-- [ ] Frontend 数据契约 + 页面（AC: 10）
-  - [ ] 在 `apps/web/src/lib/types.ts` 追加 `InlineAnalysisPayload` 与 `FiscalYearValuation` 类型
-  - [ ] 在 `apps/web/src/lib/apiPaths.ts` 追加 `stockInlineAnalysis(instrumentId, screenRunId?)`
-  - [ ] 新建 `apps/web/src/components/screen/ResultAnalysisCard.tsx`，内部用两份独立 `createChart()` 实例（价格 / 财年），使用 `HistogramSeries` + 文本 label 表达净利润与 PE/PB
-  - [ ] 在 `apps/web/src/components/screen/StrategyConfigPanel.tsx` 的 `result-card` 渲染块（当前第 402-466 行）中嵌入 `<ResultAnalysisCard>`，**同步**为每条结果请求 `/stocks/{id}/inline-analysis?screen_run_id=...`（懒加载留给 Story 3.8）
-  - [ ] 缺失 / 失败文案沿用既有 `status-copy` 与 `workflow-trust-banner` 样式，**不要**新增一套 UI primitive
-- [ ] Fiscal-Year Valuation Convention（AC: 4, 5）
-  - [ ] 在 `ResultAnalysisCard.tsx` 顶部注释中锁定 "PE 约定"：**净亏损年度 → 显示 `N/A` + tooltip `净亏损，PE 不适用`**（选择 `N/A` 方案而非负值方案，理由：负 PE 跨股票比较会误导用户）
-  - [ ] 财年标签格式统一为 `FY{YYYY}（{MM} 月结束）`，例如 `FY2024（03 月结束）`；该 helper 放到 `apps/web/src/lib/formatters.ts`
-- [ ] 可访问性（AC: 11）
-  - [ ] 净利润正负额外用符号 / 文字表达（`+` 与 `盈利` / `-` 与 `亏损`）
-  - [ ] PE / PB / 净利润数值提供 `aria-label` 或 `dt/dd` 结构，不仅依赖图表 tooltip
-- [ ] 测试（AC: 1-11）
-  - [ ] `apps/api/tests/test_inline_analysis.py`（新建）：
+- [x] Fundamentals 领域 + migration（AC: 8）
+  - [x] 创建 `apps/api/src/stockanalyse_api/domain/fundamentals/__init__.py` 与 `models.py`，定义 `FundamentalsAnnual` 与模块级常量 `FUNDAMENTALS_DATA_STATUS_VALUES = ("complete", "partial", "missing")`（复用 market_data 的 status 语义）
+  - [x] 创建 migration `apps/api/migrations/versions/20260417_0021_add_fundamentals_annual.py`，`down_revision = "20260417_0020"`，建表并补齐 `(instrument_id, fiscal_year_end_date)` 约束与索引
+  - [x] 在 `apps/api/src/stockanalyse_api/domain/instruments/models.py` 的 `Instrument` 上加 `fundamentals_annual = relationship("FundamentalsAnnual", back_populates="instrument")` 以保持 ORM 对称（参考已有 `daily_market_data` 关系）
+- [x] Fundamentals provider + lazy refresh 服务（AC: 9）
+  - [x] 新建 `apps/api/src/stockanalyse_api/services/ingestion/provider_models.py` 中 `ProviderFundamentalsAnnual` 数据类（字段同 AC8 模型的子集 + source / source_as_of_date）
+  - [x] 新建 `apps/api/src/stockanalyse_api/services/ingestion/providers/yahoo_finance_fundamentals_provider.py`，`provider_name = "yahoo_finance_fundamentals"`，复用 `yahoo_finance_chart_provider.py` 的 urllib + certifi SSL context 模式（不要另建一套 HTTP 客户端）；目标 endpoint 建议 `https://query1.finance.yahoo.com/v10/finance/quoteSummary/{symbol}?modules=incomeStatementHistory,summaryDetail,defaultKeyStatistics`
+  - [x] 在 `services/ingestion/providers/registry.py` 注册该 provider
+  - [x] 新建 `apps/api/src/stockanalyse_api/services/fundamentals_refresh.py`，暴露 `refresh_instrument_fundamentals(session, *, instrument_id: int, provider=None) -> bool`：upsert 近 5 个财年；失败时保留既存 `data_status`，仅更新 `source_as_of_date`
+  - [x] **不**修改 `services/ingestion/refresh_service.py`（daily universe refresh runtime）；fundamentals 走"按需 lazy refresh"路径
+- [x] Inline analysis 端点（AC: 7）
+  - [x] 新建 `apps/api/src/stockanalyse_api/services/inline_analysis.py::get_inline_analysis_payload(session, *, instrument_id, screen_run_id, candle_window_days=252, fiscal_year_limit=5)`，复用 `chart_data.py` 中 candlestick 组装逻辑（抽取成公共 helper `collect_candlesticks(...)`）
+  - [x] payload 顶层字段：`instrument`（id/symbol/exchange/name/currency）、`screen_run_ref`（id + trade_date，用于防错判定）、`candlesticks`、`candlestick_window_days_available`、`valuation_by_fiscal_year`、`generated_at`
+  - [x] 新建路由 `apps/api/src/stockanalyse_api/api/routes/stocks.py` 中 `@router.get("/{instrument_id}/inline-analysis")`，接受 `screen_run_id: int | None = None`；404 when instrument or screen run not found
+  - [x] 读取时若 `fundamentals_annual` 缺数据或 source_as_of_date > 7 天，调用 `refresh_instrument_fundamentals(...)` 做一次 lazy refresh（容错：失败时保留已有缓存；无缓存时返回空财年列表而不 500）
+- [x] Frontend 数据契约 + 页面（AC: 10）
+  - [x] 在 `apps/web/src/lib/types.ts` 追加 `InlineAnalysisPayload` 与 `FiscalYearValuation` 类型
+  - [x] 在 `apps/web/src/lib/apiPaths.ts` 追加 `stockInlineAnalysis(instrumentId, screenRunId?)`
+  - [x] 新建 `apps/web/src/components/screen/ResultAnalysisCard.tsx`，内部用两份独立 `createChart()` 实例（价格 / 财年），使用 `HistogramSeries` + 文本 label 表达净利润与 PE/PB
+  - [x] 在 `apps/web/src/components/screen/StrategyConfigPanel.tsx` 的 `result-card` 渲染块中嵌入 `<ResultAnalysisCard>`；其同步加载路径在本次批量交付中已立即由 Story 3.8 的调度器替换
+  - [x] 缺失 / 失败文案沿用既有 `status-copy` 与 `workflow-banner` 样式，**不要**新增一套 UI primitive
+- [x] Fiscal-Year Valuation Convention（AC: 4, 5）
+  - [x] 在 `ResultAnalysisCard.tsx` 顶部渲染逻辑中锁定 "PE 约定"：**净亏损年度 → 显示 `N/A` + tooltip `净亏损，PE 不适用`**
+  - [x] 财年标签格式统一为 `FY{YYYY}（{MM} 月结束）`，例如 `FY2024（03 月结束）`；helper 已放到 `apps/web/src/lib/formatters.ts`
+- [x] 可访问性（AC: 11）
+  - [x] 净利润正负额外用符号 / 文字表达（`+` 与 `盈利` / `-` 与 `亏损`）
+  - [x] PE / PB / 净利润数值提供 `aria-label` 或 `dt/dd` 结构，不仅依赖图表 tooltip
+- [x] 测试（AC: 1-11）
+  - [x] `apps/api/tests/test_inline_analysis.py`（新建）：
     - 1 年 candlestick 窗口按 trade_date_cutoff 正确截取；
     - IPO 场景（只有 30 天数据）时 `candlestick_window_days_available = 30`；
     - fundamentals 缺失时 `data_status = "missing"` 且端点不 500；
     - provider 失败时沿用既存缓存行的 `data_status`；
     - fiscal_year_limit 默认 5 且按时间升序；
-  - [ ] `apps/api/tests/test_fundamentals_refresh.py`（新建）：upsert / 失败保留已缓存 `data_status` / 近 5 财年截断
-  - [ ] `apps/web/tests/components/ResultAnalysisCard.test.tsx`（新建）：
+  - [x] `apps/api/tests/test_fundamentals_refresh.py`（新建）：upsert / 失败保留已缓存 `data_status` / 近 5 财年截断
+  - [x] `apps/web/tests/components/ResultAnalysisCard.test.tsx`（新建）：
     - loading / loaded / failed 三态渲染；
     - 净亏损年度显示 `N/A`（PE 约定锁定）；
     - 历史不足 1 年时显示短窗口提示；
     - 缺失财年显示 `数据缺失` 占位；
     - 失败态暴露"重试加载"按钮；
-  - [ ] 命令：`cd apps/api && PYTHONPATH=src python3 -m unittest tests.test_inline_analysis tests.test_fundamentals_refresh tests.test_chart_data`、`PYTHONPATH=src python3 -m alembic -c alembic.ini upgrade head`、`cd apps/web && npm run lint && npm run build && npm run test`
+  - [x] 命令：`cd apps/api && PYTHONPATH=src python3 -m unittest tests.test_inline_analysis tests.test_fundamentals_refresh tests.test_chart_data`、`PYTHONPATH=src python3 -m alembic -c alembic.ini upgrade head`、`cd apps/web && npm run lint && npm run build && npm run test`
 
 ## 开发备注
 
@@ -121,7 +121,7 @@
 - **Fundamentals provider 选型**：Yahoo Finance `quoteSummary` 提供 `incomeStatementHistory`（近 4 财年年度净利润）、`summaryDetail`（trailing PE）、`defaultKeyStatistics`（priceToBook）。如果只能拿到 4 财年，就返回 4 条（不要伪造第 5 条）。provider 失败时**保留既存缓存**是关键——不能因单次网络抖动回退到 `missing` 覆盖已知数据。
 - **净亏损 PE 约定**锁定为 `N/A`（理由：负 PE 值在横向比较时严重误导，例如 `-2` 与 `-80` 的高低完全不代表估值高低；显示 `N/A` 加文字 `净亏损，PE 不适用` 更诚实）。实现时只需在 `valuation_by_fiscal_year` 中给净亏损年度的 `pe` 返回 `null` + 在前端渲染层把 `null` 且 `net_income < 0` 的组合翻译成 `N/A`。
 - **不要**尝试在本 story 中"顺便"做 Story 3.8 的滚动增量加载；结果卡片按 v3 patch 分工为两个 story，**同步加载**的实现刚好是 3.8 的反例对照，后续 3.8 实现时只需替换加载调度，不必重写 `ResultAnalysisCard` 内部结构。
-- **Migration 编号**沿用现有 `YYYYMMDD_NNNN` 格式，紧随 Story 5.6 anchor (`20260417_0017`) 与 Story 5.1 v3 portfolio launch fields (`20260417_0018`) 之后为 `20260417_0019`。若实际实现时 5.6 / 5.1 v3 编号有调整，本 story 编号跟随 head revision 向后平移，保持单调递增。
+- **Migration 编号**沿用现有 `YYYYMMDD_NNNN` 格式，已根据当前 head revision 落到 `20260417_0021`，保持单调递增。
 - 现有卡片 UI `apps/web/src/components/screen/StrategyConfigPanel.tsx:403` 已经是 `<article className="result-card">` 结构，新增内联分析区应作为该 article 的**内部区块**（例如在 `signal-list` 之后追加 `<ResultAnalysisCard>`），不要把它抬到卡片外或破坏现有 `result-card__title` / `result-summary-grid` 结构。
 - 本 story **不**修改 stock detail 页面 (`apps/web/src/app/stocks/[instrumentId]/page.tsx`)；stock detail 仍然使用原 `/stocks/{id}/detail` 端点 + 重载荷，内联分析端点只服务结果区。
 - 本 story **不**改变 `/screen/runs/latest` 的现有契约——结果列表还是由那个端点返回；内联分析是 **per-instrument** 的二次请求（为 Story 3.8 的按需加载留接口）。
@@ -137,7 +137,7 @@
 ### Project Structure Notes
 
 - 后端模型：`apps/api/src/stockanalyse_api/domain/fundamentals/models.py`（新建）
-- 后端 migration：`apps/api/migrations/versions/20260417_0019_add_fundamentals_annual.py`（新建）
+- 后端 migration：`apps/api/migrations/versions/20260417_0021_add_fundamentals_annual.py`（新建）
 - 后端 provider：`apps/api/src/stockanalyse_api/services/ingestion/providers/yahoo_finance_fundamentals_provider.py`（新建）
 - 后端 provider 数据类：`apps/api/src/stockanalyse_api/services/ingestion/provider_models.py`（现有文件追加类）
 - 后端 lazy refresh 服务：`apps/api/src/stockanalyse_api/services/fundamentals_refresh.py`（新建）
@@ -171,14 +171,56 @@
 
 ### 使用的代理模型
 
-{{agent_model_name_version}}
+gpt-5.4
 
 ### 调试日志参考
 
+- `PYTHONPATH=src python3 -m unittest tests.test_inline_analysis tests.test_fundamentals_refresh tests.test_chart_data`
+- `PYTHONPATH=src python3 -m unittest`
+- `PYTHONPATH=src python3 -m alembic -c alembic.ini upgrade head`
+- `npm run test -- ResultAnalysisCard.test.tsx useInlineAnalysisScheduler.test.tsx StrategyConfigPanel.test.tsx apiPaths.test.ts`
+- `npm run test`
+- `npm run lint`
+- `npm run build`
+
 ### 完成说明
 
+- 已新增 fundamentals domain、`20260417_0021` migration、Yahoo fundamentals provider、lazy refresh service，以及 `/stocks/{instrument_id}/inline-analysis` 精简载荷端点；candlestick 复用了 `chart_data.py` 的公共收集逻辑。
+- 已新增 `ResultAnalysisCard`，在结果卡片内渲染 1 年 K 线、财年净利润柱状图和逐年 PE/PB 文本摘要，并对短历史、净亏损年度 `N/A`、以及数据缺失做显式展示。
+- 由于本次是 `3.7 / 3.8` 合并交付，Story 3.7 原本的“同步全部加载”宿主路径在同一批中已立即被 3.8 的 scheduler 替换；卡片内部渲染和后端契约保持不变。
+- 针对 Yahoo fundamentals 实际可稳定获取的数据边界，provider 不伪造逐年估值：拿不到的 PE/PB 以 `partial` / `missing` 明示，交由前端诚实渲染，而不是用当前 trailing 值静默冒充历史值。
+
 ### 文件清单
+
+- apps/api/migrations/versions/20260417_0021_add_fundamentals_annual.py
+- apps/api/src/stockanalyse_api/api/routes/stocks.py
+- apps/api/src/stockanalyse_api/domain/fundamentals/__init__.py
+- apps/api/src/stockanalyse_api/domain/fundamentals/models.py
+- apps/api/src/stockanalyse_api/domain/instruments/models.py
+- apps/api/src/stockanalyse_api/services/chart_data.py
+- apps/api/src/stockanalyse_api/services/fundamentals_refresh.py
+- apps/api/src/stockanalyse_api/services/inline_analysis.py
+- apps/api/src/stockanalyse_api/services/ingestion/provider_models.py
+- apps/api/src/stockanalyse_api/services/ingestion/providers/registry.py
+- apps/api/src/stockanalyse_api/services/ingestion/providers/yahoo_finance_fundamentals_provider.py
+- apps/api/tests/test_chart_data.py
+- apps/api/tests/test_fundamentals_refresh.py
+- apps/api/tests/test_inline_analysis.py
+- apps/web/src/app/globals.css
+- apps/web/src/components/screen/ResultAnalysisCard.tsx
+- apps/web/src/components/screen/StrategyConfigPanel.tsx
+- apps/web/src/components/screen/useInlineAnalysisScheduler.ts
+- apps/web/src/lib/apiPaths.ts
+- apps/web/src/lib/formatters.ts
+- apps/web/src/lib/inlineAnalysisScheduler.ts
+- apps/web/src/lib/types.ts
+- apps/web/tests/components/ResultAnalysisCard.test.tsx
+- apps/web/tests/components/StrategyConfigPanel.test.tsx
+- apps/web/tests/components/useInlineAnalysisScheduler.test.tsx
+- apps/web/tests/lib/apiPaths.test.ts
 
 ### 变更日志
 
 - 2026-04-17: Story 3.7 创建（v3 增量补丁）。作为 Epic 3 在 v3 阶段的重开第一条 story，引入 fundamentals domain + inline-analysis 端点 + `ResultAnalysisCard` 组件。懒加载由 Story 3.8 承接。
+- 2026-04-17: Story 3.7 开发完成并进入 review。新增 fundamentals domain / migration / provider / lazy refresh / inline-analysis 端点，以及 `ResultAnalysisCard` 的图表与财年摘要渲染。
+- 2026-04-17: 由于本次和 Story 3.8 合并交付，宿主加载方式已从同步全部请求切换为按视口调度；Story 3.7 的卡片渲染与后端契约保持不变。

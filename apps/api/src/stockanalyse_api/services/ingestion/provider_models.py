@@ -31,3 +31,18 @@ class ProviderDailyBar:
     instrument_name: str | None = None
     currency: str = "JPY"
     metadata: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ProviderFundamentalsAnnual:
+    symbol: str
+    exchange: str
+    fiscal_year_end_date: date
+    fiscal_year_label: str
+    net_income: Decimal | None = None
+    net_income_currency: str = "JPY"
+    pe: Decimal | None = None
+    pb: Decimal | None = None
+    source: str = "unknown"
+    source_as_of_date: date | None = None
+    data_status: str = "complete"

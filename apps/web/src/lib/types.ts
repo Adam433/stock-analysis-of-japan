@@ -64,6 +64,7 @@ export type PortfolioBacktestDefaults = {
 export type BacktestRun = {
   id: number;
   source_screen_run_id: number | null;
+  source_screen_run_available?: boolean | null;
   strategy_configuration_id: number;
   status: string;
   backtest_lifecycle: BacktestLifecycle;
@@ -79,6 +80,27 @@ export type BacktestRun = {
   effective_stop_loss_pct: string | null;
   effective_portfolio_cap: number | null;
   effective_entry_deferral_window_days: number | null;
+  ranking_policy_id: string | null;
+  excluded_securities: Array<{
+    instrument_id: number;
+    symbol: string;
+    exclusion_reason: string;
+  }>;
+  portfolio_value: string | null;
+  position_count_after_exclusions: number | null;
+  cumulative_return: string | null;
+  equity_curve: Array<{
+    trade_date: string;
+    equity: string;
+  }>;
+  per_security_returns: Array<{
+    instrument_id: number;
+    symbol: string;
+    entry_date: string;
+    exit_date: string;
+    exit_reason: string;
+    realized_return: string;
+  }>;
   error_message: string | null;
   result_summary: {
     trade_dates_evaluated: number;
@@ -96,6 +118,42 @@ export type BacktestRun = {
     high_proximity_threshold_pct: string;
     selected_rps_windows: number[];
   };
+};
+
+export type PortfolioReturnSourceScreenRun = {
+  id: number;
+  trade_date: string;
+  strategy_configuration_version: number | null;
+  status: string;
+};
+
+export type PortfolioReturnRunResult = {
+  run: BacktestRun;
+  cumulative_return: string | null;
+  win_rate: string;
+  max_drawdown: string;
+  equity_curve: Array<{
+    trade_date: string;
+    equity: string;
+  }>;
+  per_security_returns: BacktestRun["per_security_returns"];
+  source_screen_run: PortfolioReturnSourceScreenRun | null;
+};
+
+export type PortfolioReturnRunComparison = PortfolioReturnRunResult & {
+  compare_dimensions: {
+    holding_days: number | null;
+    stop_loss_pct: string | null;
+    portfolio_cap: number | null;
+    source_screen_run_id: number | null;
+    source_trade_date: string | null;
+    strategy_configuration_version: number | null;
+    rps_definition_version: string | null;
+  };
+  aligned_equity_curve: Array<{
+    days_since_entry: number;
+    equity: string;
+  }>;
 };
 
 export type WatchlistEntry = {
@@ -169,4 +227,32 @@ export type StockDetailPayload = {
     rps_250: string | null;
     high_proximity_ratio: string | null;
   }[];
+};
+
+export type FiscalYearValuation = {
+  fiscal_year_label: string;
+  fiscal_year_end_month: number;
+  net_income: string | null;
+  net_income_currency: string;
+  pe: string | null;
+  pb: string | null;
+  data_status: string;
+};
+
+export type InlineAnalysisPayload = {
+  instrument: {
+    id: number;
+    symbol: string;
+    exchange: string;
+    name: string | null;
+    currency: string;
+  };
+  screen_run_ref: {
+    id: number;
+    trade_date: string;
+  };
+  candlesticks: Candlestick[];
+  candlestick_window_days_available: number;
+  valuation_by_fiscal_year: FiscalYearValuation[];
+  generated_at: string;
 };

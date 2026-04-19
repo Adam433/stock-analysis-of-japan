@@ -95,7 +95,7 @@ describe("Workflow pages", () => {
       );
     vi.mocked(loadMarketDataHealth).mockResolvedValue({ health: { freshness_state: "fresh" }, error: null } as never);
 
-    render(await ScreenConfigurationPage());
+    render(await ScreenConfigurationPage({ searchParams: Promise.resolve({}) }));
 
     expect(screen.getByText("banner:筛选工作流:health:ok")).toBeInTheDocument();
     expect(screen.getByText("screen-panel:http://localhost:8000:ok:ok:ok:1")).toBeInTheDocument();
@@ -116,6 +116,63 @@ describe("Workflow pages", () => {
     expect(screen.getByText("watchlist-panel:http://localhost:8000::无法加载观察列表（503）。")).toBeInTheDocument();
   });
 
+  it("loads the requested screen run when run_id is present in the query", async () => {
+    const { resolveApiBaseUrl } = await import("@/lib/apiBaseUrl");
+    const { fetchWithRetry } = await import("@/lib/fetchWithRetry");
+    const { loadMarketDataHealth } = await import("@/lib/marketDataHealth");
+
+    vi.mocked(resolveApiBaseUrl).mockResolvedValue("http://localhost:8000");
+    vi.mocked(fetchWithRetry)
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            configuration: {
+              id: 3,
+              version: 4,
+              rps_threshold: 90,
+              high_proximity_threshold_pct: "5.00",
+              selected_rps_windows: [50, 120, 250],
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            screen_run: {
+              id: 18,
+              trade_date: "2026-04-10",
+              executed_at: "2026-04-10T09:30:00Z",
+              total_candidates: 12,
+              qualified_count: 3,
+              status: "completed",
+              parameter_set: {
+                id: 3,
+                version: 4,
+                rps_threshold: 90,
+                high_proximity_threshold_pct: "5.00",
+                selected_rps_windows: [50],
+              },
+              qualified_results: [],
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ trade_dates: [{ trade_date: "2026-04-15" }] }), { status: 200 }),
+      );
+    vi.mocked(loadMarketDataHealth).mockResolvedValue({ health: { freshness_state: "fresh" }, error: null } as never);
+
+    render(await ScreenConfigurationPage({ searchParams: Promise.resolve({ run_id: "18" }) }));
+
+    expect(fetchWithRetry).toHaveBeenCalledWith("http://localhost:8000/screen/runs/18", {
+      cache: "no-store",
+    });
+    expect(screen.getByText("screen-panel:http://localhost:8000:ok:ok:ok:1")).toBeInTheDocument();
+  });
+
   it("wires backtests page latest run, run list and health data", async () => {
     const { resolveApiBaseUrl } = await import("@/lib/apiBaseUrl");
     const { fetchWithRetry } = await import("@/lib/fetchWithRetry");
@@ -124,10 +181,18 @@ describe("Workflow pages", () => {
     vi.mocked(resolveApiBaseUrl).mockResolvedValue("http://localhost:8000");
     vi.mocked(fetchWithRetry)
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ backtest_run: { id: 9 } }), { status: 200 }),
+        new Response(JSON.stringify({ backtest_run: { id: 9, source_screen_run_id: 8 } }), { status: 200 }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ backtest_runs: [{ id: 9 }, { id: 8 }] }), { status: 200 }),
+        new Response(
+          JSON.stringify({
+            backtest_runs: [
+              { id: 9, source_screen_run_id: 8 },
+              { id: 8, source_screen_run_id: 6 },
+            ],
+          }),
+          { status: 200 },
+        ),
       )
       .mockResolvedValueOnce(
         new Response(
@@ -158,5 +223,61 @@ describe("Workflow pages", () => {
 
     expect(screen.getByText("banner:回测工作流:health:ok")).toBeInTheDocument();
     expect(screen.getByText("backtest-panel:http://localhost:8000:8:9:2:ok")).toBeInTheDocument();
+  });
+
+  it("prefers the run tied to the requested screen run over the global latest run", async () => {
+    const { resolveApiBaseUrl } = await import("@/lib/apiBaseUrl");
+    const { fetchWithRetry } = await import("@/lib/fetchWithRetry");
+    const { loadMarketDataHealth } = await import("@/lib/marketDataHealth");
+
+    vi.mocked(resolveApiBaseUrl).mockResolvedValue("http://localhost:8000");
+    vi.mocked(fetchWithRetry)
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            backtest_run: { id: 19, source_screen_run_id: 99 },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            backtest_runs: [
+              { id: 19, source_screen_run_id: 99 },
+              { id: 11, source_screen_run_id: 8 },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            screen_run: {
+              id: 8,
+              trade_date: "2026-04-15",
+              executed_at: "2026-04-16T09:30:00Z",
+              total_candidates: 10,
+              qualified_count: 2,
+              status: "completed",
+              parameter_set: {
+                id: 3,
+                version: 4,
+                rps_threshold: 90,
+                high_proximity_threshold_pct: "5.00",
+                selected_rps_windows: [50],
+              },
+              qualified_results: [],
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+    vi.mocked(loadMarketDataHealth).mockResolvedValue({ health: { freshness_state: "fresh" }, error: null } as never);
+
+    render(await BacktestsPage({ searchParams: Promise.resolve({ screen_run_id: "8" }) }));
+
+    expect(screen.getByText("backtest-panel:http://localhost:8000:8:11:2:ok")).toBeInTheDocument();
   });
 });

@@ -48,6 +48,42 @@ def resolve_latest_stock_detail_screen_run_id(session, *, instrument_id: int) ->
     ).scalar_one_or_none()
 
 
+def collect_candlesticks(
+    session,
+    *,
+    instrument_id: int,
+    trade_date_cutoff,
+    limit: int,
+) -> list[MarketDataDaily]:
+    candle_rows = session.execute(
+        select(MarketDataDaily)
+        .where(
+            MarketDataDaily.instrument_id == instrument_id,
+            MarketDataDaily.trade_date <= trade_date_cutoff,
+        )
+        .order_by(MarketDataDaily.trade_date.desc())
+        .limit(limit)
+    ).scalars().all()
+    candle_rows.reverse()
+    return candle_rows
+
+
+def serialize_candlestick_rows(candle_rows: list[MarketDataDaily]) -> list[dict[str, object]]:
+    return [
+        {
+            "trade_date": candle.trade_date.isoformat(),
+            "open": f"{candle.open:.6f}" if candle.open is not None else None,
+            "high": f"{candle.high:.6f}" if candle.high is not None else None,
+            "low": f"{candle.low:.6f}" if candle.low is not None else None,
+            "close": f"{candle.close:.6f}" if candle.close is not None else None,
+            "adj_close": f"{candle.adj_close:.6f}" if candle.adj_close is not None else None,
+            "volume": candle.volume,
+            "data_status": candle.data_status,
+        }
+        for candle in candle_rows
+    ]
+
+
 def get_stock_detail_payload(
     session,
     *,
@@ -104,30 +140,13 @@ def _build_stock_detail_payload(
         .limit(1)
     ).scalar_one_or_none()
 
-    candle_rows = session.execute(
-        select(MarketDataDaily)
-        .where(
-            MarketDataDaily.instrument_id == instrument_id,
-            MarketDataDaily.trade_date <= screen_run.trade_date,
-        )
-        .order_by(MarketDataDaily.trade_date.desc())
-        .limit(DEFAULT_STOCK_DETAIL_CANDLE_WINDOW)
-    ).scalars().all()
-    candle_rows.reverse()
-
-    candlesticks = [
-        {
-            "trade_date": candle.trade_date.isoformat(),
-            "open": f"{candle.open:.6f}" if candle.open is not None else None,
-            "high": f"{candle.high:.6f}" if candle.high is not None else None,
-            "low": f"{candle.low:.6f}" if candle.low is not None else None,
-            "close": f"{candle.close:.6f}" if candle.close is not None else None,
-            "adj_close": f"{candle.adj_close:.6f}" if candle.adj_close is not None else None,
-            "volume": candle.volume,
-            "data_status": candle.data_status,
-        }
-        for candle in candle_rows
-    ]
+    candle_rows = collect_candlesticks(
+        session,
+        instrument_id=instrument_id,
+        trade_date_cutoff=screen_run.trade_date,
+        limit=DEFAULT_STOCK_DETAIL_CANDLE_WINDOW,
+    )
+    candlesticks = serialize_candlestick_rows(candle_rows)
 
     indicator_rows = session.execute(
         select(DerivedIndicatorDaily)

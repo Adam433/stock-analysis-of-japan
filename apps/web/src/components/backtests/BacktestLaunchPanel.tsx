@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 
-import { formatTimestamp, formatRpsWindows } from "@/lib/formatters";
+import { SOURCE_SCREEN_RUN_UNAVAILABLE_MESSAGE } from "@/lib/backtestErrors";
+import { formatRatioAsPercent, formatTimestamp, formatRpsWindows } from "@/lib/formatters";
 import type { PortfolioBacktestDefaultsResponse } from "@/lib/portfolio-backtest-defaults";
 import type { BacktestRun, PortfolioBacktestDefaults, PortfolioBacktestFieldName } from "@/lib/types";
 
@@ -28,6 +30,18 @@ function getLifecycleLabel(run: BacktestRun): string {
   return run.backtest_lifecycle === "legacy_condition_hit"
     ? "历史 condition-hit 模型"
     : "portfolio-return 模型";
+}
+
+function isCompletedPortfolioReturnRun(run: BacktestRun): boolean {
+  return run.status === "completed" && run.backtest_lifecycle === "portfolio_return";
+}
+
+function isSourceScreenRunAvailable(run: BacktestRun): boolean {
+  return run.source_screen_run_available !== false && run.source_screen_run_id !== null;
+}
+
+function selectDefaultCompareIds(runs: BacktestRun[]): number[] {
+  return runs.filter((run) => isCompletedPortfolioReturnRun(run) && isSourceScreenRunAvailable(run)).slice(0, 2).map((run) => run.id);
 }
 
 function formValuesFromDefaults(defaults: PortfolioBacktestDefaults): PortfolioBacktestFormValues {
@@ -120,14 +134,35 @@ export function BacktestLaunchPanel({
   const [defaultsLoaded, setDefaultsLoaded] = useState(false);
   const [latestRun, setLatestRun] = useState<BacktestRun | null>(initialRun);
   const [runs, setRuns] = useState<BacktestRun[]>(initialRuns);
+  const [selectedCompareIds, setSelectedCompareIds] = useState<number[]>(selectDefaultCompareIds(initialRuns));
   const [message, setMessage] = useState(getInitialMessage(initialError, screenRunId));
   const [launchState, setLaunchState] = useState<"idle" | "loading-defaults" | "launching" | "ready" | "error">(
     initialError ? "error" : "idle",
   );
   const completedPortfolioReturnRuns = runs.filter(
-    (run) => run.status === "completed" && run.backtest_lifecycle === "portfolio_return",
+    isCompletedPortfolioReturnRun,
   );
   const legacyRuns = runs.filter((run) => run.backtest_lifecycle === "legacy_condition_hit");
+  const sourceUnavailableRuns = completedPortfolioReturnRuns.filter((run) => !isSourceScreenRunAvailable(run));
+  const compareEligibleRuns = completedPortfolioReturnRuns.filter(isSourceScreenRunAvailable);
+
+  useEffect(() => {
+    const availableIds = compareEligibleRuns.map((run) => run.id);
+    setSelectedCompareIds((current) => {
+      const filtered = current.filter((id) => availableIds.includes(id));
+      const nextSelection =
+        filtered.length >= 2 || availableIds.length < 2
+          ? filtered.length
+            ? filtered
+            : availableIds.slice(0, Math.min(2, availableIds.length))
+          : availableIds.slice(0, 2);
+
+      return nextSelection.length === current.length &&
+        nextSelection.every((id, index) => id === current[index])
+        ? current
+        : nextSelection;
+    });
+  }, [compareEligibleRuns]);
 
   useEffect(() => {
     let cancelled = false;
@@ -227,12 +262,22 @@ export function BacktestLaunchPanel({
     }
   }
 
+  function handleCompareSelection(runId: number) {
+    setSelectedCompareIds((current) =>
+      current.includes(runId) ? current.filter((id) => id !== runId) : [...current, runId],
+    );
+  }
+
   const validation = validateForm(formValues);
   const isLaunchDisabled =
     !defaultsLoaded ||
     launchState === "launching" ||
     screenRunId === null ||
     validation.parsedValues === null;
+  const compareHref =
+    selectedCompareIds.length >= 2
+      ? `/backtests/portfolio-return/compare?ids=${selectedCompareIds.join(",")}`
+      : null;
 
   return (
     <section className="screen-panel">
@@ -396,21 +441,41 @@ export function BacktestLaunchPanel({
               </article>
               <article className="run-metadata-card">
                 <p className="status-label">RPS 语义</p>
-                <h3>{latestRun.rps_definition_version ?? "历史未记录"}</h3>
+                <h3>
+                  {!isSourceScreenRunAvailable(latestRun) && latestRun.backtest_lifecycle === "portfolio_return"
+                    ? "策略定义不可解析"
+                    : latestRun.rps_definition_version ??
+                    (latestRun.backtest_lifecycle === "portfolio_return" && latestRun.source_screen_run_id !== null
+                      ? "从 source screen run 解析"
+                      : "历史未记录")}
+                </h3>
               </article>
             </div>
 
             <div className="run-metadata-grid">
               <article className="run-metadata-card">
                 <p className="status-label">参数集</p>
-                <h3>v{latestRun.parameter_set.version}</h3>
-                <p className="status-copy">
-                  RPS {latestRun.parameter_set.rps_threshold} / 贴近年高 {latestRun.parameter_set.high_proximity_threshold_pct}%
-                </p>
+                {latestRun.backtest_lifecycle === "portfolio_return" && !isSourceScreenRunAvailable(latestRun) ? (
+                  <>
+                    <h3>不可解析</h3>
+                    <p className="status-copy">{SOURCE_SCREEN_RUN_UNAVAILABLE_MESSAGE}</p>
+                  </>
+                ) : (
+                  <>
+                    <h3>v{latestRun.parameter_set.version}</h3>
+                    <p className="status-copy">
+                      RPS {latestRun.parameter_set.rps_threshold} / 贴近年高 {latestRun.parameter_set.high_proximity_threshold_pct}%
+                    </p>
+                  </>
+                )}
               </article>
               <article className="run-metadata-card">
                 <p className="status-label">RPS 窗口</p>
-                <h3>{formatRpsWindows(latestRun.parameter_set.selected_rps_windows)}</h3>
+                <h3>
+                  {latestRun.backtest_lifecycle === "portfolio_return" && !isSourceScreenRunAvailable(latestRun)
+                    ? "不可解析"
+                    : formatRpsWindows(latestRun.parameter_set.selected_rps_windows)}
+                </h3>
               </article>
               <article className="run-metadata-card">
                 <p className="status-label">错误信息</p>
@@ -425,23 +490,40 @@ export function BacktestLaunchPanel({
         {latestRun?.status === "completed" ? (
           <div className="run-metadata-grid backtest-summary-grid">
             <article className="run-metadata-card">
-              <p className="status-label">交易日数</p>
-              <h3>{latestRun.result_summary.trade_dates_evaluated}</h3>
+              <p className="status-label">累计收益</p>
+              <h3>{formatRatioAsPercent(latestRun.cumulative_return)}</h3>
             </article>
             <article className="run-metadata-card">
-              <p className="status-label">入选快照数</p>
-              <h3>{latestRun.result_summary.qualifying_observations}</h3>
+              <p className="status-label">已入场标的</p>
+              <h3>{latestRun.position_count_after_exclusions ?? 0}</h3>
             </article>
             <article className="run-metadata-card">
-              <p className="status-label">入选标的数</p>
-              <h3>{latestRun.result_summary.unique_qualified_instruments}</h3>
+              <p className="status-label">排除标的</p>
+              <h3>{latestRun.excluded_securities.length}</h3>
             </article>
             <article className="run-metadata-card">
-              <p className="status-label">首个 / 最后入选日</p>
-              <h3>
-                {latestRun.result_summary.first_qualified_trade_date ?? "-"} /{" "}
-                {latestRun.result_summary.last_qualified_trade_date ?? "-"}
-              </h3>
+              <p className="status-label">胜率视图</p>
+              {latestRun.backtest_lifecycle === "portfolio_return" && isSourceScreenRunAvailable(latestRun) ? (
+                <>
+                  <h3>
+                    <Link className="result-link" href={`/backtests/portfolio-return/${latestRun.id}`}>
+                      打开结果详情
+                    </Link>
+                  </h3>
+                  <p className="status-copy">查看 cumulative return、win rate、max drawdown 与权益曲线。</p>
+                </>
+              ) : latestRun.backtest_lifecycle === "portfolio_return" ? (
+                <>
+                  <h3>
+                    <span className="result-link result-link--disabled" aria-disabled="true">
+                      结果不可解释
+                    </span>
+                  </h3>
+                  <p className="status-copy">{SOURCE_SCREEN_RUN_UNAVAILABLE_MESSAGE}</p>
+                </>
+              ) : (
+                <h3>仅历史追溯</h3>
+              )}
             </article>
             <article className="run-metadata-card">
               <p className="status-label">校验和</p>
@@ -483,20 +565,72 @@ export function BacktestLaunchPanel({
         </div>
 
         {completedPortfolioReturnRuns.length ? (
-          <div className="run-metadata-grid backtest-summary-grid">
-            {completedPortfolioReturnRuns.slice(0, 2).map((run) => (
-              <article key={`compare-${run.id}`} className="run-metadata-card">
+          <>
+            <div className="strategy-actions">
+              <div className="strategy-button-row">
+                <Link
+                  href={compareHref ?? "/backtests"}
+                  aria-disabled={compareHref ? "false" : "true"}
+                  className={`strategy-button strategy-button--link ${compareHref ? "" : "strategy-button--disabled"}`}
+                >
+                  打开对比页
+                </Link>
+              </div>
+              <p className="strategy-message strategy-message--ready">
+                {compareHref
+                  ? `已选择 ${selectedCompareIds.length} 条 portfolio-return runs 进入对比。`
+                  : sourceUnavailableRuns.length
+                    ? "至少选择两条来源筛选仍可解析的 portfolio-return runs 才能进入对比。"
+                    : "至少选择两条已完成的 portfolio-return runs 才能进入对比。"}
+              </p>
+            </div>
+            <div className="run-metadata-grid backtest-summary-grid">
+              {completedPortfolioReturnRuns.map((run) => (
+              <article
+                key={`compare-${run.id}`}
+                className={`run-metadata-card ${isSourceScreenRunAvailable(run) ? "" : "run-metadata-card--warning"}`}
+              >
+                <div className="compare-run-header">
+                  <label
+                    className={`compare-run-select ${isSourceScreenRunAvailable(run) ? "" : "compare-run-select--disabled"}`}
+                    title={isSourceScreenRunAvailable(run) ? undefined : SOURCE_SCREEN_RUN_UNAVAILABLE_MESSAGE}
+                  >
+                    <input
+                      type="checkbox"
+                      disabled={!isSourceScreenRunAvailable(run)}
+                      checked={selectedCompareIds.includes(run.id)}
+                      onChange={() => handleCompareSelection(run.id)}
+                    />
+                    <span>{isSourceScreenRunAvailable(run) ? "加入对比" : "来源不可解析"}</span>
+                  </label>
+                  <p className="lifecycle-badge lifecycle-badge--portfolio">portfolio-return 模型</p>
+                </div>
                 <p className="status-label">任务 #{run.id}</p>
-                <h3>v{run.parameter_set.version}</h3>
+                <h3>{formatRatioAsPercent(run.cumulative_return)}</h3>
                 <p className="status-copy">
-                  来源 screen run #{run.source_screen_run_id ?? "历史未记录"}
+                  来源 screen run #{run.source_screen_run_id ?? "历史未记录"} / 参数集 v{run.parameter_set.version}
                 </p>
                 <p className="status-copy">
-                  入选 {run.result_summary.qualifying_observations} 次，标的 {run.result_summary.unique_qualified_instruments} 只
+                  持有 {run.effective_holding_days ?? "-"} / 止损 {run.effective_stop_loss_pct ?? "-"} / cap {run.effective_portfolio_cap ?? "-"}
                 </p>
+                <p className="status-copy">
+                  {isSourceScreenRunAvailable(run) ? (
+                    <Link className="result-link" href={`/backtests/portfolio-return/${run.id}`}>
+                      查看结果详情
+                    </Link>
+                  ) : (
+                    <span className="result-link result-link--disabled" aria-disabled="true">
+                      结果不可解释
+                    </span>
+                  )}
+                </p>
+                {!isSourceScreenRunAvailable(run) ? (
+                  <p className="status-copy">{SOURCE_SCREEN_RUN_UNAVAILABLE_MESSAGE}</p>
+                ) : null}
               </article>
-            ))}
-          </div>
+              ))}
+            </div>
+          </>
         ) : (
           <p className="empty-state">暂无已完成的 portfolio-return runs 可用于跨 run 对比。</p>
         )}
@@ -505,6 +639,12 @@ export function BacktestLaunchPanel({
           <div className="run-metadata-grid backtest-summary-grid">
             {legacyRuns.slice(0, 2).map((run) => (
               <article key={`legacy-${run.id}`} className="run-metadata-card">
+                <div className="compare-run-header">
+                  <label className="compare-run-select" title="历史 condition-hit runs 不能加入 portfolio-return 对比。">
+                    <input type="checkbox" disabled />
+                    <span>不可加入对比</span>
+                  </label>
+                </div>
                 <p className="lifecycle-badge lifecycle-badge--legacy">历史 condition-hit 模型</p>
                 <h3>#{run.id}</h3>
                 <p className="status-copy">

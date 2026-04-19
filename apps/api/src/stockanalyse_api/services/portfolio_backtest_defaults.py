@@ -12,6 +12,7 @@ MVP_HOLDING_DAYS = 20
 MVP_STOP_LOSS_PCT = Decimal("-0.08")
 MVP_PORTFOLIO_CAP = 20
 MVP_ENTRY_DEFERRAL_WINDOW_DAYS = 5
+MVP_PORTFOLIO_VALUE = Decimal("1.0")
 
 
 def get_portfolio_backtest_defaults() -> dict[str, int | float]:

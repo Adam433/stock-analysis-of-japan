@@ -353,6 +353,18 @@ textarea:focus-visible {
   background: #c96b2c;
 }
 
+.strategy-button--link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.strategy-button--disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 .strategy-button:disabled {
   cursor: progress;
   opacity: 0.7;
@@ -429,6 +441,28 @@ textarea:focus-visible {
   margin-top: 0;
 }
 
+.compare-run-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.compare-run-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.compare-run-select input {
+  margin: 0;
+}
+
+.compare-run-select--disabled {
+  color: var(--muted);
+}
+
 .result-pass-flag {
   margin: 0;
   border-radius: 999px;
@@ -477,6 +511,101 @@ textarea:focus-visible {
   margin: 6px 0 0;
 }
 
+.result-analysis {
+  margin-top: 20px;
+  display: grid;
+  gap: 16px;
+  border-top: 1px solid rgba(27, 24, 20, 0.08);
+  padding-top: 18px;
+}
+
+.result-analysis__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.result-analysis__header h4 {
+  margin: 8px 0 0;
+  font-size: 1.1rem;
+}
+
+.result-analysis__meta {
+  display: grid;
+  gap: 4px;
+  text-align: right;
+}
+
+.analysis-chart-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.analysis-fiscal-list {
+  display: grid;
+  gap: 12px;
+}
+
+.analysis-fiscal-card {
+  border: 1px solid rgba(27, 24, 20, 0.08);
+  border-radius: 18px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.analysis-fiscal-card dl {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 0;
+}
+
+.analysis-fiscal-card dt {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.analysis-fiscal-card dd {
+  margin: 4px 0 0;
+}
+
+.analysis-fiscal-card--missing {
+  border-style: dashed;
+}
+
+.analysis-fiscal-status {
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.analysis-skeleton-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.analysis-skeleton-block {
+  min-height: 220px;
+  border-radius: 18px;
+  background: linear-gradient(
+    90deg,
+    rgba(27, 24, 20, 0.06) 0%,
+    rgba(27, 24, 20, 0.12) 50%,
+    rgba(27, 24, 20, 0.06) 100%
+  );
+  background-size: 200% 100%;
+  animation: analysis-skeleton-shimmer 1.6s linear infinite;
+}
+
+@keyframes analysis-skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
 .empty-state {
   margin: 18px 0 0;
   color: var(--muted);
@@ -495,6 +624,17 @@ textarea:focus-visible {
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 0.14em;
+}
+
+.result-link--disabled {
+  color: var(--muted);
+  text-decoration-style: dashed;
+  cursor: not-allowed;
+}
+
+.run-metadata-card--warning {
+  border-color: rgba(181, 104, 41, 0.35);
+  background: linear-gradient(180deg, rgba(255, 244, 223, 0.68), rgba(255, 255, 255, 0.78));
 }
 
 .stock-detail-shell {
@@ -568,6 +708,11 @@ textarea:focus-visible {
 .chart-label {
   fill: var(--muted);
   font-size: 12px;
+}
+
+.compare-chart {
+  width: 100%;
+  min-height: 260px;
 }
 
 .legend-card {
@@ -683,6 +828,63 @@ textarea:focus-visible {
   text-align: right;
 }
 
+.distribution-exit-flag {
+  margin: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  background: rgba(14, 90, 82, 0.12);
+  color: var(--accent);
+}
+
+.distribution-exit-flag--stop {
+  background: rgba(139, 47, 36, 0.14);
+  color: var(--bad-fg);
+}
+
+.distribution-exit-flag--expiry {
+  background: rgba(14, 90, 82, 0.12);
+  color: var(--good-fg);
+}
+
+.compare-semantic-flag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(14, 90, 82, 0.12);
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
+.compare-semantic-flag--warning {
+  background: rgba(181, 104, 41, 0.18);
+  color: var(--accent-strong);
+}
+
+.distribution-bar-track {
+  margin-top: 16px;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(27, 24, 20, 0.08);
+  overflow: hidden;
+}
+
+.distribution-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.distribution-bar-fill--positive {
+  background: linear-gradient(90deg, rgba(14, 90, 82, 0.7), rgba(14, 90, 82, 1));
+}
+
+.distribution-bar-fill--negative {
+  background: linear-gradient(90deg, rgba(139, 47, 36, 0.7), rgba(139, 47, 36, 1));
+}
+
 .signal-list {
   padding-left: 18px;
 }
@@ -765,6 +967,11 @@ textarea:focus-visible {
   }
 
   .result-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .analysis-chart-grid,
+  .analysis-fiscal-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

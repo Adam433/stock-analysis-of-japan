@@ -16,6 +16,50 @@ vi.mock("@/components/watchlist/WatchlistToggleButton", () => ({
   WatchlistToggleButton: ({ symbol }: { symbol: string }) => <button type="button">观察 {symbol}</button>,
 }));
 
+vi.mock("lightweight-charts", () => ({
+  createChart: vi.fn(() => ({
+    applyOptions: vi.fn(),
+    addSeries: vi.fn(() => ({ setData: vi.fn() })),
+    remove: vi.fn(),
+    timeScale: vi.fn(() => ({
+      fitContent: vi.fn(),
+    })),
+  })),
+  CandlestickSeries: "CandlestickSeries",
+  HistogramSeries: "HistogramSeries",
+  ColorType: { Solid: "solid" },
+  CrosshairMode: { Normal: 0 },
+  LineStyle: { Solid: 0 },
+}));
+
+class MockIntersectionObserver {
+  static instances: MockIntersectionObserver[] = [];
+
+  callback: IntersectionObserverCallback;
+
+  constructor(callback: IntersectionObserverCallback) {
+    this.callback = callback;
+    MockIntersectionObserver.instances.push(this);
+  }
+
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
+
+  trigger(elements: Element[]) {
+    this.callback(
+      elements.map(
+        (element) =>
+          ({
+            isIntersecting: true,
+            target: element,
+          }) as IntersectionObserverEntry,
+      ),
+      this as unknown as IntersectionObserver,
+    );
+  }
+}
+
 function buildConfigurationResponse(
   overrides: Partial<StrategyConfigurationResponse["configuration"]> = {},
 ): StrategyConfigurationResponse {
@@ -36,6 +80,22 @@ function buildConfigurationResponse(
   };
 }
 
+function buildQualifiedResult(index: number) {
+  return {
+    instrument_id: 60 + index,
+    symbol: `${7202 + index}`,
+    exchange: "TSE",
+    trade_date: "2026-04-15",
+    best_rps_value: "97.1",
+    rps_threshold: 90,
+    high_proximity_ratio: "0.98",
+    high_proximity_threshold_pct: "5.00",
+    max_drawdown_from_high_pct: "2.10",
+    rps_condition_passed: true,
+    high_proximity_condition_passed: true,
+  };
+}
+
 function buildScreenRun(overrides: Partial<ScreenRun> = {}): ScreenRun {
   return {
     id: 8,
@@ -52,21 +112,7 @@ function buildScreenRun(overrides: Partial<ScreenRun> = {}): ScreenRun {
       high_proximity_threshold_pct: "5.00",
       selected_rps_windows: [50, 120, 250],
     },
-    qualified_results: [
-      {
-        instrument_id: 61,
-        symbol: "7203",
-        exchange: "TSE",
-        trade_date: "2026-04-15",
-        best_rps_value: "97.1",
-        rps_threshold: 90,
-        high_proximity_ratio: "0.98",
-        high_proximity_threshold_pct: "5.00",
-        max_drawdown_from_high_pct: "2.10",
-        rps_condition_passed: true,
-        high_proximity_condition_passed: true,
-      },
-    ],
+    qualified_results: [buildQualifiedResult(1)],
     ...overrides,
   };
 }
@@ -86,6 +132,8 @@ describe("StrategyConfigPanel", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    MockIntersectionObserver.instances = [];
   });
 
   it("shows a validation error before saving when no RPS period is selected for screening", async () => {
@@ -161,12 +209,42 @@ describe("StrategyConfigPanel", () => {
   it("launches a screen run and renders the qualified result list", async () => {
     const user = userEvent.setup();
     const screenRun = buildScreenRun();
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(new Response(JSON.stringify({ entries: [{ instrument_id: 61 }] }), { status: 200 }))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ screen_run: screenRun }), { status: 200 }),
-      );
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/watchlist")) {
+        return Promise.resolve(new Response(JSON.stringify({ entries: [{ instrument_id: 61 }] }), { status: 200 }));
+      }
+      if (url.endsWith("/screen/runs")) {
+        return Promise.resolve(new Response(JSON.stringify({ screen_run: screenRun }), { status: 200 }));
+      }
+      if (url.includes("/inline-analysis")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              inline_analysis: {
+                instrument: {
+                  id: 61,
+                  symbol: "7203",
+                  exchange: "TSE",
+                  name: "Toyota",
+                  currency: "JPY",
+                },
+                screen_run_ref: {
+                  id: 8,
+                  trade_date: "2026-04-15",
+                },
+                candlesticks: [],
+                candlestick_window_days_available: 0,
+                valuation_by_fiscal_year: [],
+                generated_at: "2026-04-17T12:00:00Z",
+              },
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify({ entries: [] }), { status: 200 }));
+    });
 
     render(
       <StrategyConfigPanel
@@ -231,5 +309,127 @@ describe("StrategyConfigPanel", () => {
     await user.click(screen.getByRole("button", { name: "启动筛选" }));
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("eagerly loads inline analysis for small result lists", async () => {
+    vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+    const screenRun = buildScreenRun();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/watchlist")) {
+        return Promise.resolve(new Response(JSON.stringify({ entries: [] }), { status: 200 }));
+      }
+      if (url.includes("/inline-analysis")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              inline_analysis: {
+                instrument: {
+                  id: 61,
+                  symbol: "7203",
+                  exchange: "TSE",
+                  name: "Toyota",
+                  currency: "JPY",
+                },
+                screen_run_ref: {
+                  id: 8,
+                  trade_date: "2026-04-15",
+                },
+                candlesticks: [],
+                candlestick_window_days_available: 0,
+                valuation_by_fiscal_year: [],
+                generated_at: "2026-04-17T12:00:00Z",
+              },
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify({ screen_run: screenRun }), { status: 200 }));
+    });
+
+    render(
+      <StrategyConfigPanel
+        apiBaseUrl="http://localhost:8000"
+        initialData={buildConfigurationResponse()}
+        initialError={null}
+        initialRun={screenRun}
+        initialRunError={null}
+        initialTradeDates={[{ trade_date: "2026-04-15" }]}
+        initialTradeDateError={null}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://localhost:8000/stocks/61/inline-analysis?screen_run_id=8",
+      );
+    });
+  });
+
+  it("waits for intersection before loading inline analysis for large result lists", async () => {
+    vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+    const screenRun = buildScreenRun({
+      qualified_count: 20,
+      qualified_results: Array.from({ length: 20 }, (_, index) => buildQualifiedResult(index + 1)),
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/watchlist")) {
+        return Promise.resolve(new Response(JSON.stringify({ entries: [] }), { status: 200 }));
+      }
+      if (url.includes("/inline-analysis")) {
+        const instrumentId = Number(url.match(/stocks\/(\d+)/)?.[1] ?? "0");
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              inline_analysis: {
+                instrument: {
+                  id: instrumentId,
+                  symbol: String(instrumentId),
+                  exchange: "TSE",
+                  name: `Name ${instrumentId}`,
+                  currency: "JPY",
+                },
+                screen_run_ref: {
+                  id: 8,
+                  trade_date: "2026-04-15",
+                },
+                candlesticks: [],
+                candlestick_window_days_available: 0,
+                valuation_by_fiscal_year: [],
+                generated_at: "2026-04-17T12:00:00Z",
+              },
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify({ screen_run: screenRun }), { status: 200 }));
+    });
+
+    render(
+      <StrategyConfigPanel
+        apiBaseUrl="http://localhost:8000"
+        initialData={buildConfigurationResponse()}
+        initialError={null}
+        initialRun={screenRun}
+        initialRunError={null}
+        initialTradeDates={[{ trade_date: "2026-04-15" }]}
+        initialTradeDateError={null}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    const observer = MockIntersectionObserver.instances[0];
+    observer.trigger([screen.getByTestId("card-61"), screen.getByTestId("card-62")]);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("http://localhost:8000/stocks/61/inline-analysis?screen_run_id=8");
+      expect(fetchMock).toHaveBeenCalledWith("http://localhost:8000/stocks/62/inline-analysis?screen_run_id=8");
+    });
   });
 });

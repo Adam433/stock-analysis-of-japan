@@ -14,6 +14,19 @@ type LoadScreenRunContextResult = {
   error: string | null;
 };
 
+function selectInitialRunForContext(
+  latestRun: BacktestRun | null,
+  runs: BacktestRun[],
+  screenRunId: number | null,
+): BacktestRun | null {
+  if (screenRunId === null) {
+    return latestRun;
+  }
+
+  const candidates = latestRun && runs.every((run) => run.id !== latestRun.id) ? [latestRun, ...runs] : runs;
+  return candidates.find((run) => run.source_screen_run_id === screenRunId) ?? null;
+}
+
 async function loadLatestBacktestRun(
   apiBaseUrl: string,
 ): Promise<{ data: BacktestRun | null; error: string | null }> {
@@ -140,6 +153,7 @@ export default async function BacktestsPage({
     (run) => run.backtest_lifecycle === "legacy_condition_hit",
   ).length;
   const screenRunId = screenRun?.status === "completed" ? screenRun.id : null;
+  const contextualRun = selectInitialRunForContext(data, visibleRuns, screenRunId);
 
   return (
     <main id="main-content" className="dashboard-shell">
@@ -162,7 +176,7 @@ export default async function BacktestsPage({
       <BacktestLaunchPanel
         apiBaseUrl={apiBaseUrl}
         screenRunId={screenRunId}
-        initialRun={data}
+        initialRun={contextualRun}
         initialRuns={visibleRuns}
         initialError={screenRunError ?? error ?? runsError}
       />

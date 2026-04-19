@@ -1,10 +1,13 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+import { ResultAnalysisCard } from "@/components/screen/ResultAnalysisCard";
+import { useInlineAnalysisScheduler } from "@/components/screen/useInlineAnalysisScheduler";
 import { WatchlistToggleButton } from "@/components/watchlist/WatchlistToggleButton";
 import { formatTimestamp, formatRpsWindows } from "@/lib/formatters";
+import type { InlineAnalysisPayload } from "@/lib/types";
 import type { StrategyConfiguration, StrategyConfigurationResponse, ScreenRun, ScreenRunResult } from "@/lib/types";
 
 type ScreeningTradeDateOption = {
@@ -64,6 +67,14 @@ export function StrategyConfigPanel({
     [50, 120, 250];
   const hasLoadedConfiguration = Boolean(initialData);
   const canRunWithoutTradeDateList = Boolean(initialTradeDateError) && !availableTradeDates.length;
+  const inlineAnalysisTargets = useMemo(
+    () =>
+      latestRun?.qualified_results.map((result) => ({
+        instrumentId: result.instrument_id,
+        screenRunId: latestRun.id,
+      })) ?? [],
+    [latestRun],
+  );
   const hasUnsavedChanges =
     savedConfiguration !== null &&
     (
@@ -71,6 +82,10 @@ export function StrategyConfigPanel({
       highProximityThresholdPct !== savedConfiguration.high_proximity_threshold_pct ||
       selectedRpsWindows.join(",") !== savedConfiguration.selected_rps_windows.join(",")
     );
+  const { states: inlineAnalysisStates, registerCardRef, retry } = useInlineAnalysisScheduler(
+    apiBaseUrl,
+    inlineAnalysisTargets,
+  );
 
   useEffect(() => {
     if (initialData) {
@@ -230,6 +245,23 @@ export function StrategyConfigPanel({
         ? current.filter((value) => value !== window)
         : [...current, window].sort((left, right) => left - right);
     });
+  }
+
+  function resolveInlineAnalysisView(result: ScreenRunResult): {
+    analysisPayload: InlineAnalysisPayload | "idle" | "loading" | "failed" | null;
+    errorMessage: string | null;
+  } {
+    const state = inlineAnalysisStates[result.instrument_id];
+    if (!state || state.kind === "idle") {
+      return { analysisPayload: "idle", errorMessage: null };
+    }
+    if (state.kind === "loading") {
+      return { analysisPayload: "loading", errorMessage: null };
+    }
+    if (state.kind === "failed") {
+      return { analysisPayload: "failed", errorMessage: state.error };
+    }
+    return { analysisPayload: state.data, errorMessage: null };
   }
 
   return (
@@ -399,8 +431,16 @@ export function StrategyConfigPanel({
 
             {latestRun.qualified_results.length ? (
               <div className="result-list">
-                {latestRun.qualified_results.map((result) => (
-                  <article key={`${latestRun.id}-${result.instrument_id}`} className="result-card">
+                {latestRun.qualified_results.map((result) => {
+                  const inlineAnalysisView = resolveInlineAnalysisView(result);
+
+                  return (
+                    <article
+                      key={`${latestRun.id}-${result.instrument_id}`}
+                      className="result-card"
+                      ref={registerCardRef(result.instrument_id)}
+                      data-testid={`card-${result.instrument_id}`}
+                    >
                     <div className="result-card__title">
                       <div>
                         <p className="status-label">{result.exchange}</p>
@@ -462,8 +502,18 @@ export function StrategyConfigPanel({
                       </li>
                       <li>距高点比率：{result.high_proximity_ratio}</li>
                     </ul>
-                  </article>
-                ))}
+
+                    <ResultAnalysisCard
+                      instrumentId={result.instrument_id}
+                      symbol={result.symbol}
+                      screenRunId={latestRun.id}
+                      analysisPayload={inlineAnalysisView.analysisPayload}
+                      errorMessage={inlineAnalysisView.errorMessage}
+                      onRetry={() => retry(result.instrument_id)}
+                    />
+                    </article>
+                  );
+                })}
               </div>
             ) : (
               <p className="empty-state">

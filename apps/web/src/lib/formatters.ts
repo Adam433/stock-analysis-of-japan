@@ -29,6 +29,14 @@ export function formatPercent(value: string | null, digits = 2): string {
   return `${Number(value).toFixed(digits)}%`;
 }
 
+export function formatRatioAsPercent(value: string | null, digits = 2): string {
+  if (!value) {
+    return "不可用";
+  }
+
+  return `${(Number(value) * 100).toFixed(digits)}%`;
+}
+
 export function formatDateOnly(value: string): string {
   const [year, month, day] = value.split("-").map(Number);
   if (!year || !month || !day) {
@@ -39,4 +47,9 @@ export function formatDateOnly(value: string): string {
     dateStyle: "long",
     timeZone: "UTC",
   }).format(new Date(Date.UTC(year, month - 1, day)));
+}
+
+export function formatFiscalYearLabel(fiscalYearLabel: string, fiscalYearEndMonth: number): string {
+  const month = String(fiscalYearEndMonth).padStart(2, "0");
+  return `${fiscalYearLabel}（${month} 月结束）`;
 }

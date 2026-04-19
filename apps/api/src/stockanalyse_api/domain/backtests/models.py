@@ -9,8 +9,18 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from stockanalyse_api.db.base import Base, TimestampMixin
 
-BACKTEST_RUN_STATUS_VALUES = ("running", "completed", "failed", "failed-recoverable")
+BACKTEST_RUN_STATUS_VALUES = (
+    "running",
+    "completed",
+    "failed",
+    "failed-recoverable",
+    "failed-data-insufficient",
+)
 BACKTEST_LIFECYCLE_VALUES = ("portfolio_return", "legacy_condition_hit")
+PORTFOLIO_RETURN_PROVENANCE_CONSTRAINT = (
+    "(backtest_lifecycle = 'legacy_condition_hit') OR "
+    "(backtest_lifecycle = 'portfolio_return' AND source_screen_run_id IS NOT NULL AND rps_definition_version IS NULL)"
+)
 
 
 class BacktestRun(TimestampMixin, Base):
@@ -23,6 +33,10 @@ class BacktestRun(TimestampMixin, Base):
         CheckConstraint(
             f"backtest_lifecycle IN {BACKTEST_LIFECYCLE_VALUES}",
             name="backtest_runs_lifecycle",
+        ),
+        CheckConstraint(
+            PORTFOLIO_RETURN_PROVENANCE_CONSTRAINT,
+            name="backtest_runs_portfolio_return_provenance",
         ),
     )
 
@@ -49,8 +63,15 @@ class BacktestRun(TimestampMixin, Base):
     effective_stop_loss_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 4), nullable=True)
     effective_portfolio_cap: Mapped[int | None] = mapped_column(Integer, nullable=True)
     effective_entry_deferral_window_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ranking_policy_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    excluded_securities_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    portfolio_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    position_count_after_exclusions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cumulative_return: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    equity_curve_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    per_security_returns_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     backtest_lifecycle: Mapped[str] = mapped_column(String(32), nullable=False)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running", server_default="running")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="running", server_default="running")
     trade_dates_evaluated: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     total_candidates_evaluated: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     qualifying_observations: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")

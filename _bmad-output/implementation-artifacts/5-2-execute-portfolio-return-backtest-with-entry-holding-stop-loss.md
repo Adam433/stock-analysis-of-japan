@@ -1,6 +1,6 @@
 # 故事 5.2 (portfolio-return 重做): Execute Portfolio-Return Backtest with Entry, Holding, and Stop-Loss Rules
 
-状态: ready-for-dev
+状态: review
 
 > **本 story 重做了旧 5-2-execute-reproducible-backtests-from-stored-inputs（done，condition-hit 模型）**。旧执行做"计数 qualifying observations"；新执行做"模拟一个 portfolio：T+1 入场、equal-weight 等权、stop-loss 触发平仓、holding 到期平仓、不再投入释放现金"。**Story 5.6 anchor (`_bmad-output/planning-artifacts/portfolio-backtest-anchor.md`) 是本 story 的 semantic source；本 story 不重新定义 anchor 中已经写明的语义**。
 
@@ -36,8 +36,8 @@
 
 ## 任务 / 子任务
 
-- [ ] 数据模型 + migration（AC: 2, 5, 6, 7, 8, 10）
-  - [ ] 在 `apps/api/src/stockanalyse_api/domain/backtests/models.py` 加：
+- [x] 数据模型 + migration（AC: 2, 5, 6, 7, 8, 10）
+  - [x] 在 `apps/api/src/stockanalyse_api/domain/backtests/models.py` 加：
     - `ranking_policy_id`（String(64)）
     - `excluded_securities_json`（Text）— 序列化 JSON
     - `portfolio_value` (Numeric(18,6), default 1.0)
@@ -45,27 +45,27 @@
     - `cumulative_return`（Numeric(18,6), nullable）— 由 5.3 review 用，本 story 写入
     - `equity_curve_json`（Text, nullable）— 序列化每日组合权益序列 `[{trade_date, equity}]`
     - `per_security_returns_json`（Text, nullable）— `[{instrument_id, symbol, entry_date, exit_date, exit_reason, realized_return}]`
-  - [ ] 新增 `'failed-data-insufficient'`、`'failed-recoverable'` 到 `BACKTEST_RUN_STATUS_VALUES`
-  - [ ] Migration `20260417_0019_add_portfolio_return_execution_fields.py`，依赖 `0018`；既存 row 全部为 NULL/默认（不影响 condition-hit）；CheckConstraint `status IN (...)` 更新
-- [ ] 执行引擎（AC: 1-11）
-  - [ ] 新建 `apps/api/src/stockanalyse_api/services/portfolio_backtest.py::execute_portfolio_return_backtest(session, run_id)`
-  - [ ] 加载 `screen_run_results`（passed=true）作为 qualified set
-  - [ ] 加载 `market_data_daily` 在 `[trade_date, trade_date + holding_days + deferral_window]` 范围
-  - [ ] 实现 cap 排序（RPS composite score 来源：screen_run_results.best_rps_value 降序，instrument.symbol 升序）+ exclusion 记录
-  - [ ] 实现 deferral 窗口入场：从 trade_date+1 起逐日找第一个有效 open；超窗口排除
-  - [ ] 等权 sizing：weight = MVP_PORTFOLIO_VALUE / N（N 是排除后数量）
-  - [ ] 持仓循环：每日 close 检查 stop-loss → 标记 breach；breach 次日 open 平仓（含递延）；持有期到期则到期后下一日 open 平仓
-  - [ ] 写 equity_curve_json、per_security_returns_json、cumulative_return
-  - [ ] 计算 dataset_checksum（沿用既有方式：trade_date + instrument 元组 SHA256）
-  - [ ] 异常分流：数据不足 → `failed-data-insufficient`；其它已知 ValueError → `failed-recoverable`
-- [ ] 常量
-  - [ ] `services/portfolio_backtest_defaults.py` 加 `MVP_PORTFOLIO_VALUE = 1.0`（与 holding/stop-loss/cap/deferral 同模块）
-- [ ] API
-  - [ ] 在 launch 端点（Story 5.1 已建）内部触发 execute（不暴露独立 execute 端点 — 依 anchor 第 8 项 + Story 5.1 AC1）
-- [ ] 测试（AC: 1-11，每个 AC 至少 1 条断言）
-  - [ ] `apps/api/tests/test_backtesting.py` 新增 fixtures：seed screen_run + screen_run_results（passed） + market_data_daily 完整 trade_date 序列
-  - [ ] 测试覆盖：T+1 入场 / cap 截断 + ranking + excluded 列表 / deferral 入场 / 超 deferral 窗口排除 / suspended 排除 / fractional weight 1/N / N=0 空 portfolio / stop-loss 触发 + 次日 open 平仓 + gap-down 不优化 / 平仓递延 / 释放现金不再投入 / 持有期到期 + 递延 / 数据不足 → failed-data-insufficient / 无加仓路径（grep 断言）/ 重复执行确定性（同输入两次 result 一致）/ dataset-version 变化 surfaced
-  - [ ] 跑 `PYTHONPATH=src python3 -m unittest tests.test_backtesting`、`alembic upgrade head`
+  - [x] 新增 `'failed-data-insufficient'`、`'failed-recoverable'` 到 `BACKTEST_RUN_STATUS_VALUES`
+  - [x] Migration `20260417_0019_add_portfolio_return_execution_fields.py`，依赖 `0018`；既存 row 全部为 NULL/默认（不影响 condition-hit）；CheckConstraint `status IN (...)` 更新
+- [x] 执行引擎（AC: 1-11）
+  - [x] 新建 `apps/api/src/stockanalyse_api/services/portfolio_backtest.py::execute_portfolio_return_backtest(session, run_id)`
+  - [x] 加载 `screen_run_results`（passed=true）作为 qualified set
+  - [x] 加载 `market_data_daily` 在 `[trade_date, trade_date + holding_days + deferral_window]` 范围
+  - [x] 实现 cap 排序（RPS composite score 来源：screen_run_results.best_rps_value 降序，instrument.symbol 升序）+ exclusion 记录
+  - [x] 实现 deferral 窗口入场：从 trade_date+1 起逐日找第一个有效 open；超窗口排除
+  - [x] 等权 sizing：weight = MVP_PORTFOLIO_VALUE / N（N 是排除后数量）
+  - [x] 持仓循环：每日 close 检查 stop-loss → 标记 breach；breach 次日 open 平仓（含递延）；持有期到期则到期后下一日 open 平仓
+  - [x] 写 equity_curve_json、per_security_returns_json、cumulative_return
+  - [x] 计算 dataset_checksum（沿用既有方式：trade_date + instrument 元组 SHA256）
+  - [x] 异常分流：数据不足 → `failed-data-insufficient`；其它已知 ValueError → `failed-recoverable`
+- [x] 常量
+  - [x] `services/portfolio_backtest_defaults.py` 加 `MVP_PORTFOLIO_VALUE = 1.0`（与 holding/stop-loss/cap/deferral 同模块）
+- [x] API
+  - [x] 在 launch 端点（Story 5.1 已建）内部触发 execute（不暴露独立 execute 端点 — 依 anchor 第 8 项 + Story 5.1 AC1）
+- [x] 测试（AC: 1-11，每个 AC 至少 1 条断言）
+  - [x] `apps/api/tests/test_backtesting.py` 新增 fixtures：seed screen_run + screen_run_results（passed） + market_data_daily 完整 trade_date 序列
+  - [x] 测试覆盖：T+1 入场 / cap 截断 + ranking + excluded 列表 / deferral 入场 / 超 deferral 窗口排除 / suspended 排除 / fractional weight 1/N / N=0 空 portfolio / stop-loss 触发 + 次日 open 平仓 + gap-down 不优化 / 平仓递延 / 释放现金不再投入 / 持有期到期 + 递延 / 数据不足 → failed-data-insufficient / 无加仓路径（grep 断言）/ 重复执行确定性（同输入两次 result 一致）/ dataset-version 变化 surfaced
+  - [x] 跑 `PYTHONPATH=src python3 -m unittest tests.test_backtesting`、`alembic upgrade head`
 
 ## 开发备注
 
@@ -101,14 +101,29 @@
 
 ### 使用的代理模型
 
-{{agent_model_name_version}}
+GPT-5 Codex（Codex desktop）
 
 ### 调试日志参考
 
+- `PYTHONPATH=src python3 -m unittest tests.test_backtesting`
+- `PYTHONPATH=src python3 -m alembic -c alembic.ini upgrade head`
+
 ### 完成说明
 
+- 新增 `execute_portfolio_return_backtest`，实现 T+1/递延入场、cap 排序裁剪、equal-weight sizing、按 adjusted close 触发 stop-loss、next valid open 平仓、holding 到期平仓，以及无 rebalance / 无 re-entry / 无现金再投入的组合路径。
+- 新增 `20260417_0019` migration 与 BacktestRun execution 字段；序列化层同步暴露 `ranking_policy_id`、`excluded_securities`、`portfolio_value`、`position_count_after_exclusions`、`cumulative_return`、`equity_curve`、`per_security_returns`。
+- 本轮 review 修复了两个 provenance 缺口：空组合与 `failed-data-insufficient` run 现在都会持久化 dataset span/checksum；当未来数据不足以覆盖完整 entry deferral window 时，run 会返回 `failed-data-insufficient`，不再误报成已完成的空组合。
+
 ### 文件清单
+
+- apps/api/src/stockanalyse_api/domain/backtests/models.py
+- apps/api/src/stockanalyse_api/services/backtesting.py
+- apps/api/src/stockanalyse_api/services/portfolio_backtest.py
+- apps/api/src/stockanalyse_api/services/portfolio_backtest_defaults.py
+- apps/api/migrations/versions/20260417_0019_add_portfolio_return_execution_fields.py
+- apps/api/tests/test_backtesting.py
 
 ### 变更日志
 
 - 2026-04-17: Story 5.2 portfolio-return 重做版本创建（v3 patch）。执行引擎独立于 condition-hit 旧路径。
+- 2026-04-17: 完成 portfolio-return execution engine、execution schema/migration 与后端测试；review 后补齐 failed/empty-run dataset provenance，并把 entry deferral window 数据不足归类为 `failed-data-insufficient`。

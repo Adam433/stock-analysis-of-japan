@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
 from hashlib import sha256
@@ -9,11 +10,8 @@ from sqlalchemy import select
 from stockanalyse_api.domain.backtests.models import BacktestRun
 from stockanalyse_api.domain.indicators.models import DerivedIndicatorDaily
 from stockanalyse_api.domain.instruments.models import Instrument
-from stockanalyse_api.domain.screens.models import StrategyConfiguration
-from stockanalyse_api.services.rps_semantics import (
-    APPROVED_RPS_DEFINITION_VERSION,
-    normalize_rps_definition_version,
-)
+from stockanalyse_api.domain.screens.models import ScreenRun, StrategyConfiguration
+from stockanalyse_api.services.rps_semantics import APPROVED_RPS_DEFINITION_VERSION, normalize_rps_definition_version
 from stockanalyse_api.services.screening import evaluate_indicator_snapshot
 from stockanalyse_api.services.strategy_config import get_active_strategy_configuration
 
@@ -22,6 +20,7 @@ from stockanalyse_api.services.strategy_config import get_active_strategy_config
 class BacktestRunSummary:
     id: int
     source_screen_run_id: int | None
+    source_screen_run_available: bool | None
     strategy_configuration_id: int
     status: str
     backtest_lifecycle: str
@@ -37,6 +36,13 @@ class BacktestRunSummary:
     effective_stop_loss_pct: str | None
     effective_portfolio_cap: int | None
     effective_entry_deferral_window_days: int | None
+    ranking_policy_id: str | None
+    excluded_securities: list[dict[str, object]]
+    portfolio_value: str | None
+    position_count_after_exclusions: int | None
+    cumulative_return: str | None
+    equity_curve: list[dict[str, object]]
+    per_security_returns: list[dict[str, object]]
     error_message: str | None
     result_summary: dict[str, object]
     parameter_set: dict[str, object]
@@ -45,10 +51,29 @@ class BacktestRunSummary:
         return asdict(self)
 
 
-def serialize_backtest_run(run: BacktestRun, configuration: StrategyConfiguration) -> BacktestRunSummary:
+def _resolve_source_screen_run_available(session, run: BacktestRun) -> bool | None:
+    if run.source_screen_run_id is None:
+        return None
+
+    screen_run = session.get(ScreenRun, run.source_screen_run_id)
+    if screen_run is None:
+        return False
+    return screen_run.status == "completed"
+
+
+def serialize_backtest_run(
+    session,
+    run: BacktestRun,
+    configuration: StrategyConfiguration,
+) -> BacktestRunSummary:
+    serialized_rps_definition_version = normalize_rps_definition_version(run.rps_definition_version)
+    if run.backtest_lifecycle == "portfolio_return" and run.source_screen_run_id is not None:
+        serialized_rps_definition_version = run.rps_definition_version
+
     return BacktestRunSummary(
         id=run.id,
         source_screen_run_id=run.source_screen_run_id,
+        source_screen_run_available=_resolve_source_screen_run_available(session, run),
         strategy_configuration_id=run.strategy_configuration_id,
         status=run.status,
         backtest_lifecycle=run.backtest_lifecycle,
@@ -56,7 +81,7 @@ def serialize_backtest_run(run: BacktestRun, configuration: StrategyConfiguratio
         end_date=run.end_date.isoformat(),
         started_at=run.started_at.isoformat(),
         completed_at=run.completed_at.isoformat() if run.completed_at is not None else None,
-        rps_definition_version=normalize_rps_definition_version(run.rps_definition_version),
+        rps_definition_version=serialized_rps_definition_version,
         dataset_trade_date_start=run.dataset_trade_date_start.isoformat() if run.dataset_trade_date_start is not None else None,
         dataset_trade_date_end=run.dataset_trade_date_end.isoformat() if run.dataset_trade_date_end is not None else None,
         dataset_checksum=run.dataset_checksum,
@@ -66,6 +91,13 @@ def serialize_backtest_run(run: BacktestRun, configuration: StrategyConfiguratio
         ),
         effective_portfolio_cap=run.effective_portfolio_cap,
         effective_entry_deferral_window_days=run.effective_entry_deferral_window_days,
+        ranking_policy_id=run.ranking_policy_id,
+        excluded_securities=json.loads(run.excluded_securities_json) if run.excluded_securities_json else [],
+        portfolio_value=f"{run.portfolio_value:.6f}" if run.portfolio_value is not None else None,
+        position_count_after_exclusions=run.position_count_after_exclusions,
+        cumulative_return=f"{run.cumulative_return:.6f}" if run.cumulative_return is not None else None,
+        equity_curve=json.loads(run.equity_curve_json) if run.equity_curve_json else [],
+        per_security_returns=json.loads(run.per_security_returns_json) if run.per_security_returns_json else [],
         error_message=run.error_message,
         result_summary={
             "trade_dates_evaluated": run.trade_dates_evaluated,
@@ -106,7 +138,7 @@ def launch_backtest_run(session, *, start_date: date, end_date: date) -> Backtes
         started_at=datetime.now(UTC),
         completed_at=None,
         rps_definition_version=APPROVED_RPS_DEFINITION_VERSION,
-        backtest_lifecycle="portfolio_return",
+        backtest_lifecycle="legacy_condition_hit",
         status="running",
         error_message=None,
     )
@@ -114,7 +146,7 @@ def launch_backtest_run(session, *, start_date: date, end_date: date) -> Backtes
     session.commit()
     session.refresh(run)
 
-    return serialize_backtest_run(run, configuration)
+    return serialize_backtest_run(session, run, configuration)
 
 
 def get_backtest_run(session, run_id: int) -> BacktestRunSummary | None:
@@ -125,7 +157,7 @@ def get_backtest_run(session, run_id: int) -> BacktestRunSummary | None:
     configuration = session.get(StrategyConfiguration, run.strategy_configuration_id)
     if configuration is None:
         return None
-    return serialize_backtest_run(run, configuration)
+    return serialize_backtest_run(session, run, configuration)
 
 
 def get_latest_backtest_run(session) -> BacktestRunSummary | None:
@@ -146,7 +178,7 @@ def list_backtest_runs(session, *, limit: int = 50, offset: int = 0) -> list[Bac
         .offset(offset)
     ).all()
 
-    return [serialize_backtest_run(run, configuration) for run, configuration in rows]
+    return [serialize_backtest_run(session, run, configuration) for run, configuration in rows]
 
 
 def execute_backtest_run(session, run_id: int) -> BacktestRunSummary:
@@ -231,4 +263,4 @@ def execute_backtest_run(session, run_id: int) -> BacktestRunSummary:
     session.commit()
     session.refresh(run)
 
-    return serialize_backtest_run(run, configuration)
+    return serialize_backtest_run(session, run, configuration)

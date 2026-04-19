@@ -4,6 +4,14 @@ import userEvent from "@testing-library/user-event";
 import { BacktestLaunchPanel } from "@/components/backtests/BacktestLaunchPanel";
 import type { BacktestRun } from "@/lib/types";
 
+vi.mock("next/link", () => ({
+  default: ({ href, children, className, "aria-disabled": ariaDisabled }: { href: string; children: React.ReactNode; className?: string; "aria-disabled"?: string }) => (
+    <a href={href} className={className} aria-disabled={ariaDisabled}>
+      {children}
+    </a>
+  ),
+}));
+
 const mockDefaults = {
   holding_days: 20,
   stop_loss_pct: -0.08,
@@ -15,6 +23,7 @@ function buildBacktestRun(overrides: Partial<BacktestRun> = {}): BacktestRun {
   return {
     id: 9,
     source_screen_run_id: 8,
+    source_screen_run_available: true,
     strategy_configuration_id: 3,
     status: "running",
     backtest_lifecycle: "portfolio_return",
@@ -30,6 +39,13 @@ function buildBacktestRun(overrides: Partial<BacktestRun> = {}): BacktestRun {
     effective_stop_loss_pct: mockDefaults.stop_loss_pct.toFixed(4),
     effective_portfolio_cap: mockDefaults.portfolio_cap,
     effective_entry_deferral_window_days: mockDefaults.entry_deferral_window_days,
+    ranking_policy_id: "rps_desc_ticker_asc_v1",
+    excluded_securities: [],
+    portfolio_value: "1.000000",
+    position_count_after_exclusions: 0,
+    cumulative_return: "0.000000",
+    equity_curve: [],
+    per_security_returns: [],
     error_message: null,
     result_summary: {
       trade_dates_evaluated: 0,
@@ -256,5 +272,75 @@ describe("BacktestLaunchPanel", () => {
     expect(
       screen.getByText(/这些 runs 保留用于历史追溯，并显式带标签展示/),
     ).toBeInTheDocument();
+  });
+
+  it("disables legacy runs in compare selection while allowing portfolio runs", () => {
+    const portfolioRun = buildBacktestRun({ id: 21, status: "completed", cumulative_return: "0.045000" });
+    const legacyRun = buildBacktestRun({
+      id: 8,
+      status: "completed",
+      backtest_lifecycle: "legacy_condition_hit",
+    });
+
+    render(
+      <BacktestLaunchPanel
+        apiBaseUrl="http://localhost:8000"
+        screenRunId={8}
+        initialRun={portfolioRun}
+        initialRuns={[portfolioRun, legacyRun]}
+        initialError={null}
+      />,
+    );
+
+    expect(screen.getByLabelText("加入对比")).not.toBeDisabled();
+    expect(screen.getByLabelText("不可加入对比")).toBeDisabled();
+    expect(screen.getByText("打开对比页")).toBeInTheDocument();
+  });
+
+  it("disables portfolio-return runs whose source screen run is no longer resolvable", () => {
+    const healthyRun = buildBacktestRun({ id: 21, status: "completed", cumulative_return: "0.045000" });
+    const unavailableRun = buildBacktestRun({
+      id: 22,
+      status: "completed",
+      source_screen_run_id: 999,
+      source_screen_run_available: false,
+    });
+
+    render(
+      <BacktestLaunchPanel
+        apiBaseUrl="http://localhost:8000"
+        screenRunId={8}
+        initialRun={healthyRun}
+        initialRuns={[healthyRun, unavailableRun]}
+        initialError={null}
+      />,
+    );
+
+    expect(screen.getByLabelText("加入对比")).not.toBeDisabled();
+    expect(screen.getByLabelText("来源不可解析")).toBeDisabled();
+    expect(screen.getByText("原筛选记录不可用 — 策略定义无法解析")).toBeInTheDocument();
+  });
+
+  it("hides latest-run strategy summary and result link when source provenance is unavailable", () => {
+    const unavailableRun = buildBacktestRun({
+      id: 31,
+      status: "completed",
+      source_screen_run_id: 999,
+      source_screen_run_available: false,
+    });
+
+    render(
+      <BacktestLaunchPanel
+        apiBaseUrl="http://localhost:8000"
+        screenRunId={8}
+        initialRun={unavailableRun}
+        initialRuns={[unavailableRun]}
+        initialError={null}
+      />,
+    );
+
+    expect(screen.getAllByText("不可解析").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("结果不可解释")).toHaveLength(2);
+    expect(screen.queryByText("打开结果详情")).not.toBeInTheDocument();
   });
 });

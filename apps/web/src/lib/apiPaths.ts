@@ -11,10 +11,17 @@ export function apiPaths(baseUrl: string) {
     backtestRuns: `${baseUrl}/backtests/runs`,
     backtestRunsLatest: `${baseUrl}/backtests/runs/latest`,
     portfolioReturnBacktestRuns: `${baseUrl}/backtests/portfolio-return/runs`,
+    portfolioReturnBacktestResult: (runId: number) => `${baseUrl}/backtests/portfolio-return/runs/${runId}/result`,
+    portfolioReturnBacktestCompare: (ids: number[]) =>
+      `${baseUrl}/backtests/portfolio-return/runs/compare?ids=${ids.join(",")}`,
     backtestRunExecute: (runId: number) => `${baseUrl}/backtests/runs/${runId}/execute`,
     stockDetail: (instrumentId: string | number, screenRunId?: string) => {
       const query = screenRunId ? `?screen_run_id=${screenRunId}` : "";
       return `${baseUrl}/stocks/${instrumentId}/detail${query}`;
+    },
+    stockInlineAnalysis: (instrumentId: string | number, screenRunId?: string | number) => {
+      const query = screenRunId ? `?screen_run_id=${screenRunId}` : "";
+      return `${baseUrl}/stocks/${instrumentId}/inline-analysis${query}`;
     },
   } as const;
 }

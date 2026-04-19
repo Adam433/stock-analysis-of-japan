@@ -21,7 +21,13 @@ describe("apiPaths", () => {
 
     expect(paths.watchlistEntry(61)).toBe("http://localhost:8000/watchlist/61");
     expect(paths.backtestRunExecute(9)).toBe("http://localhost:8000/backtests/runs/9/execute");
+    expect(paths.portfolioReturnBacktestResult(9)).toBe("http://localhost:8000/backtests/portfolio-return/runs/9/result");
+    expect(paths.portfolioReturnBacktestCompare([9, 11])).toBe(
+      "http://localhost:8000/backtests/portfolio-return/runs/compare?ids=9,11",
+    );
     expect(paths.stockDetail(61)).toBe("http://localhost:8000/stocks/61/detail");
     expect(paths.stockDetail("61", "8")).toBe("http://localhost:8000/stocks/61/detail?screen_run_id=8");
+    expect(paths.stockInlineAnalysis(61)).toBe("http://localhost:8000/stocks/61/inline-analysis");
+    expect(paths.stockInlineAnalysis("61", 8)).toBe("http://localhost:8000/stocks/61/inline-analysis?screen_run_id=8");
   });
 });

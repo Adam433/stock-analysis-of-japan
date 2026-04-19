@@ -24,3 +24,8 @@ class Instrument(TimestampMixin, Base):
         back_populates="instrument",
         cascade="all, delete-orphan",
     )
+    fundamentals_annual = relationship(
+        "FundamentalsAnnual",
+        back_populates="instrument",
+        cascade="all, delete-orphan",
+    )

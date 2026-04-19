@@ -55,28 +55,52 @@ async function loadStrategyConfiguration(
   }
 }
 
-async function loadLatestScreenRun(apiBaseUrl: string): Promise<LoadLatestRunResult> {
+async function loadScreenRunContext(
+  apiBaseUrl: string,
+  requestedRunId: string | undefined,
+): Promise<LoadLatestRunResult> {
+  const trimmedRunId = requestedRunId?.trim();
+  if (trimmedRunId && !/^\d+$/.test(trimmedRunId)) {
+    return {
+      data: null,
+      error: "run_id 必须是整数。",
+    };
+  }
+
+  const endpoint = trimmedRunId
+    ? `${apiBaseUrl}/screen/runs/${trimmedRunId}`
+    : `${apiBaseUrl}/screen/runs/latest`;
+
   try {
-    const response = await fetchWithRetry(`${apiBaseUrl}/screen/runs/latest`, {
+    const response = await fetchWithRetry(endpoint, {
       cache: "no-store",
     });
 
     if (!response.ok) {
       return {
         data: null,
-        error: `无法加载最近一次筛选结果（${response.status}）。`,
+        error: trimmedRunId
+          ? `无法加载指定的筛选结果（${response.status}）。`
+          : `无法加载最近一次筛选结果（${response.status}）。`,
       };
     }
 
     const payload = (await response.json()) as { screen_run: ScreenRun | null };
     return {
       data: payload.screen_run,
-      error: null,
+      error:
+        payload.screen_run === null
+          ? trimmedRunId
+            ? "指定的筛选记录不存在。"
+            : null
+          : null,
     };
   } catch {
     return {
       data: null,
-      error: "最近筛选结果接口不可达，后端恢复后即可正常启动筛选。",
+      error: trimmedRunId
+        ? "指定筛选结果接口不可达，后端恢复后即可查看来源筛选。"
+        : "最近筛选结果接口不可达，后端恢复后即可正常启动筛选。",
     };
   }
 }
@@ -107,8 +131,11 @@ async function loadScreeningTradeDates(apiBaseUrl: string): Promise<LoadTradeDat
   }
 }
 
-export default async function ScreenConfigurationPage() {
+export default async function ScreenConfigurationPage(props: {
+  searchParams?: Promise<{ run_id?: string }>;
+}) {
   const apiBaseUrl = await resolveApiBaseUrl();
+  const resolvedSearchParams = (await props?.searchParams) ?? {};
   const [
     { data, error },
     { data: latestRun, error: latestRunError },
@@ -116,7 +143,7 @@ export default async function ScreenConfigurationPage() {
     { health, error: healthError },
   ] = await Promise.all([
     loadStrategyConfiguration(apiBaseUrl),
-    loadLatestScreenRun(apiBaseUrl),
+    loadScreenRunContext(apiBaseUrl, resolvedSearchParams.run_id),
     loadScreeningTradeDates(apiBaseUrl),
     loadMarketDataHealth(apiBaseUrl),
   ]);
