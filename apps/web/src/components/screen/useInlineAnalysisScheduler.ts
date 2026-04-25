@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { apiPaths } from "@/lib/apiPaths";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import {
   INCREMENTAL_LOAD_THRESHOLD,
   MAX_CONCURRENT_INLINE_LOADS,
@@ -28,12 +29,17 @@ type InlineAnalysisLoadState =
   | { kind: "failed"; error: string };
 
 const IDLE_STATE: InlineAnalysisLoadState = { kind: "idle" };
+const INLINE_ANALYSIS_FETCH_RETRIES = 2;
+const INLINE_ANALYSIS_FETCH_RETRY_DELAY_MS = 100;
 
 function buildTargetKey(instrumentId: number, screenRunId: number): string {
   return `${instrumentId}:${screenRunId}`;
 }
 
 function normalizeError(message: string | null, status: number | null): string {
+  if (message === "Failed to fetch" || message === "Load failed") {
+    return "内联分析接口不可达，请检查后端服务与 API 地址。";
+  }
   if (message) {
     return message;
   }
@@ -94,8 +100,13 @@ export function useInlineAnalysisScheduler(
     updateState(instrumentId, { kind: "loading" });
 
     try {
-      const response = await fetch(
+      const response = await fetchWithRetry(
         apiPaths(apiBaseUrl).stockInlineAnalysis(instrumentId, target.screenRunId),
+        { cache: "no-store" },
+        {
+          retries: INLINE_ANALYSIS_FETCH_RETRIES,
+          delay: INLINE_ANALYSIS_FETCH_RETRY_DELAY_MS,
+        },
       );
       if (currentTargetKeysRef.current[instrumentId] !== targetKey) {
         return;
@@ -116,7 +127,7 @@ export function useInlineAnalysisScheduler(
       }
       updateState(instrumentId, {
         kind: "failed",
-        error: error instanceof Error ? error.message : normalizeError(null, null),
+        error: normalizeError(error instanceof Error ? error.message : null, null),
       });
     } finally {
       activeRef.current.delete(targetKey);

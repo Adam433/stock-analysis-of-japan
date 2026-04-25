@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { StrategyConfigPanel } from "@/components/screen/StrategyConfigPanel";
@@ -363,6 +363,7 @@ describe("StrategyConfigPanel", () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "http://localhost:8000/stocks/61/inline-analysis?screen_run_id=8",
+        { cache: "no-store" },
       );
     });
   });
@@ -425,11 +426,17 @@ describe("StrategyConfigPanel", () => {
     });
 
     const observer = MockIntersectionObserver.instances[0];
-    observer.trigger([screen.getByTestId("card-61"), screen.getByTestId("card-62")]);
+    await act(async () => {
+      observer.trigger([screen.getByTestId("card-61"), screen.getByTestId("card-62")]);
+    });
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("http://localhost:8000/stocks/61/inline-analysis?screen_run_id=8");
-      expect(fetchMock).toHaveBeenCalledWith("http://localhost:8000/stocks/62/inline-analysis?screen_run_id=8");
+      expect(fetchMock).toHaveBeenCalledWith("http://localhost:8000/stocks/61/inline-analysis?screen_run_id=8", {
+        cache: "no-store",
+      });
+      expect(fetchMock).toHaveBeenCalledWith("http://localhost:8000/stocks/62/inline-analysis?screen_run_id=8", {
+        cache: "no-store",
+      });
     });
   });
 });

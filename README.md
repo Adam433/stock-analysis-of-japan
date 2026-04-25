@@ -8,7 +8,7 @@
 
 ```bash
 cd apps/api
-STOCKANALYSE_DB_PATH=/Users/adam/Code/stockAnalyse/data/stockanalyse.db PYTHONPATH=src /Users/adam/Code/stockAnalyse/.venv/bin/python -m uvicorn stockanalyse_api.main:app --host 127.0.0.1 --port 8000
+STOCKANALYSE_DB_PATH=/Users/adam/Documents/GitHub/stockAnalyse/data/stockanalyse.db PYTHONPATH=src python3 -m uvicorn stockanalyse_api.main:app --host 127.0.0.1 --port 8000
 ```
 
 后端地址：
@@ -39,7 +39,7 @@ http://localhost:3000
 
 ```bash
 cd apps/api
-STOCKANALYSE_DB_PATH=/Users/adam/Code/stockAnalyse/data/stockanalyse.db PYTHONPATH=src /Users/adam/Code/stockAnalyse/.venv/bin/python -m uvicorn stockanalyse_api.main:app --host 127.0.0.1 --port 8000
+STOCKANALYSE_DB_PATH=/Users/adam/Documents/GitHub/stockAnalyse/data/stockanalyse.db PYTHONPATH=src python3 -m uvicorn stockanalyse_api.main:app --host 127.0.0.1 --port 8000
 ```
 
 2. 在仓库根目录启动 frontend
@@ -67,7 +67,7 @@ curl -s http://localhost:3000/
 
 ```bash
 cd apps/api
-STOCKANALYSE_DB_PATH=/Users/adam/Code/stockAnalyse/data/stockanalyse.db PYTHONPATH=src /Users/adam/Code/stockAnalyse/.venv/bin/python -m stockanalyse_api.jobs.materialize_derived_facts
+STOCKANALYSE_DB_PATH=/Users/adam/Documents/GitHub/stockAnalyse/data/stockanalyse.db PYTHONPATH=src python3 -m stockanalyse_api.jobs.materialize_derived_facts
 ```
 
 说明：
@@ -84,4 +84,4 @@ STOCKANALYSE_DB_PATH=/Users/adam/Code/stockAnalyse/data/stockanalyse.db PYTHONPA
 ### Notes
 
 - screening 现在依赖 `derived_indicator_daily`，如果这张表没有补算到最新日期，筛选运行日期会停在当前已物化的最新交易日。
-- 如果你误连仓库内默认库 `data/stockanalyse.db`，可能会看到数据不完整；当前测试建议使用上面的 `STOCKANALYSE_DB_PATH`。
+- 当前统一使用仓库内默认库 `data/stockanalyse.db`；如需显式指定，请使用上面的 `STOCKANALYSE_DB_PATH`。

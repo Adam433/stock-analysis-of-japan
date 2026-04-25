@@ -62,7 +62,16 @@ def materialize_derived_indicator_facts(
     *,
     commit_every_dates: int = DEFAULT_MATERIALIZE_COMMIT_EVERY_DATES,
     progress_callback: Callable[[dict[str, object]], None] | None = None,
+    since_date: date | None = None,
 ) -> dict[str, int]:
+    """Materialize RPS / 52-week-high facts.
+
+    When ``since_date`` is supplied, market rows older than ``since_date`` are
+    still walked to warm the per-instrument 252-day price history (so that
+    RPS_250 has the right lookback), but no derived rows are written for those
+    earlier trade dates. This lets dashboards refresh the recent slice without
+    paying the cost of the full backfill.
+    """
     price_history: dict[int, deque[PricePoint]] = defaultdict(
         lambda: deque(maxlen=MAX_HISTORY_WINDOW)
     )
@@ -74,10 +83,28 @@ def materialize_derived_indicator_facts(
     inserted = 0
     updated = 0
     processed_trade_dates = 0
+    scanned_trade_dates = 0
 
     def flush_trade_date(trade_date: date | None) -> None:
-        nonlocal inserted, updated, processed_trade_dates, current_date_facts, current_date_returns
+        nonlocal inserted, updated, processed_trade_dates, scanned_trade_dates, current_date_facts, current_date_returns
         if trade_date is None or not current_date_facts:
+            return
+
+        scanned_trade_dates += 1
+        if since_date is not None and trade_date < since_date:
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "trade_date": trade_date.isoformat(),
+                        "scanned_trade_dates": scanned_trade_dates,
+                        "processed_trade_dates": processed_trade_dates,
+                        "inserted": inserted,
+                        "updated": updated,
+                        "warming_up": True,
+                    }
+                )
+            current_date_facts = {}
+            current_date_returns = {lookback: {} for lookback in RPS_LOOKBACKS}
             return
 
         for lookback, returns_by_instrument in current_date_returns.items():
@@ -118,9 +145,11 @@ def materialize_derived_indicator_facts(
                 progress_callback(
                     {
                         "trade_date": trade_date.isoformat(),
+                        "scanned_trade_dates": scanned_trade_dates,
                         "processed_trade_dates": processed_trade_dates,
                         "inserted": inserted,
                         "updated": updated,
+                        "warming_up": False,
                     }
                 )
 
@@ -180,10 +209,17 @@ def materialize_derived_indicator_facts(
         progress_callback(
             {
                 "trade_date": current_trade_date.isoformat(),
+                "scanned_trade_dates": scanned_trade_dates,
                 "processed_trade_dates": processed_trade_dates,
                 "inserted": inserted,
                 "updated": updated,
+                "warming_up": False,
                 "final": True,
             }
         )
-    return {"inserted": inserted, "updated": updated}
+    return {
+        "inserted": inserted,
+        "updated": updated,
+        "processed_trade_dates": processed_trade_dates,
+        "scanned_trade_dates": scanned_trade_dates,
+    }

@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger("stockanalyse_api")
 
 from stockanalyse_api.api.routes import backtests_router
+from stockanalyse_api.api.routes import dashboard_router
 from stockanalyse_api.api.routes import health_router
 from stockanalyse_api.api.routes import screening_router
 from stockanalyse_api.api.routes import stocks_router
@@ -71,6 +72,7 @@ def create_app(*, auto_refresh_runtime: AutoRefreshRuntime | None = None) -> Fas
     app.include_router(stocks_router)
     app.include_router(watchlist_router)
     app.include_router(backtests_router)
+    app.include_router(dashboard_router)
     return app
 
 

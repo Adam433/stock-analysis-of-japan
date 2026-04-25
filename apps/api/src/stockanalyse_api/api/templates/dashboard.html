@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>stockAnalyse · 内部预览 Dashboard</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel-border: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --accent-strong: #0ea5e9;
+    --good: #22c55e;
+    --warn: #f59e0b;
+    --bad: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+  }
+  header {
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--panel-border);
+    display: flex; justify-content: space-between; align-items: baseline;
+    background: var(--panel);
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  header .meta { color: var(--muted); font-size: 13px; }
+  main {
+    padding: 18px 24px;
+    display: grid;
+    grid-template-columns: minmax(320px, 360px) 1fr;
+    gap: 18px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .card h2 {
+    margin: 0 0 10px 0;
+    font-size: 13px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  .stat {
+    background: rgba(15, 23, 42, 0.6);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .stat .label { color: var(--muted); font-size: 12px; }
+  .stat .value { font-size: 20px; font-weight: 600; margin-top: 2px; }
+  .stat .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+  label.row {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 8px; cursor: pointer; user-select: none;
+  }
+  label.row input[type="checkbox"] { accent-color: var(--accent); }
+  .field { margin-bottom: 10px; }
+  .field label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  .field input[type="number"], .field input[type="date"] {
+    width: 100%; padding: 6px 8px; background: rgba(15, 23, 42, 0.6);
+    border: 1px solid var(--panel-border); color: var(--text); border-radius: 6px;
+  }
+  .windows {
+    display: flex; gap: 8px;
+  }
+  .windows label {
+    flex: 1; text-align: center; padding: 6px 0;
+    border: 1px solid var(--panel-border); border-radius: 6px; cursor: pointer;
+    background: rgba(15, 23, 42, 0.6);
+  }
+  .windows input { display: none; }
+  .windows label.active {
+    border-color: var(--accent); color: var(--accent);
+    background: rgba(56, 189, 248, 0.08);
+  }
+  button.primary {
+    width: 100%; padding: 9px 12px; border-radius: 8px;
+    background: var(--accent-strong); color: #06121f;
+    border: none; font-weight: 600; cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.6; cursor: progress; }
+  table {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+  }
+  th, td {
+    text-align: left; padding: 7px 8px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: rgba(56, 189, 248, 0.08); }
+  tbody tr.selected { background: rgba(56, 189, 248, 0.18); }
+  .badge {
+    display: inline-block; padding: 2px 6px; font-size: 11px;
+    border-radius: 999px; background: rgba(34, 197, 94, 0.18); color: var(--good);
+  }
+  .badge.warn { background: rgba(245, 158, 11, 0.18); color: var(--warn); }
+  .empty {
+    text-align: center; color: var(--muted); padding: 24px 0;
+  }
+  #chartHost {
+    width: 100%; height: 460px;
+    background: rgba(15, 23, 42, 0.6); border-radius: 8px;
+  }
+  .chart-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 10px;
+  }
+  .chart-meta h3 { margin: 0; font-size: 16px; }
+  .chart-meta .pattern {
+    color: var(--muted); font-size: 12px;
+  }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .legend span::before {
+    content: ""; display: inline-block; width: 8px; height: 8px;
+    border-radius: 50%; margin-right: 6px; vertical-align: middle;
+  }
+  .legend .rps::before { background: var(--accent); }
+  .legend .cup::before { background: var(--warn); }
+  .toast {
+    position: fixed; right: 18px; bottom: 18px;
+    background: var(--bad); color: #fff; padding: 10px 14px;
+    border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none;
+  }
+  .toast.show { opacity: 0.95; }
+</style>
+</head>
+<body>
+<header>
+  <h1>stockAnalyse · 内部预览 Dashboard</h1>
+  <div class="meta" id="lastTradeMeta">加载中…</div>
+</header>
+<main>
+  <section>
+    <div class="card">
+      <h2>覆盖概览</h2>
+      <div class="stat-grid" id="overviewGrid">
+        <div class="stat"><div class="label">普通股清单 (universe)</div><div class="value" id="universeSize">—</div><div class="sub">JPX approved</div></div>
+        <div class="stat"><div class="label">历史文件备份</div><div class="value" id="csvPoolSize">—</div><div class="sub">local archive</div></div>
+        <div class="stat"><div class="label">DB 已入库 instrument</div><div class="value" id="instrumentsInDb">—</div><div class="sub" id="instrumentsWithMd">—</div></div>
+        <div class="stat"><div class="label">最新交易日</div><div class="value" id="latestDate">—</div><div class="sub" id="updatedCount">—</div></div>
+        <div class="stat"><div class="label">指标最新日</div><div class="value" id="latestIndDate">—</div><div class="sub" id="indicatorsAtLatest">—</div></div>
+        <div class="stat"><div class="label">最新日覆盖率</div><div class="value" id="coverageRatio">—</div><div class="sub">updated / with_md</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>更新数据与指标物化</h2>
+      <div style="color: var(--muted); font-size: 12px; margin-bottom: 8px;">
+        刷新 DB 内现有股票的最新行情，并物化 RPS / 52 周高点。耗时取决于更新数量。
+      </div>
+      <button class="primary" id="runUpdate">更新数据并物化</button>
+      <div id="updateStatus" style="margin-top: 10px; font-size: 12px; color: var(--muted);"></div>
+    </div>
+
+    <div class="card">
+      <h2>筛选条件 (AND 关系)</h2>
+      <label class="row">
+        <input type="checkbox" id="useRps" />
+        <span>启用 RPS 筛选 (所选窗口全部满足)</span>
+      </label>
+      <div class="field">
+        <label>RPS 阈值</label>
+        <input type="number" id="rpsThreshold" min="0" max="100" value="90" />
+      </div>
+      <div class="field">
+        <label>RPS 窗口</label>
+        <div class="windows" id="rpsWindows">
+          <label><input type="checkbox" value="50" checked />50</label>
+          <label><input type="checkbox" value="120" checked />120</label>
+          <label><input type="checkbox" value="250" checked />250</label>
+        </div>
+      </div>
+      <label class="row">
+        <input type="checkbox" id="useCupHandle" />
+        <span>启用 欧奈尔 杯柄 (Cup-with-Handle) 筛选</span>
+      </label>
+      <div class="field">
+        <label>截止交易日 (留空 = 最新)</label>
+        <input type="date" id="cutoffDate" />
+      </div>
+      <button class="primary" id="runScreen">运行筛选</button>
+    </div>
+
+    <div class="card">
+      <h2>命中股票 <span id="hitsCount" class="badge">0</span></h2>
+      <table>
+        <thead>
+          <tr>
+            <th>代码</th><th>名称</th>
+            <th>RPS50</th><th>RPS120</th><th>RPS250</th><th>杯柄</th>
+          </tr>
+        </thead>
+        <tbody id="hitsBody"></tbody>
+      </table>
+      <div class="empty" id="hitsEmpty">尚未运行筛选</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="card">
+      <div class="chart-meta">
+        <h3 id="chartTitle">选择左侧股票查看 K 线</h3>
+        <div class="pattern" id="chartPattern"></div>
+      </div>
+      <div id="chartHost"></div>
+      <div class="legend">
+        <span class="rps">RPS 满足条件日</span>
+        <span class="cup">杯柄突破日</span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  const state = {
+    overview: null,
+    hits: [],
+    selectedInstrumentId: null,
+    chart: null,
+    candleSeries: null,
+  };
+
+  function showToast(msg) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => el.classList.remove('show'), 3000);
+  }
+
+  async function api(method, path, body) {
+    const res = await fetch(path, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try { detail = (await res.json()).detail || detail; } catch (_) {}
+      throw new Error(detail);
+    }
+    return res.json();
+  }
+
+  function getCriteria() {
+    const windows = Array.from(
+      document.querySelectorAll('#rpsWindows input:checked')
+    ).map((el) => parseInt(el.value, 10));
+    const cutoffRaw = document.getElementById('cutoffDate').value;
+    return {
+      use_rps: document.getElementById('useRps').checked,
+      rps_threshold: parseInt(document.getElementById('rpsThreshold').value || '0', 10),
+      selected_rps_windows: windows,
+      use_cup_handle: document.getElementById('useCupHandle').checked,
+      trade_date: cutoffRaw || null,
+    };
+  }
+
+  async function loadOverview() {
+    try {
+      const data = await api('GET', '/dashboard/api/overview');
+      state.overview = data.overview;
+      const o = data.overview;
+      document.getElementById('universeSize').textContent = o.universe_size.toLocaleString();
+      document.getElementById('csvPoolSize').textContent = o.csv_pool_size.toLocaleString();
+      document.getElementById('instrumentsInDb').textContent = o.instruments_in_db.toLocaleString();
+      document.getElementById('instrumentsWithMd').textContent =
+        `有行情 ${o.instruments_with_market_data.toLocaleString()}`;
+      document.getElementById('latestDate').textContent = o.latest_trade_date || '—';
+      document.getElementById('updatedCount').textContent =
+        `已更新 ${o.instruments_updated_to_latest.toLocaleString()}`;
+      document.getElementById('latestIndDate').textContent = o.latest_indicator_date || '—';
+      document.getElementById('indicatorsAtLatest').textContent =
+        `指标覆盖 ${o.instruments_with_indicators_at_latest.toLocaleString()}`;
+      document.getElementById('coverageRatio').textContent =
+        (o.coverage_ratio * 100).toFixed(1) + '%';
+      document.getElementById('lastTradeMeta').textContent = o.latest_trade_date
+        ? `行情截至 ${o.latest_trade_date} · 指标 ${o.latest_indicator_date || '—'} · ` +
+          `DB ${o.instruments_with_market_data}/${o.instruments_in_db}`
+        : '尚无数据 · 请先点 "更新数据并物化"';
+    } catch (err) {
+      showToast('加载概览失败: ' + err.message);
+    }
+  }
+
+  function describeUpdateState(state) {
+    if (!state || state.status === 'idle') return '尚未执行';
+    if (state.status === 'failed') return '失败：' + (state.error || 'unknown');
+    if (state.status === 'completed') {
+      return `完成 · 行情 +${state.refresh_inserted}/~${state.refresh_updated}` +
+        ` · 指标 +${state.materialize_inserted}/~${state.materialize_updated}`;
+    }
+    // running
+    if (state.phase === 'refresh') {
+      const provider = state.refresh_provider ? ` · ${state.refresh_provider}` : '';
+      return `更新行情中${provider} · ${state.universe_count.toLocaleString()} 只 · 已处理 ${state.refresh_processed.toLocaleString()} 行`;
+    }
+    if (state.phase === 'materialize') {
+      const total = state.materialize_total_dates || 0;
+      const processed = state.materialize_processed_dates || 0;
+      const scanned = state.materialize_scanned_dates || 0;
+      const scanTotal = state.materialize_scan_total_dates || 0;
+      const latest = state.materialize_latest_trade_date || '';
+      if (state.materialize_since_date && processed === 0) {
+        return `预热历史数据中 · 已扫 ${scanned}/${scanTotal} 交易日 · 当前 ${latest} · 目标从 ${state.materialize_since_date} 开始`;
+      }
+      return `物化指标中 · ${processed}/${total} 交易日 · 当前 ${latest}`;
+    }
+    return '运行中…';
+  }
+
+  async function pollUpdate() {
+    try {
+      const data = await api('GET', '/dashboard/api/update/status');
+      const s = data.state;
+      document.getElementById('updateStatus').textContent = describeUpdateState(s);
+      if (s.status === 'running') {
+        setTimeout(pollUpdate, 2000);
+      } else if (s.status === 'completed' || s.status === 'failed') {
+        document.getElementById('runUpdate').disabled = false;
+        document.getElementById('runUpdate').textContent = '更新数据并物化';
+        loadOverview();
+      }
+    } catch (err) {
+      // backend unreachable; stop polling silently
+    }
+  }
+
+  async function runUpdate() {
+    const btn = document.getElementById('runUpdate');
+    btn.disabled = true;
+    btn.textContent = '更新中…';
+    try {
+      const data = await api('POST', '/dashboard/api/update', {
+        materialize_since_days: 320,
+        skip_refresh: false,
+      });
+      if (!data.started) showToast('已有任务在运行');
+      pollUpdate();
+    } catch (err) {
+      showToast('启动更新失败: ' + err.message);
+      btn.disabled = false;
+      btn.textContent = '更新数据并物化';
+    }
+  }
+
+  function renderHits(hits) {
+    state.hits = hits;
+    const body = document.getElementById('hitsBody');
+    body.innerHTML = '';
+    document.getElementById('hitsCount').textContent = hits.length;
+    document.getElementById('hitsEmpty').style.display = hits.length ? 'none' : 'block';
+
+    for (const hit of hits) {
+      const tr = document.createElement('tr');
+      tr.dataset.id = hit.instrument_id;
+      tr.innerHTML = `
+        <td><strong>${hit.symbol}</strong><div style="color:var(--muted);font-size:11px">${hit.exchange}</div></td>
+        <td>${hit.name || '—'}</td>
+        <td>${hit.rps_50 ?? '—'}</td>
+        <td>${hit.rps_120 ?? '—'}</td>
+        <td>${hit.rps_250 ?? '—'}</td>
+        <td>${hit.cup_handle_passed ? `<span class="badge warn">突破 ${hit.cup_handle_breakout_date || ''}</span>` : '—'}</td>
+      `;
+      tr.addEventListener('click', () => {
+        document.querySelectorAll('#hitsBody tr.selected').forEach((row) =>
+          row.classList.remove('selected')
+        );
+        tr.classList.add('selected');
+        loadChart(hit.instrument_id, hit.symbol, hit.name);
+      });
+      body.appendChild(tr);
+    }
+  }
+
+  async function runScreen() {
+    const criteria = getCriteria();
+    const btn = document.getElementById('runScreen');
+    btn.disabled = true;
+    btn.textContent = '筛选中…';
+    try {
+      const data = await api('POST', '/dashboard/api/screen', criteria);
+      renderHits(data.hits);
+      if (data.hits.length === 0) {
+        showToast('共扫描 ' + data.total_evaluated + ' 支股票，无命中');
+      }
+    } catch (err) {
+      showToast('筛选失败: ' + err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '运行筛选';
+    }
+  }
+
+  function ensureChart() {
+    if (state.chart) return;
+    const host = document.getElementById('chartHost');
+    state.chart = LightweightCharts.createChart(host, {
+      layout: { background: { color: 'transparent' }, textColor: '#e2e8f0' },
+      grid: {
+        vertLines: { color: 'rgba(148, 163, 184, 0.1)' },
+        horzLines: { color: 'rgba(148, 163, 184, 0.1)' },
+      },
+      rightPriceScale: { borderColor: 'rgba(148, 163, 184, 0.3)' },
+      timeScale: { borderColor: 'rgba(148, 163, 184, 0.3)' },
+      crosshair: { mode: 1 },
+      autoSize: true,
+    });
+    state.candleSeries = state.chart.addCandlestickSeries({
+      upColor: '#22c55e', downColor: '#ef4444',
+      borderUpColor: '#22c55e', borderDownColor: '#ef4444',
+      wickUpColor: '#22c55e', wickDownColor: '#ef4444',
+    });
+  }
+
+  async function loadChart(instrumentId, symbol, name) {
+    state.selectedInstrumentId = instrumentId;
+    document.getElementById('chartTitle').textContent =
+      `${symbol}${name ? ' · ' + name : ''}`;
+    document.getElementById('chartPattern').textContent = '加载中…';
+    try {
+      const criteria = getCriteria();
+      const data = await api('POST', `/dashboard/api/chart/${instrumentId}`, criteria);
+      ensureChart();
+      const candles = data.candles
+        .filter((c) => c.open !== null && c.close !== null)
+        .map((c) => ({
+          time: c.trade_date,
+          open: c.open, high: c.high, low: c.low, close: c.close,
+        }));
+      state.candleSeries.setData(candles);
+
+      const markers = [];
+      const rpsDates = new Set(data.rps_marker_dates || []);
+      for (const d of rpsDates) {
+        markers.push({
+          time: d, position: 'aboveBar', color: '#38bdf8',
+          shape: 'circle', text: 'R',
+        });
+      }
+      if (data.cup_handle_breakout_date) {
+        markers.push({
+          time: data.cup_handle_breakout_date,
+          position: 'aboveBar', color: '#f59e0b',
+          shape: 'arrowUp', text: '杯柄突破',
+        });
+      }
+      markers.sort((a, b) => (a.time < b.time ? -1 : 1));
+      state.candleSeries.setMarkers(markers);
+      state.chart.timeScale().fitContent();
+
+      if (data.cup_handle_pattern) {
+        const p = data.cup_handle_pattern;
+        document.getElementById('chartPattern').textContent =
+          `杯深 ${p.cup_depth_pct}% · 把手回调 ${p.handle_depth_pct}% · ` +
+          `左唇 ${p.left_lip_date} → 杯底 ${p.cup_bottom_date} → 右唇 ${p.right_lip_date} → 突破 ${p.breakout_date}`;
+      } else {
+        const rpsCount = data.rps_marker_dates ? data.rps_marker_dates.length : 0;
+        document.getElementById('chartPattern').textContent =
+          rpsCount ? `RPS 满足条件日 ${rpsCount} 个` : '';
+      }
+    } catch (err) {
+      showToast('加载 K 线失败: ' + err.message);
+      document.getElementById('chartPattern').textContent = '';
+    }
+  }
+
+  document.getElementById('runScreen').addEventListener('click', runScreen);
+  document.getElementById('runUpdate').addEventListener('click', runUpdate);
+  pollUpdate();
+
+  document.querySelectorAll('#rpsWindows label').forEach((label) => {
+    const input = label.querySelector('input');
+    const sync = () => label.classList.toggle('active', input.checked);
+    input.addEventListener('change', sync);
+    sync();
+  });
+
+  loadOverview();
+</script>
+</body>
+</html>

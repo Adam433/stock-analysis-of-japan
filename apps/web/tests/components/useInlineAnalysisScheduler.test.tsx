@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { useInlineAnalysisScheduler } from "@/components/screen/useInlineAnalysisScheduler";
@@ -93,6 +93,9 @@ function SchedulerHarness({ instruments, threshold = 20, maxConcurrent = 4 }: Ha
         <div key={instrument.instrumentId}>
           <div ref={registerCardRef(instrument.instrumentId)} data-testid={`card-${instrument.instrumentId}`} />
           <span data-testid={`state-${instrument.instrumentId}`}>{states[instrument.instrumentId]?.kind ?? "idle"}</span>
+          <span data-testid={`error-${instrument.instrumentId}`}>
+            {states[instrument.instrumentId]?.kind === "failed" ? states[instrument.instrumentId].error : ""}
+          </span>
           <button type="button" onClick={() => retry(instrument.instrumentId)}>
             retry-{instrument.instrumentId}
           </button>
@@ -137,6 +140,26 @@ describe("useInlineAnalysisScheduler", () => {
       expect(fetchMock).toHaveBeenCalledTimes(5);
     });
     expect(screen.getByTestId("state-1")).toHaveTextContent("loaded");
+  });
+
+  it("retries a transient network failure before surfacing an error", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("Failed to fetch"))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ inline_analysis: buildInlineAnalysisPayload(1) }), { status: 200 }),
+      );
+
+    render(
+      <SchedulerHarness
+        instruments={[{ instrumentId: 1, screenRunId: 8 }]}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId("state-1")).toHaveTextContent("loaded");
+    });
   });
 
   it("only loads intersecting cards and respects the concurrency limit for large lists", async () => {
@@ -203,6 +226,8 @@ describe("useInlineAnalysisScheduler", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockRejectedValueOnce(new Error("network down"))
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockRejectedValueOnce(new Error("network down"))
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ inline_analysis: buildInlineAnalysisPayload(1) }), { status: 200 }),
       );
@@ -215,20 +240,42 @@ describe("useInlineAnalysisScheduler", () => {
     );
 
     const observer = MockIntersectionObserver.instances[0];
-    observer.trigger([screen.getByTestId("card-1")]);
+    await act(async () => {
+      observer.trigger([screen.getByTestId("card-1")]);
+    });
 
     await waitFor(() => {
       expect(screen.getByTestId("state-1")).toHaveTextContent("failed");
     });
 
-    observer.trigger([screen.getByTestId("card-1")]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      observer.trigger([screen.getByTestId("card-1")]);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
 
     await user.click(screen.getByRole("button", { name: "retry-1" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
       expect(screen.getByTestId("state-1")).toHaveTextContent("loaded");
+    });
+  });
+
+  it("maps exhausted browser fetch failures to a user-facing connectivity message", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Failed to fetch"));
+
+    render(
+      <SchedulerHarness
+        instruments={[{ instrumentId: 1, screenRunId: 8 }]}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(screen.getByTestId("state-1")).toHaveTextContent("failed");
+      expect(screen.getByTestId("error-1")).toHaveTextContent(
+        "内联分析接口不可达，请检查后端服务与 API 地址。",
+      );
     });
   });
 
@@ -251,7 +298,7 @@ describe("useInlineAnalysisScheduler", () => {
     const newUrl = "http://localhost:8000/stocks/1/inline-analysis?screen_run_id=9";
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(oldUrl);
+      expect(fetchMock).toHaveBeenCalledWith(oldUrl, { cache: "no-store" });
     });
 
     rerender(
@@ -261,7 +308,7 @@ describe("useInlineAnalysisScheduler", () => {
     );
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(newUrl);
+      expect(fetchMock).toHaveBeenCalledWith(newUrl, { cache: "no-store" });
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 

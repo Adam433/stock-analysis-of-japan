@@ -116,6 +116,6 @@ Operational note:
 
 In the current live runtime copy, refreshed market data is stored in:
 
-- SQLite database: `/Users/adam/Code/stockAnalyse/data/stockanalyse.db`
-- JPX universe manifest: `/Users/adam/Code/stockAnalyse/data/tse_common_stock_symbols.txt`
-- Optional archived local seed CSVs: `/Users/adam/Code/stockAnalyse/data/archive/local_seed_csv`
+- SQLite database: `/Users/adam/Documents/GitHub/stockAnalyse/data/stockanalyse.db`
+- JPX universe manifest: `/Users/adam/Documents/GitHub/stockAnalyse/data/tse_common_stock_symbols.txt`
+- Optional archived local seed CSVs: `/Users/adam/Documents/GitHub/stockAnalyse/data/archive/local_seed_csv`
