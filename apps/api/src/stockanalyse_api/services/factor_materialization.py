@@ -10,8 +10,14 @@ import os
 
 from sqlalchemy import select
 
+# Ensure SQLAlchemy relationship targets are registered for direct service usage.
+import stockanalyse_api.domain.fundamentals.models  # noqa: F401
+import stockanalyse_api.domain.instruments.models  # noqa: F401
 from stockanalyse_api.domain.indicators.models import DerivedIndicatorDaily
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
+from stockanalyse_api.services.market_data_adjustments import adjusted_close
+from stockanalyse_api.services.market_data_adjustments import has_extreme_price_gap
+from stockanalyse_api.services.market_data_adjustments import is_complete_market_row
 
 RPS_LOOKBACKS = (50, 120, 250)
 ONE_HUNDRED = Decimal("100")
@@ -33,7 +39,9 @@ def _quantize(value: Decimal, pattern: str) -> Decimal:
 
 
 def _resolve_price(row: MarketDataDaily) -> Decimal | None:
-    return row.adj_close or row.close
+    if not is_complete_market_row(row):
+        return None
+    return adjusted_close(row)
 
 
 def _percentile_scores(
@@ -57,6 +65,55 @@ def _percentile_scores(
     return scores
 
 
+def _append_price_point(history: deque[PricePoint], point: PricePoint) -> None:
+    if history and has_extreme_price_gap(history[-1].price, point.price):
+        history.clear()
+    history.append(point)
+
+
+def _preload_price_history(session, since_date: date) -> dict[int, deque[PricePoint]]:
+    price_history: dict[int, deque[PricePoint]] = defaultdict(
+        lambda: deque(maxlen=MAX_HISTORY_WINDOW)
+    )
+    instrument_ids = session.execute(
+        select(MarketDataDaily.instrument_id)
+        .where(
+            MarketDataDaily.trade_date < since_date,
+            MarketDataDaily.data_status == "complete",
+            MarketDataDaily.volume > 0,
+            MarketDataDaily.close.is_not(None),
+        )
+        .group_by(MarketDataDaily.instrument_id)
+        .order_by(MarketDataDaily.instrument_id.asc())
+    ).scalars().all()
+    for instrument_id in instrument_ids:
+        rows = session.execute(
+            select(MarketDataDaily)
+            .where(
+                MarketDataDaily.instrument_id == instrument_id,
+                MarketDataDaily.trade_date < since_date,
+                MarketDataDaily.data_status == "complete",
+                MarketDataDaily.volume > 0,
+                MarketDataDaily.close.is_not(None),
+            )
+            .order_by(MarketDataDaily.trade_date.desc())
+            .limit(MAX_HISTORY_WINDOW)
+        ).scalars().all()
+        for row in reversed(rows):
+            price = _resolve_price(row)
+            if price is None:
+                continue
+            _append_price_point(
+                price_history[instrument_id],
+                PricePoint(
+                    instrument_id=row.instrument_id,
+                    trade_date=row.trade_date,
+                    price=price,
+                ),
+            )
+    return price_history
+
+
 def materialize_derived_indicator_facts(
     session,
     *,
@@ -72,8 +129,10 @@ def materialize_derived_indicator_facts(
     earlier trade dates. This lets dashboards refresh the recent slice without
     paying the cost of the full backfill.
     """
-    price_history: dict[int, deque[PricePoint]] = defaultdict(
-        lambda: deque(maxlen=MAX_HISTORY_WINDOW)
+    price_history: dict[int, deque[PricePoint]] = (
+        _preload_price_history(session, since_date)
+        if since_date is not None
+        else defaultdict(lambda: deque(maxlen=MAX_HISTORY_WINDOW))
     )
     current_trade_date: date | None = None
     current_date_facts: dict[int, dict[str, Decimal | None]] = {}
@@ -87,7 +146,7 @@ def materialize_derived_indicator_facts(
 
     def flush_trade_date(trade_date: date | None) -> None:
         nonlocal inserted, updated, processed_trade_dates, scanned_trade_dates, current_date_facts, current_date_returns
-        if trade_date is None or not current_date_facts:
+        if trade_date is None:
             return
 
         scanned_trade_dates += 1
@@ -107,18 +166,29 @@ def materialize_derived_indicator_facts(
             current_date_returns = {lookback: {} for lookback in RPS_LOOKBACKS}
             return
 
-        for lookback, returns_by_instrument in current_date_returns.items():
-            percentile_scores = _percentile_scores(returns_by_instrument)
-            field_name = f"rps_{lookback}"
-            for instrument_id, score in percentile_scores.items():
-                current_date_facts[instrument_id][field_name] = score
-
         existing_rows = {
             row.instrument_id: row
             for row in session.execute(
                 select(DerivedIndicatorDaily).where(DerivedIndicatorDaily.trade_date == trade_date)
             ).scalars()
         }
+
+        if not current_date_facts:
+            for row in existing_rows.values():
+                session.delete(row)
+            processed_trade_dates += 1
+            current_date_returns = {lookback: {} for lookback in RPS_LOOKBACKS}
+            return
+
+        for lookback, returns_by_instrument in current_date_returns.items():
+            percentile_scores = _percentile_scores(returns_by_instrument)
+            field_name = f"rps_{lookback}"
+            for instrument_id, score in percentile_scores.items():
+                current_date_facts[instrument_id][field_name] = score
+
+        for instrument_id, row in existing_rows.items():
+            if instrument_id not in current_date_facts:
+                session.delete(row)
 
         for instrument_id, facts in current_date_facts.items():
             row = existing_rows.get(instrument_id)
@@ -156,54 +226,67 @@ def materialize_derived_indicator_facts(
         current_date_facts = {}
         current_date_returns = {lookback: {} for lookback in RPS_LOOKBACKS}
 
-    market_rows = session.execute(
-        select(MarketDataDaily)
-        .order_by(MarketDataDaily.trade_date.asc(), MarketDataDaily.instrument_id.asc())
-    ).scalars().yield_per(10_000)
+    trade_dates_query = (
+        select(MarketDataDaily.trade_date)
+        .group_by(MarketDataDaily.trade_date)
+        .order_by(MarketDataDaily.trade_date.asc())
+    )
+    if since_date is not None:
+        trade_dates_query = trade_dates_query.where(MarketDataDaily.trade_date >= since_date)
+    trade_dates = session.execute(trade_dates_query).scalars().all()
 
-    for market_row in market_rows:
-        if current_trade_date is None:
-            current_trade_date = market_row.trade_date
-        elif market_row.trade_date != current_trade_date:
-            flush_trade_date(current_trade_date)
-            current_trade_date = market_row.trade_date
-
-        price = _resolve_price(market_row)
-        if price is None or market_row.data_status == "unavailable":
-            continue
-
-        history = price_history[market_row.instrument_id]
-        history.append(
-            PricePoint(
-                instrument_id=market_row.instrument_id,
-                trade_date=market_row.trade_date,
-                price=price,
+    for trade_date in trade_dates:
+        current_trade_date = trade_date
+        market_rows = session.execute(
+            select(MarketDataDaily)
+            .where(
+                MarketDataDaily.trade_date == trade_date,
+                MarketDataDaily.data_status == "complete",
+                MarketDataDaily.volume > 0,
+                MarketDataDaily.close.is_not(None),
             )
-        )
-        history_list = list(history)
-        current_index = len(history_list) - 1
+            .order_by(MarketDataDaily.instrument_id.asc())
+        ).scalars().all()
 
-        fifty_two_week_high = max(point.price for point in history_list)
-        high_proximity_ratio = _quantize(price / fifty_two_week_high, "0.000001")
+        for market_row in market_rows:
+            price = _resolve_price(market_row)
+            if price is None:
+                continue
 
-        facts = {
-            "rps_50": None,
-            "rps_120": None,
-            "rps_250": None,
-            "fifty_two_week_high": fifty_two_week_high,
-            "high_proximity_ratio": high_proximity_ratio,
-        }
+            history = price_history[market_row.instrument_id]
+            _append_price_point(
+                history,
+                PricePoint(
+                    instrument_id=market_row.instrument_id,
+                    trade_date=market_row.trade_date,
+                    price=price,
+                ),
+            )
+            history_list = list(history)
+            current_index = len(history_list) - 1
 
-        for lookback in RPS_LOOKBACKS:
-            prior_index = current_index - lookback
-            if prior_index >= 0:
-                prior_price = history_list[prior_index].price
-                relative_strength = (price / prior_price) - Decimal("1")
-                current_date_returns[lookback][market_row.instrument_id] = relative_strength
+            fifty_two_week_high = max(point.price for point in history_list)
+            high_proximity_ratio = _quantize(price / fifty_two_week_high, "0.000001")
 
-        current_date_facts[market_row.instrument_id] = facts
+            facts = {
+                "rps_50": None,
+                "rps_120": None,
+                "rps_250": None,
+                "fifty_two_week_high": fifty_two_week_high,
+                "high_proximity_ratio": high_proximity_ratio,
+            }
 
-    flush_trade_date(current_trade_date)
+            for lookback in RPS_LOOKBACKS:
+                prior_index = current_index - lookback
+                if prior_index >= 0:
+                    prior_price = history_list[prior_index].price
+                    relative_strength = (price / prior_price) - Decimal("1")
+                    current_date_returns[lookback][market_row.instrument_id] = relative_strength
+
+            current_date_facts[market_row.instrument_id] = facts
+
+        flush_trade_date(current_trade_date)
+
     session.commit()
     if progress_callback is not None and current_trade_date is not None:
         progress_callback(

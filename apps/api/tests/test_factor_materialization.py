@@ -52,8 +52,12 @@ class FactorMaterializationTests(unittest.TestCase):
                     MarketDataDaily(
                         instrument_id=leader.id,
                         trade_date=trade_date,
+                        open=leader_close,
+                        high=leader_close,
+                        low=leader_close,
                         close=leader_close,
                         adj_close=leader_close,
+                        volume=1000 + index,
                         data_status="complete",
                         data_source="test",
                     )
@@ -62,8 +66,12 @@ class FactorMaterializationTests(unittest.TestCase):
                     MarketDataDaily(
                         instrument_id=laggard.id,
                         trade_date=trade_date,
+                        open=laggard_close,
+                        high=laggard_close,
+                        low=laggard_close,
                         close=laggard_close,
                         adj_close=laggard_close,
+                        volume=1000 + index,
                         data_status="complete",
                         data_source="test",
                     )
@@ -114,6 +122,62 @@ class FactorMaterializationTests(unittest.TestCase):
         self.assertEqual(result["inserted"], 0)
         self.assertEqual(result["updated"], 520)
         self.assertEqual(len(row_count), 520)
+
+    def test_materialize_derived_indicator_facts_removes_stale_unavailable_rows(self) -> None:
+        self._seed_market_data()
+
+        with self.session_factory() as session:
+            materialize_derived_indicator_facts(session)
+            stale_row = session.execute(
+                select(MarketDataDaily).order_by(MarketDataDaily.trade_date.desc()).limit(1)
+            ).scalar_one()
+            stale_row.data_status = "unavailable"
+            session.commit()
+            materialize_derived_indicator_facts(session)
+            stale_fact = session.execute(
+                select(DerivedIndicatorDaily).where(
+                    DerivedIndicatorDaily.instrument_id == stale_row.instrument_id,
+                    DerivedIndicatorDaily.trade_date == stale_row.trade_date,
+                )
+            ).scalar_one_or_none()
+
+        self.assertIsNone(stale_fact)
+
+    def test_materialize_derived_indicator_facts_resets_rps_after_extreme_price_gap(self) -> None:
+        start_date = date(2025, 1, 1)
+        with self.session_factory() as session:
+            instrument = Instrument(symbol="7691", exchange="TSE", name="Discontinuous")
+            session.add(instrument)
+            session.flush()
+
+            rows: list[MarketDataDaily] = []
+            for index in range(70):
+                trade_date = start_date + timedelta(days=index)
+                close = Decimal("100") if index < 60 else Decimal("5000")
+                rows.append(
+                    MarketDataDaily(
+                        instrument_id=instrument.id,
+                        trade_date=trade_date,
+                        open=close,
+                        high=close,
+                        low=close,
+                        close=close,
+                        adj_close=close,
+                        volume=1000,
+                        data_status="complete",
+                        data_source="test",
+                    )
+                )
+            session.add_all(rows)
+            session.commit()
+
+            materialize_derived_indicator_facts(session)
+            latest_fact = session.execute(
+                select(DerivedIndicatorDaily).order_by(DerivedIndicatorDaily.trade_date.desc())
+            ).scalars().first()
+
+        assert latest_fact is not None
+        self.assertIsNone(latest_fact.rps_50)
 
     def test_materialize_derived_indicator_facts_commits_across_trade_date_batches(self) -> None:
         self._seed_market_data()

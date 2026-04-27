@@ -8,6 +8,8 @@ from stockanalyse_api.domain.indicators.models import DerivedIndicatorDaily
 from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
 from stockanalyse_api.domain.screens.models import ScreenRun, ScreenRunResult, StrategyConfiguration
+from stockanalyse_api.services.market_data_adjustments import adjusted_ohlc
+from stockanalyse_api.services.market_data_adjustments import is_complete_market_row
 
 DEFAULT_STOCK_DETAIL_CANDLE_WINDOW = 250
 
@@ -69,19 +71,28 @@ def collect_candlesticks(
 
 
 def serialize_candlestick_rows(candle_rows: list[MarketDataDaily]) -> list[dict[str, object]]:
-    return [
-        {
-            "trade_date": candle.trade_date.isoformat(),
-            "open": f"{candle.open:.6f}" if candle.open is not None else None,
-            "high": f"{candle.high:.6f}" if candle.high is not None else None,
-            "low": f"{candle.low:.6f}" if candle.low is not None else None,
-            "close": f"{candle.close:.6f}" if candle.close is not None else None,
-            "adj_close": f"{candle.adj_close:.6f}" if candle.adj_close is not None else None,
-            "volume": candle.volume,
-            "data_status": candle.data_status,
-        }
-        for candle in candle_rows
-    ]
+    payload: list[dict[str, object]] = []
+    for candle in candle_rows:
+        if not is_complete_market_row(candle):
+            continue
+        adjusted = adjusted_ohlc(candle)
+        payload.append(
+            {
+                "trade_date": candle.trade_date.isoformat(),
+                "open": _format_decimal(adjusted.open),
+                "high": _format_decimal(adjusted.high),
+                "low": _format_decimal(adjusted.low),
+                "close": _format_decimal(adjusted.close),
+                "adj_close": _format_decimal(adjusted.close),
+                "volume": candle.volume,
+                "data_status": candle.data_status,
+            }
+        )
+    return payload
+
+
+def _format_decimal(value) -> str | None:
+    return f"{value:.6f}" if value is not None else None
 
 
 def get_stock_detail_payload(

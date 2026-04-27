@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from datetime import UTC, datetime
 import inspect
 import os
 
 from sqlalchemy import func, select
 
+# Ensure SQLAlchemy relationship targets are registered for direct job usage.
+import stockanalyse_api.domain.fundamentals.models  # noqa: F401
 from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
 from stockanalyse_api.domain.operations.models import MarketDataRefreshRun
@@ -18,6 +20,7 @@ from stockanalyse_api.services.normalization.eod_normalizer import normalize_dai
 
 DEFAULT_UNIVERSE_FILTER = "tse_common_stock"
 DEFAULT_REFRESH_COMMIT_EVERY = int(os.environ.get("STOCKANALYSE_REFRESH_COMMIT_EVERY", "500"))
+DEFAULT_REFRESH_OVERLAP_DAYS = int(os.environ.get("STOCKANALYSE_REFRESH_OVERLAP_DAYS", "30"))
 
 
 def _get_or_create_instrument(session, bar: ProviderDailyBar) -> Instrument:
@@ -50,6 +53,7 @@ def refresh_market_data(
     symbols: list[str],
     *,
     commit_every: int = DEFAULT_REFRESH_COMMIT_EVERY,
+    overlap_days: int = DEFAULT_REFRESH_OVERLAP_DAYS,
 ) -> dict[str, int | str | None]:
     inserted = 0
     updated = 0
@@ -65,7 +69,10 @@ def refresh_market_data(
         session.commit()
         rows_by_key = {}
 
-    latest_stored_dates = _load_latest_trade_dates_by_symbol(session, symbols)
+    latest_stored_dates = _apply_refresh_overlap(
+        _load_latest_trade_dates_by_symbol(session, symbols),
+        overlap_days=overlap_days,
+    )
 
     for raw_bar in _fetch_provider_daily_bars(
         provider,
@@ -145,6 +152,20 @@ def _load_latest_trade_dates_by_symbol(session, symbols: list[str]) -> dict[str,
         .group_by(Instrument.symbol)
     ).all()
     return {symbol: latest_trade_date for symbol, latest_trade_date in rows if latest_trade_date is not None}
+
+
+def _apply_refresh_overlap(
+    latest_dates: dict[str, date],
+    *,
+    overlap_days: int,
+) -> dict[str, date]:
+    if overlap_days <= 0:
+        return latest_dates
+    overlap_delta = timedelta(days=overlap_days)
+    return {
+        symbol: latest_trade_date - overlap_delta
+        for symbol, latest_trade_date in latest_dates.items()
+    }
 
 
 def _fetch_provider_daily_bars(

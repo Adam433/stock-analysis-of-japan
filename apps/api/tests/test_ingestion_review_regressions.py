@@ -85,6 +85,29 @@ class IncrementalAwareProvider:
         ]
 
 
+class ZeroVolumeProvider:
+    def list_supported_instruments(self) -> list[ProviderInstrument]:
+        return [ProviderInstrument(symbol="7691", exchange="TSE", instrument_type="common_stock")]
+
+    def fetch_daily_bars(self, _symbols: list[str]) -> list[ProviderDailyBar]:
+        return [
+            ProviderDailyBar(
+                symbol="7691",
+                exchange="TSE",
+                trade_date=date(2025, 7, 18),
+                open=Decimal("1"),
+                high=Decimal("1"),
+                low=Decimal("1"),
+                close=Decimal("1"),
+                adj_close=Decimal("1"),
+                volume=0,
+                data_status="complete",
+                data_source="test_provider",
+                instrument_name="Example Zero Volume",
+            )
+        ]
+
+
 class IngestionReviewRegressionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
@@ -146,7 +169,7 @@ class IngestionReviewRegressionTests(unittest.TestCase):
             },
         )
 
-    def test_refresh_market_data_passes_latest_stored_date_to_incremental_provider(self) -> None:
+    def test_refresh_market_data_passes_overlapped_date_to_incremental_provider(self) -> None:
         provider = IncrementalAwareProvider()
 
         with self.session_factory() as session:
@@ -170,7 +193,7 @@ class IngestionReviewRegressionTests(unittest.TestCase):
 
             result = refresh_market_data(session, provider, ["7203"])
 
-        self.assertEqual(provider.last_start_after_by_symbol, {"7203": date(2026, 4, 11)})
+        self.assertEqual(provider.last_start_after_by_symbol, {"7203": date(2026, 3, 12)})
         self.assertEqual(
             result,
             {
@@ -182,6 +205,24 @@ class IngestionReviewRegressionTests(unittest.TestCase):
                 "latest_trade_date": "2026-04-12",
             },
         )
+
+    def test_refresh_market_data_marks_zero_volume_price_rows_unavailable(self) -> None:
+        with self.session_factory() as session:
+            result = refresh_market_data(session, ZeroVolumeProvider(), ["7691"])
+            row = session.execute(select(MarketDataDaily)).scalar_one()
+
+        self.assertEqual(
+            result,
+            {
+                "processed": 1,
+                "inserted": 1,
+                "updated": 0,
+                "partial_rows": 0,
+                "unavailable_rows": 1,
+                "latest_trade_date": "2025-07-18",
+            },
+        )
+        self.assertEqual(row.data_status, "unavailable")
 
     def test_resolve_fixture_path_falls_back_to_app_root_for_repo_root_execution(self) -> None:
         original_cwd = Path.cwd()

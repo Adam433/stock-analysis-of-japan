@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -9,32 +10,95 @@ from sqlalchemy import distinct, func, select
 
 from stockanalyse_api.config.settings import (
     get_local_csv_raw_dir,
-    get_tse_common_stock_symbols_path,
 )
 from stockanalyse_api.domain.indicators.models import DerivedIndicatorDaily
 from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
+from stockanalyse_api.services.market_data_adjustments import adjusted_ohlc
+from stockanalyse_api.services.market_data_adjustments import has_extreme_price_gap
+from stockanalyse_api.services.market_data_adjustments import is_complete_market_row
 
 APPROVED_RPS_WINDOWS = (50, 120, 250)
 DEFAULT_RPS_THRESHOLD = 90
-DEFAULT_CUP_LOOKBACK_DAYS = 250
+DEFAULT_CUP_LOOKBACK_DAYS = 520
 DEFAULT_CHART_WINDOW_DAYS = 250
 
 # O'Neil cup-with-handle parameters (conservative defaults).
 CUP_MIN_DEPTH_PCT = Decimal("12")
-CUP_MAX_DEPTH_PCT = Decimal("35")
-CUP_MIN_DURATION = 25
-CUP_MAX_DURATION = 130
+CUP_MAX_DEPTH_PCT = Decimal("33")
+CUP_MIN_DURATION = 60
+CUP_MAX_DURATION = 220
 HANDLE_MIN_DURATION = 5
-HANDLE_MAX_DURATION = 30
-HANDLE_MAX_PULLBACK_PCT = Decimal("15")
+HANDLE_MAX_DURATION = 40
+HANDLE_MAX_PULLBACK_PCT = Decimal("12")
 HANDLE_MIN_PULLBACK_PCT = Decimal("3")
 RIGHT_LIP_MAX_DELTA_PCT = Decimal("5")
+CUP_HANDLE_MIN_TOTAL_DURATION = 120
+CUP_HANDLE_MAX_TOTAL_DURATION = 260
+CUP_HANDLE_BREAKOUT_LOOKBACK_DAYS = 30
+PRIOR_UPTREND_LOOKBACK_DAYS = 120
+MIN_PRIOR_UPTREND_PCT = Decimal("30")
+MIN_HANDLE_LOW_POSITION_PCT = Decimal("66")
+MAX_HANDLE_DEPTH_TO_CUP_DEPTH_PCT = Decimal("35")
+MAX_HANDLE_HIGH_ABOVE_LIP_PCT = Decimal("2")
+MIN_BOTTOM_DWELL_DAYS = 5
+BOTTOM_ZONE_PCT = Decimal("20")
+MIN_BOTTOM_SPAN_PCT = Decimal("10")
+MIN_CUP_SIDE_DURATION_PCT = Decimal("20")
+BREAKOUT_VOLUME_AVG_DAYS = 50
+MIN_BREAKOUT_VOLUME_MULTIPLIER = Decimal("1.4")
+
+
+@dataclass(frozen=True, slots=True)
+class CupHandleParams:
+    min_cup_duration: int = CUP_MIN_DURATION
+    max_cup_duration: int = CUP_MAX_DURATION
+    min_handle_duration: int = HANDLE_MIN_DURATION
+    max_handle_duration: int = HANDLE_MAX_DURATION
+    min_total_duration: int = CUP_HANDLE_MIN_TOTAL_DURATION
+    max_total_duration: int = CUP_HANDLE_MAX_TOTAL_DURATION
+    min_cup_depth_pct: Decimal = CUP_MIN_DEPTH_PCT
+    max_cup_depth_pct: Decimal = CUP_MAX_DEPTH_PCT
+    min_handle_pullback_pct: Decimal = HANDLE_MIN_PULLBACK_PCT
+    max_handle_pullback_pct: Decimal = HANDLE_MAX_PULLBACK_PCT
+    max_right_lip_delta_pct: Decimal = RIGHT_LIP_MAX_DELTA_PCT
+    require_prior_uptrend: bool = True
+    prior_uptrend_lookback_days: int = PRIOR_UPTREND_LOOKBACK_DAYS
+    min_prior_uptrend_pct: Decimal = MIN_PRIOR_UPTREND_PCT
+    min_handle_low_position_pct: Decimal = MIN_HANDLE_LOW_POSITION_PCT
+    max_handle_depth_to_cup_depth_pct: Decimal = MAX_HANDLE_DEPTH_TO_CUP_DEPTH_PCT
+    max_handle_high_above_lip_pct: Decimal = MAX_HANDLE_HIGH_ABOVE_LIP_PCT
+    min_bottom_dwell_days: int = MIN_BOTTOM_DWELL_DAYS
+    bottom_zone_pct: Decimal = BOTTOM_ZONE_PCT
+    min_bottom_span_pct: Decimal = MIN_BOTTOM_SPAN_PCT
+    min_cup_side_duration_pct: Decimal = MIN_CUP_SIDE_DURATION_PCT
+    require_breakout_volume: bool = False
+    breakout_volume_avg_days: int = BREAKOUT_VOLUME_AVG_DAYS
+    min_breakout_volume_multiplier: Decimal = MIN_BREAKOUT_VOLUME_MULTIPLIER
+    breakout_lookback_days: int = CUP_HANDLE_BREAKOUT_LOOKBACK_DAYS
+    lookback_days: int = DEFAULT_CUP_LOOKBACK_DAYS
+
+    @property
+    def effective_lookback_days(self) -> int:
+        prior_window = self.prior_uptrend_lookback_days if self.require_prior_uptrend else 0
+        return max(
+            self.lookback_days,
+            prior_window + self.max_total_duration + self.breakout_lookback_days + 5,
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        payload = asdict(self)
+        for key, value in payload.items():
+            if isinstance(value, Decimal):
+                payload[key] = str(value)
+        return payload
+
+
+DEFAULT_CUP_HANDLE_PARAMS = CupHandleParams()
 
 
 @dataclass(slots=True)
 class OverviewSnapshot:
-    universe_size: int
     csv_pool_size: int
     instruments_in_db: int
     instruments_with_market_data: int
@@ -66,8 +130,25 @@ class ScreenHit:
         return asdict(self)
 
 
+@dataclass(frozen=True, slots=True)
+class _PatternCandle:
+    trade_date: date
+    high: Decimal | None
+    low: Decimal | None
+    close: Decimal | None
+    adj_close: Decimal | None = None
+    volume: int | None = None
+    data_status: str = "complete"
+
+
+@dataclass(frozen=True, slots=True)
+class _CupCandidate:
+    left_lip_idx: int
+    cup_bottom_idx: int
+    cup_depth_pct: float
+
+
 def get_overview(session) -> OverviewSnapshot:
-    universe_size = _count_universe_manifest()
     csv_pool_size = _count_local_csv_pool()
 
     instruments_in_db = session.execute(select(func.count(Instrument.id))).scalar_one() or 0
@@ -98,7 +179,6 @@ def get_overview(session) -> OverviewSnapshot:
     coverage = updated_to_latest / base_for_ratio if instruments_with_market_data else 0.0
 
     return OverviewSnapshot(
-        universe_size=universe_size,
         csv_pool_size=csv_pool_size,
         instruments_in_db=instruments_in_db,
         instruments_with_market_data=instruments_with_market_data,
@@ -107,17 +187,6 @@ def get_overview(session) -> OverviewSnapshot:
         latest_trade_date=latest_trade_date.isoformat() if latest_trade_date else None,
         latest_indicator_date=latest_indicator_date.isoformat() if latest_indicator_date else None,
         coverage_ratio=round(coverage, 4),
-    )
-
-
-def _count_universe_manifest() -> int:
-    path = get_tse_common_stock_symbols_path()
-    if not path.exists():
-        return 0
-    return sum(
-        1
-        for raw in path.read_text(encoding="utf-8").splitlines()
-        if raw.strip() and not raw.strip().startswith("#")
     )
 
 
@@ -133,6 +202,72 @@ def list_local_csv_symbols() -> list[str]:
     if not csv_dir.exists():
         return []
     return sorted(entry.stem for entry in csv_dir.iterdir() if entry.suffix.lower() == ".csv")
+
+
+def _normalize_cup_handle_params(params: CupHandleParams | None = None) -> CupHandleParams:
+    params = params or DEFAULT_CUP_HANDLE_PARAMS
+    checks = (
+        ("min_cup_duration", params.min_cup_duration),
+        ("max_cup_duration", params.max_cup_duration),
+        ("min_handle_duration", params.min_handle_duration),
+        ("max_handle_duration", params.max_handle_duration),
+        ("min_total_duration", params.min_total_duration),
+        ("max_total_duration", params.max_total_duration),
+        ("prior_uptrend_lookback_days", params.prior_uptrend_lookback_days),
+        ("min_bottom_dwell_days", params.min_bottom_dwell_days),
+        ("breakout_volume_avg_days", params.breakout_volume_avg_days),
+        ("breakout_lookback_days", params.breakout_lookback_days),
+        ("lookback_days", params.lookback_days),
+    )
+    for name, value in checks:
+        if value <= 0:
+            raise ValueError(f"{name} must be greater than 0.")
+
+    if params.min_cup_duration > params.max_cup_duration:
+        raise ValueError("min_cup_duration must be less than or equal to max_cup_duration.")
+    if params.min_handle_duration > params.max_handle_duration:
+        raise ValueError(
+            "min_handle_duration must be less than or equal to max_handle_duration."
+        )
+    if params.min_total_duration > params.max_total_duration:
+        raise ValueError(
+            "min_total_duration must be less than or equal to max_total_duration."
+        )
+    if params.max_total_duration < params.min_cup_duration + params.min_handle_duration:
+        raise ValueError(
+            "max_total_duration is too small for the selected cup and handle durations."
+        )
+    if params.min_total_duration > params.max_cup_duration + params.max_handle_duration:
+        raise ValueError(
+            "min_total_duration is too large for the selected cup and handle durations."
+        )
+
+    percent_pairs = (
+        ("min_cup_depth_pct", params.min_cup_depth_pct),
+        ("max_cup_depth_pct", params.max_cup_depth_pct),
+        ("min_handle_pullback_pct", params.min_handle_pullback_pct),
+        ("max_handle_pullback_pct", params.max_handle_pullback_pct),
+        ("max_right_lip_delta_pct", params.max_right_lip_delta_pct),
+        ("min_prior_uptrend_pct", params.min_prior_uptrend_pct),
+        ("min_handle_low_position_pct", params.min_handle_low_position_pct),
+        ("max_handle_depth_to_cup_depth_pct", params.max_handle_depth_to_cup_depth_pct),
+        ("max_handle_high_above_lip_pct", params.max_handle_high_above_lip_pct),
+        ("bottom_zone_pct", params.bottom_zone_pct),
+        ("min_bottom_span_pct", params.min_bottom_span_pct),
+        ("min_cup_side_duration_pct", params.min_cup_side_duration_pct),
+        ("min_breakout_volume_multiplier", params.min_breakout_volume_multiplier),
+    )
+    for name, value in percent_pairs:
+        if value < 0:
+            raise ValueError(f"{name} must be greater than or equal to 0.")
+    if params.min_cup_depth_pct > params.max_cup_depth_pct:
+        raise ValueError("min_cup_depth_pct must be less than or equal to max_cup_depth_pct.")
+    if params.min_handle_pullback_pct > params.max_handle_pullback_pct:
+        raise ValueError(
+            "min_handle_pullback_pct must be less than or equal to max_handle_pullback_pct."
+        )
+
+    return params
 
 
 def _normalize_rps_windows(values: list[int]) -> list[int]:
@@ -155,8 +290,12 @@ def screen_universe(
     rps_threshold: int,
     selected_rps_windows: list[int],
     use_cup_handle: bool,
+    cup_handle_params: CupHandleParams | None = None,
     trade_date: date | None = None,
 ) -> dict[str, object]:
+    resolved_cup_params = (
+        _normalize_cup_handle_params(cup_handle_params) if use_cup_handle else DEFAULT_CUP_HANDLE_PARAMS
+    )
     target_date = _resolve_target_trade_date(session, trade_date)
     if target_date is None:
         return {
@@ -166,6 +305,7 @@ def screen_universe(
                 "rps_threshold": rps_threshold,
                 "selected_rps_windows": _normalize_rps_windows(selected_rps_windows),
                 "use_cup_handle": use_cup_handle,
+                "cup_handle_params": resolved_cup_params.to_dict(),
             },
             "total_evaluated": 0,
             "hits": [],
@@ -181,6 +321,7 @@ def screen_universe(
                 "rps_threshold": rps_threshold,
                 "selected_rps_windows": [],
                 "use_cup_handle": use_cup_handle,
+                "cup_handle_params": resolved_cup_params.to_dict(),
             },
             "total_evaluated": 0,
             "hits": [],
@@ -194,7 +335,7 @@ def screen_universe(
     ).all()
 
     threshold_decimal = Decimal(rps_threshold)
-    hits: list[ScreenHit] = []
+    candidates: list[tuple[DerivedIndicatorDaily, Instrument, bool]] = []
 
     for indicator_row, instrument in rows:
         rps_value_by_window = {
@@ -214,15 +355,23 @@ def screen_universe(
         if use_rps and not rps_passed:
             continue
 
+        candidates.append((indicator_row, instrument, rps_passed))
+
+    candles_by_instrument: dict[int, list[_PatternCandle]] = {}
+    if use_cup_handle and candidates:
+        candles_by_instrument = _load_candles_by_instrument(
+            session,
+            instrument_ids=[instrument.id for _, instrument, _ in candidates],
+            cutoff=target_date,
+            limit=resolved_cup_params.effective_lookback_days,
+        )
+
+    hits: list[ScreenHit] = []
+    for indicator_row, instrument, rps_passed in candidates:
         cup_breakout_date: date | None = None
         if use_cup_handle:
-            candles = _load_candles(
-                session,
-                instrument_id=instrument.id,
-                cutoff=target_date,
-                limit=DEFAULT_CUP_LOOKBACK_DAYS,
-            )
-            cup_pattern = _detect_cup_handle_pattern(candles)
+            candles = candles_by_instrument.get(instrument.id, [])
+            cup_pattern = _detect_cup_handle_pattern(candles, resolved_cup_params)
             if cup_pattern is None:
                 continue
             cup_breakout_date = cup_pattern["breakout_date"]
@@ -255,6 +404,7 @@ def screen_universe(
             "rps_threshold": rps_threshold,
             "selected_rps_windows": selected_windows,
             "use_cup_handle": use_cup_handle,
+            "cup_handle_params": resolved_cup_params.to_dict(),
         },
         "total_evaluated": len(rows),
         "hits": [hit.to_dict() for hit in hits],
@@ -269,9 +419,13 @@ def get_chart_with_markers(
     rps_threshold: int,
     selected_rps_windows: list[int],
     use_cup_handle: bool,
+    cup_handle_params: CupHandleParams | None = None,
     trade_date: date | None = None,
     window_days: int = DEFAULT_CHART_WINDOW_DAYS,
 ) -> dict[str, object] | None:
+    resolved_cup_params = (
+        _normalize_cup_handle_params(cup_handle_params) if use_cup_handle else DEFAULT_CUP_HANDLE_PARAMS
+    )
     instrument = session.get(Instrument, instrument_id)
     if instrument is None:
         return None
@@ -284,7 +438,9 @@ def get_chart_with_markers(
         session,
         instrument_id=instrument_id,
         cutoff=target_date,
-        limit=window_days,
+        limit=max(window_days, resolved_cup_params.effective_lookback_days)
+        if use_cup_handle
+        else window_days,
     )
     if not candles:
         return None
@@ -317,7 +473,7 @@ def get_chart_with_markers(
     cup_breakout_date: date | None = None
     cup_pattern_meta: dict[str, object] | None = None
     if use_cup_handle:
-        cup_pattern = _detect_cup_handle_pattern(candles)
+        cup_pattern = _detect_cup_handle_pattern(candles, resolved_cup_params)
         if cup_pattern is not None:
             cup_breakout_date = cup_pattern["breakout_date"]
             cup_pattern_meta = {
@@ -328,6 +484,23 @@ def get_chart_with_markers(
                 "breakout_date": cup_pattern["breakout_date"].isoformat(),
                 "cup_depth_pct": str(cup_pattern["cup_depth_pct"]),
                 "handle_depth_pct": str(cup_pattern["handle_depth_pct"]),
+                "cup_duration": cup_pattern["cup_duration"],
+                "handle_duration": cup_pattern["handle_duration"],
+                "total_duration": cup_pattern["total_duration"],
+                "handle_position_pct": str(cup_pattern["handle_position_pct"]),
+                "handle_depth_to_cup_depth_pct": str(
+                    cup_pattern["handle_depth_to_cup_depth_pct"]
+                ),
+                "prior_uptrend_pct": (
+                    str(cup_pattern["prior_uptrend_pct"])
+                    if cup_pattern["prior_uptrend_pct"] is not None
+                    else None
+                ),
+                "breakout_volume_ratio": (
+                    str(cup_pattern["breakout_volume_ratio"])
+                    if cup_pattern["breakout_volume_ratio"] is not None
+                    else None
+                ),
             }
 
     return {
@@ -338,22 +511,26 @@ def get_chart_with_markers(
             "name": instrument.name,
         },
         "trade_date": target_date.isoformat(),
-        "candles": [
-            {
-                "trade_date": c.trade_date.isoformat(),
-                "open": _to_float(c.open),
-                "high": _to_float(c.high),
-                "low": _to_float(c.low),
-                "close": _to_float(c.close),
-                "volume": c.volume,
-            }
-            for c in candles
-        ],
+        "candles": [_serialize_adjusted_candle(c) for c in candles if is_complete_market_row(c)],
         "rps_marker_dates": [d.isoformat() for d in rps_marker_dates],
         "cup_handle_breakout_date": (
             cup_breakout_date.isoformat() if cup_breakout_date else None
         ),
         "cup_handle_pattern": cup_pattern_meta,
+        "cup_handle_params": resolved_cup_params.to_dict(),
+    }
+
+
+def _serialize_adjusted_candle(candle: MarketDataDaily) -> dict[str, object]:
+    adjusted = adjusted_ohlc(candle)
+    return {
+        "trade_date": candle.trade_date.isoformat(),
+        "open": _to_float(adjusted.open),
+        "high": _to_float(adjusted.high),
+        "low": _to_float(adjusted.low),
+        "close": _to_float(adjusted.close),
+        "volume": candle.volume,
+        "data_status": candle.data_status,
     }
 
 
@@ -371,101 +548,441 @@ def _load_candles(session, *, instrument_id: int, cutoff: date, limit: int) -> l
     return rows
 
 
-def _detect_cup_handle_pattern(candles: list[MarketDataDaily]) -> dict[str, object] | None:
+def _load_candles_by_instrument(
+    session,
+    *,
+    instrument_ids: list[int],
+    cutoff: date,
+    limit: int,
+    chunk_size: int = 500,
+) -> dict[int, list[_PatternCandle]]:
+    if not instrument_ids:
+        return {}
+
+    candles_by_instrument: dict[int, list[_PatternCandle]] = defaultdict(list)
+    lookback_start = cutoff - timedelta(days=max(limit * 3, 750))
+    for offset in range(0, len(instrument_ids), chunk_size):
+        chunk = instrument_ids[offset : offset + chunk_size]
+        rows = session.execute(
+            select(
+                MarketDataDaily.instrument_id,
+                MarketDataDaily.trade_date,
+                MarketDataDaily.high,
+                MarketDataDaily.low,
+                MarketDataDaily.close,
+                MarketDataDaily.adj_close,
+                MarketDataDaily.volume,
+                MarketDataDaily.data_status,
+            )
+            .where(
+                MarketDataDaily.instrument_id.in_(chunk),
+                MarketDataDaily.trade_date >= lookback_start,
+                MarketDataDaily.trade_date <= cutoff,
+            )
+            .order_by(MarketDataDaily.instrument_id.asc(), MarketDataDaily.trade_date.asc())
+        ).all()
+        for row in rows:
+            candles_by_instrument[row.instrument_id].append(
+                _PatternCandle(
+                    trade_date=row.trade_date,
+                    high=row.high,
+                    low=row.low,
+                    close=row.close,
+                    adj_close=row.adj_close,
+                    volume=row.volume,
+                    data_status=row.data_status,
+                )
+            )
+        for instrument_id in chunk:
+            candles = candles_by_instrument.get(instrument_id)
+            if candles and len(candles) > limit:
+                candles_by_instrument[instrument_id] = candles[-limit:]
+
+    for instrument_id in instrument_ids:
+        candles = candles_by_instrument.get(instrument_id, [])
+        if len(candles) >= limit:
+            continue
+        rows = _load_candles(
+            session,
+            instrument_id=instrument_id,
+            cutoff=cutoff,
+            limit=limit,
+        )
+        if rows:
+            candles_by_instrument[instrument_id] = [
+                _PatternCandle(
+                    trade_date=row.trade_date,
+                    high=row.high,
+                    low=row.low,
+                    close=row.close,
+                    adj_close=row.adj_close,
+                    volume=row.volume,
+                    data_status=row.data_status,
+                )
+                for row in rows
+            ]
+
+    return dict(candles_by_instrument)
+
+
+def _detect_cup_handle_pattern(
+    candles: list[MarketDataDaily] | list[_PatternCandle],
+    params: CupHandleParams | None = None,
+) -> dict[str, object] | None:
     """Detect a recent O'Neil cup-with-handle pattern.
 
     Returns a dict describing the pattern, or None if no pattern ends within
     the supplied candle window. Only the most recent valid pattern is returned.
     """
-    if len(candles) < CUP_MIN_DURATION + HANDLE_MIN_DURATION:
+    params = _normalize_cup_handle_params(params)
+    min_required = max(
+        params.min_cup_duration + params.min_handle_duration,
+        params.min_total_duration,
+    )
+    usable_candles: list[MarketDataDaily] | list[_PatternCandle] = []
+    closes: list[float] = []
+    highs: list[float] = []
+    lows: list[float] = []
+    volumes: list[int | None] = []
+    for candle in candles:
+        if not is_complete_market_row(candle):
+            continue
+        adjusted = adjusted_ohlc(candle)
+        if adjusted.close is None:
+            continue
+        if closes and has_extreme_price_gap(closes[-1], adjusted.close):
+            usable_candles = []
+            closes = []
+            highs = []
+            lows = []
+            volumes = []
+        close = float(adjusted.close)
+        usable_candles.append(candle)
+        closes.append(close)
+        highs.append(float(adjusted.high) if adjusted.high is not None else close)
+        lows.append(float(adjusted.low) if adjusted.low is not None else close)
+        volumes.append(getattr(candle, "volume", None))
+
+    if len(usable_candles) < min_required + 1:
         return None
 
-    closes = [c.close for c in candles]
-    highs = [c.high if c.high is not None else c.close for c in candles]
-    lows = [c.low if c.low is not None else c.close for c in candles]
-    if any(v is None for v in closes):
-        return None
-
-    n = len(candles)
-    # Search back to ~last 30 trading days for a breakout day.
-    breakout_search_start = max(n - 30, 0)
+    n = len(usable_candles)
+    breakout_search_start = max(n - params.breakout_lookback_days, 0)
+    right_lip_indices = {
+        breakout_idx - handle_len
+        for breakout_idx in range(n - 1, breakout_search_start - 1, -1)
+        for handle_len in range(params.min_handle_duration, params.max_handle_duration + 1)
+        if breakout_idx - handle_len >= params.min_cup_duration
+    }
+    cup_candidates = _find_cup_candidates_by_right_lip(
+        highs,
+        lows,
+        closes,
+        right_lip_indices,
+        params,
+    )
     for breakout_idx in range(n - 1, breakout_search_start - 1, -1):
-        result = _try_pattern_ending_at(candles, highs, lows, closes, breakout_idx)
+        result = _try_pattern_ending_at(
+            usable_candles,
+            highs,
+            lows,
+            closes,
+            volumes,
+            cup_candidates,
+            params,
+            breakout_idx,
+        )
         if result is not None:
             return result
     return None
 
 
-def _try_pattern_ending_at(
-    candles: list[MarketDataDaily],
-    highs: list,
-    lows: list,
-    closes: list,
-    breakout_idx: int,
-) -> dict[str, object] | None:
-    # Handle window: HANDLE_MIN_DURATION..HANDLE_MAX_DURATION before breakout_idx.
-    for handle_len in range(HANDLE_MIN_DURATION, HANDLE_MAX_DURATION + 1):
-        right_lip_idx = breakout_idx - handle_len
-        if right_lip_idx < CUP_MIN_DURATION:
-            break
+def _has_prior_uptrend(
+    closes: list[float],
+    *,
+    left_lip_idx: int,
+    left_lip_high: float,
+    params: CupHandleParams,
+) -> bool:
+    if not params.require_prior_uptrend:
+        return True
+    start_idx = max(0, left_lip_idx - params.prior_uptrend_lookback_days)
+    prior_closes = [value for value in closes[start_idx:left_lip_idx] if value > 0]
+    if not prior_closes or left_lip_high <= 0:
+        return False
+    prior_low = min(prior_closes)
+    prior_uptrend_pct = ((left_lip_high / prior_low) - 1) * 100
+    return prior_uptrend_pct >= float(params.min_prior_uptrend_pct)
+
+
+def _prior_uptrend_pct(
+    closes: list[float],
+    *,
+    left_lip_idx: int,
+    left_lip_high: float,
+    params: CupHandleParams,
+) -> float | None:
+    start_idx = max(0, left_lip_idx - params.prior_uptrend_lookback_days)
+    prior_closes = [value for value in closes[start_idx:left_lip_idx] if value > 0]
+    if not prior_closes or left_lip_high <= 0:
+        return None
+    return ((left_lip_high / min(prior_closes)) - 1) * 100
+
+
+def _has_rounded_bottom(
+    lows: list[float],
+    *,
+    left_lip_idx: int,
+    right_lip_idx: int,
+    cup_bottom_low: float,
+    cup_depth_abs: float,
+    params: CupHandleParams,
+) -> bool:
+    if cup_depth_abs <= 0:
+        return False
+    cup_len = right_lip_idx - left_lip_idx
+    bottom_threshold = cup_bottom_low + (cup_depth_abs * float(params.bottom_zone_pct) / 100)
+    bottom_zone_indices = [
+        idx
+        for idx in range(left_lip_idx, right_lip_idx + 1)
+        if lows[idx] <= bottom_threshold
+    ]
+    if len(bottom_zone_indices) < params.min_bottom_dwell_days:
+        return False
+    bottom_span = bottom_zone_indices[-1] - bottom_zone_indices[0] + 1
+    return bottom_span >= max(1, int(cup_len * float(params.min_bottom_span_pct) / 100))
+
+
+def _find_cup_candidates_by_right_lip(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    right_lip_indices: set[int],
+    params: CupHandleParams,
+) -> dict[int, list[_CupCandidate]]:
+    params = _normalize_cup_handle_params(params)
+    candidates: dict[int, list[_CupCandidate]] = defaultdict(list)
+    n = len(highs)
+    min_depth_pct = float(params.min_cup_depth_pct)
+    max_depth_pct = float(params.max_cup_depth_pct)
+    max_lip_delta_pct = float(params.max_right_lip_delta_pct)
+    for right_lip_idx in sorted(right_lip_indices):
+        if right_lip_idx >= n:
+            continue
         right_lip_high = highs[right_lip_idx]
-        if right_lip_high is None or right_lip_high <= 0:
-            continue
-        # Breakout requires close above right lip.
-        if closes[breakout_idx] is None or closes[breakout_idx] <= right_lip_high:
-            continue
-        handle_segment_lows = lows[right_lip_idx + 1 : breakout_idx + 1]
-        if not handle_segment_lows or any(v is None for v in handle_segment_lows):
-            continue
-        handle_low = min(handle_segment_lows)
-        handle_low_offset = handle_segment_lows.index(handle_low)
-        handle_pullback_pct = (Decimal(right_lip_high - handle_low) / Decimal(right_lip_high)) * Decimal("100")
-        if handle_pullback_pct < HANDLE_MIN_PULLBACK_PCT or handle_pullback_pct > HANDLE_MAX_PULLBACK_PCT:
+        if right_lip_high <= 0:
             continue
 
-        # Cup window: precedes the right lip; depth from peak down to bottom and recovery to right lip.
-        for cup_len in range(CUP_MIN_DURATION, CUP_MAX_DURATION + 1):
-            left_lip_idx = right_lip_idx - cup_len
-            if left_lip_idx < 0:
-                break
-            cup_segment_highs = highs[left_lip_idx : right_lip_idx + 1]
-            cup_segment_lows = lows[left_lip_idx : right_lip_idx + 1]
-            if any(v is None for v in cup_segment_highs) or any(v is None for v in cup_segment_lows):
+        min_low = float("inf")
+        min_low_idx = right_lip_idx
+        interior_high = float("-inf")
+        min_left_idx = max(0, right_lip_idx - params.max_cup_duration)
+        for left_lip_idx in range(right_lip_idx, min_left_idx - 1, -1):
+            low = lows[left_lip_idx]
+            if low < min_low:
+                min_low = low
+                min_low_idx = left_lip_idx
+
+            if left_lip_idx + 1 <= right_lip_idx - 1:
+                interior_high = max(interior_high, highs[left_lip_idx + 1])
+
+            cup_len = right_lip_idx - left_lip_idx
+            if cup_len < params.min_cup_duration:
                 continue
+
             left_lip_high = highs[left_lip_idx]
-            cup_bottom = min(cup_segment_lows)
-            cup_bottom_offset = cup_segment_lows.index(cup_bottom)
-            cup_bottom_idx = left_lip_idx + cup_bottom_offset
-
-            # The bottom should sit roughly in the middle, not adjacent to the lips.
-            if cup_bottom_offset < 5 or (cup_len - cup_bottom_offset) < 5:
+            if left_lip_high <= 0:
                 continue
 
-            cup_depth_pct = (Decimal(left_lip_high - cup_bottom) / Decimal(left_lip_high)) * Decimal("100")
-            if cup_depth_pct < CUP_MIN_DEPTH_PCT or cup_depth_pct > CUP_MAX_DEPTH_PCT:
+            cup_bottom_offset = min_low_idx - left_lip_idx
+            min_side_duration = max(5, int(cup_len * float(params.min_cup_side_duration_pct) / 100))
+            if (
+                cup_bottom_offset < min_side_duration
+                or (cup_len - cup_bottom_offset) < min_side_duration
+            ):
                 continue
 
-            # Right lip should approximately equal left lip (within tolerance).
-            lip_delta_pct = abs(Decimal(left_lip_high - right_lip_high) / Decimal(left_lip_high)) * Decimal("100")
-            if lip_delta_pct > RIGHT_LIP_MAX_DELTA_PCT:
+            cup_depth_pct = ((left_lip_high - min_low) / left_lip_high) * 100
+            if cup_depth_pct < min_depth_pct or cup_depth_pct > max_depth_pct:
                 continue
 
-            # The cup interior should not exceed lips (rounded shape, no spike above either lip).
-            interior_high = max(cup_segment_highs[1:-1]) if cup_len >= 2 else cup_bottom
+            if not _has_prior_uptrend(
+                closes,
+                left_lip_idx=left_lip_idx,
+                left_lip_high=left_lip_high,
+                params=params,
+            ):
+                continue
+            if not _has_rounded_bottom(
+                lows,
+                left_lip_idx=left_lip_idx,
+                right_lip_idx=right_lip_idx,
+                cup_bottom_low=min_low,
+                cup_depth_abs=left_lip_high - min_low,
+                params=params,
+            ):
+                continue
+
+            lip_delta_pct = abs((left_lip_high - right_lip_high) / left_lip_high) * 100
+            if lip_delta_pct > max_lip_delta_pct:
+                continue
+
             lip_baseline = max(left_lip_high, right_lip_high)
             if interior_high > lip_baseline * 1.02:
                 continue
 
+            candidates[right_lip_idx].append(
+                _CupCandidate(
+                    left_lip_idx=left_lip_idx,
+                    cup_bottom_idx=min_low_idx,
+                    cup_depth_pct=cup_depth_pct,
+                )
+            )
+
+    return candidates
+
+
+def _try_pattern_ending_at(
+    candles: list[MarketDataDaily] | list[_PatternCandle],
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    volumes: list[int | None],
+    cup_candidates: dict[int, list[_CupCandidate]],
+    params: CupHandleParams,
+    breakout_idx: int,
+) -> dict[str, object] | None:
+    min_handle_pullback_pct = float(params.min_handle_pullback_pct)
+    max_handle_pullback_pct = float(params.max_handle_pullback_pct)
+    # Handle window: configured min..max duration before breakout_idx.
+    for handle_len in range(params.min_handle_duration, params.max_handle_duration + 1):
+        right_lip_idx = breakout_idx - handle_len
+        if right_lip_idx < params.min_cup_duration:
+            break
+        right_lip_candidates = cup_candidates.get(right_lip_idx)
+        if not right_lip_candidates:
+            continue
+
+        right_lip_high = highs[right_lip_idx]
+        if right_lip_high <= 0:
+            continue
+
+        handle_segment_lows = lows[right_lip_idx + 1 : breakout_idx]
+        if not handle_segment_lows:
+            continue
+        handle_segment_highs = highs[right_lip_idx + 1 : breakout_idx]
+        handle_high = max(handle_segment_highs) if handle_segment_highs else right_lip_high
+        if handle_high > right_lip_high * (
+            1 + float(params.max_handle_high_above_lip_pct) / 100
+        ):
+            continue
+
+        # Breakout should clear both the cup lip and the handle's local resistance.
+        breakout_resistance = max(right_lip_high, handle_high)
+        if closes[breakout_idx] <= breakout_resistance:
+            continue
+        breakout_volume_ratio = _breakout_volume_ratio(
+            volumes,
+            breakout_idx=breakout_idx,
+            avg_days=params.breakout_volume_avg_days,
+        )
+        if params.require_breakout_volume and (
+            breakout_volume_ratio is None
+            or breakout_volume_ratio < float(params.min_breakout_volume_multiplier)
+        ):
+            continue
+
+        handle_low = min(handle_segment_lows)
+        handle_low_offset = handle_segment_lows.index(handle_low)
+        handle_pullback_pct = ((right_lip_high - handle_low) / right_lip_high) * 100
+        if (
+            handle_pullback_pct < min_handle_pullback_pct
+            or handle_pullback_pct > max_handle_pullback_pct
+        ):
+            continue
+
+        for cup_candidate in right_lip_candidates:
+            cup_duration = right_lip_idx - cup_candidate.left_lip_idx
+            total_duration = breakout_idx - cup_candidate.left_lip_idx
+            if (
+                total_duration < params.min_total_duration
+                or total_duration > params.max_total_duration
+            ):
+                continue
+            cup_bottom_low = lows[cup_candidate.cup_bottom_idx]
+            cup_depth_abs = highs[cup_candidate.left_lip_idx] - cup_bottom_low
+            if cup_depth_abs <= 0:
+                continue
+            handle_position_pct = ((handle_low - cup_bottom_low) / cup_depth_abs) * 100
+            if handle_position_pct < float(params.min_handle_low_position_pct):
+                continue
+            handle_depth_to_cup_depth_pct = (
+                (right_lip_high - handle_low) / cup_depth_abs
+            ) * 100
+            if handle_depth_to_cup_depth_pct > float(
+                params.max_handle_depth_to_cup_depth_pct
+            ):
+                continue
+            prior_uptrend_pct = _prior_uptrend_pct(
+                closes,
+                left_lip_idx=cup_candidate.left_lip_idx,
+                left_lip_high=highs[cup_candidate.left_lip_idx],
+                params=params,
+            )
+
             return {
-                "left_lip_date": candles[left_lip_idx].trade_date,
-                "cup_bottom_date": candles[cup_bottom_idx].trade_date,
+                "left_lip_date": candles[cup_candidate.left_lip_idx].trade_date,
+                "cup_bottom_date": candles[cup_candidate.cup_bottom_idx].trade_date,
                 "right_lip_date": candles[right_lip_idx].trade_date,
                 "handle_low_date": candles[right_lip_idx + 1 + handle_low_offset].trade_date,
                 "breakout_date": candles[breakout_idx].trade_date,
-                "cup_depth_pct": cup_depth_pct.quantize(Decimal("0.01")),
-                "handle_depth_pct": handle_pullback_pct.quantize(Decimal("0.01")),
+                "cup_depth_pct": Decimal(str(cup_candidate.cup_depth_pct)).quantize(
+                    Decimal("0.01")
+                ),
+                "handle_depth_pct": Decimal(str(handle_pullback_pct)).quantize(
+                    Decimal("0.01")
+                ),
+                "cup_duration": cup_duration,
+                "handle_duration": handle_len,
+                "total_duration": total_duration,
+                "handle_position_pct": Decimal(str(handle_position_pct)).quantize(
+                    Decimal("0.01")
+                ),
+                "handle_depth_to_cup_depth_pct": Decimal(
+                    str(handle_depth_to_cup_depth_pct)
+                ).quantize(Decimal("0.01")),
+                "prior_uptrend_pct": (
+                    Decimal(str(prior_uptrend_pct)).quantize(Decimal("0.01"))
+                    if prior_uptrend_pct is not None
+                    else None
+                ),
+                "breakout_volume_ratio": (
+                    Decimal(str(breakout_volume_ratio)).quantize(Decimal("0.01"))
+                    if breakout_volume_ratio is not None
+                    else None
+                ),
             }
     return None
+
+
+def _breakout_volume_ratio(
+    volumes: list[int | None],
+    *,
+    breakout_idx: int,
+    avg_days: int,
+) -> float | None:
+    breakout_volume = volumes[breakout_idx]
+    if breakout_volume is None or breakout_volume <= 0:
+        return None
+    start_idx = max(0, breakout_idx - avg_days)
+    prior_volumes = [
+        volume
+        for volume in volumes[start_idx:breakout_idx]
+        if volume is not None and volume > 0
+    ]
+    if not prior_volumes:
+        return None
+    return breakout_volume / (sum(prior_volumes) / len(prior_volumes))
 
 
 def _to_float(value) -> float | None:

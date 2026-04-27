@@ -7,28 +7,30 @@
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
   :root {
-    --bg: #0f172a;
-    --panel: #1e293b;
-    --panel-border: #334155;
-    --text: #e2e8f0;
-    --muted: #94a3b8;
-    --accent: #38bdf8;
-    --accent-strong: #0ea5e9;
+    --bg: #111315;
+    --panel: #191c20;
+    --panel-subtle: #14171a;
+    --panel-border: #30363d;
+    --text: #eef2f6;
+    --muted: #9aa4b2;
+    --accent: #14b8a6;
+    --accent-strong: #2dd4bf;
     --good: #22c55e;
     --warn: #f59e0b;
-    --bad: #ef4444;
+    --bad: #f43f5e;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
       "Microsoft YaHei", sans-serif;
+    min-height: 100vh;
     background: var(--bg);
     color: var(--text);
     font-size: 14px;
   }
   header {
-    padding: 18px 24px;
+    padding: 16px 24px;
     border-bottom: 1px solid var(--panel-border);
     display: flex; justify-content: space-between; align-items: baseline;
     background: var(--panel);
@@ -36,17 +38,18 @@
   header h1 { font-size: 18px; margin: 0; }
   header .meta { color: var(--muted); font-size: 13px; }
   main {
-    padding: 18px 24px;
+    padding: 16px 24px 24px;
     display: grid;
-    grid-template-columns: minmax(320px, 360px) 1fr;
-    gap: 18px;
+    grid-template-columns: minmax(340px, 380px) 1fr;
+    gap: 16px;
+    align-items: start;
   }
   .card {
     background: var(--panel);
     border: 1px solid var(--panel-border);
-    border-radius: 10px;
+    border-radius: 8px;
     padding: 14px 16px;
-    margin-bottom: 14px;
+    margin-bottom: 12px;
   }
   .card h2 {
     margin: 0 0 10px 0;
@@ -55,18 +58,24 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
+  .card-title-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin-bottom: 10px;
+  }
+  .card-title-row h2 { margin: 0; }
   .stat-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 10px;
   }
   .stat {
-    background: rgba(15, 23, 42, 0.6);
+    background: var(--panel-subtle);
     border-radius: 8px;
     padding: 10px 12px;
+    min-width: 0;
   }
   .stat .label { color: var(--muted); font-size: 12px; }
-  .stat .value { font-size: 20px; font-weight: 600; margin-top: 2px; }
+  .stat .value { font-size: 19px; font-weight: 650; margin-top: 2px; }
   .stat .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
 
   label.row {
@@ -77,28 +86,63 @@
   .field { margin-bottom: 10px; }
   .field label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
   .field input[type="number"], .field input[type="date"] {
-    width: 100%; padding: 6px 8px; background: rgba(15, 23, 42, 0.6);
+    width: 100%; padding: 7px 8px; background: var(--panel-subtle);
     border: 1px solid var(--panel-border); color: var(--text); border-radius: 6px;
   }
+  .field-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 10px;
+  }
+  .field-grid .field { margin-bottom: 0; }
   .windows {
     display: flex; gap: 8px;
   }
   .windows label {
     flex: 1; text-align: center; padding: 6px 0;
     border: 1px solid var(--panel-border); border-radius: 6px; cursor: pointer;
-    background: rgba(15, 23, 42, 0.6);
+    background: var(--panel-subtle);
   }
   .windows input { display: none; }
   .windows label.active {
     border-color: var(--accent); color: var(--accent);
-    background: rgba(56, 189, 248, 0.08);
+    background: rgba(20, 184, 166, 0.1);
+  }
+  .action-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  button.primary, button.secondary {
+    width: 100%; padding: 9px 12px; border-radius: 8px;
+    border: 1px solid transparent; font-weight: 650; cursor: pointer;
+    white-space: nowrap;
   }
   button.primary {
-    width: 100%; padding: 9px 12px; border-radius: 8px;
-    background: var(--accent-strong); color: #06121f;
-    border: none; font-weight: 600; cursor: pointer;
+    background: var(--accent-strong); color: #06201d;
   }
-  button.primary:disabled { opacity: 0.6; cursor: progress; }
+  button.secondary {
+    background: transparent; color: var(--text); border-color: var(--panel-border);
+  }
+  button.primary:disabled, button.secondary:disabled { opacity: 0.6; cursor: progress; }
+  .status-box {
+    min-height: 36px; margin-top: 10px; padding: 8px 10px;
+    border-radius: 8px; background: var(--panel-subtle);
+    color: var(--muted); font-size: 12px; line-height: 1.45;
+  }
+  .mini-badge {
+    display: inline-flex; align-items: center; min-height: 22px;
+    padding: 2px 8px; border-radius: 999px;
+    background: rgba(154, 164, 178, 0.12); color: var(--muted);
+    font-size: 12px;
+  }
+  .mini-badge.running {
+    background: rgba(20, 184, 166, 0.12); color: var(--accent-strong);
+  }
+  .mini-badge.failed {
+    background: rgba(244, 63, 94, 0.14); color: var(--bad);
+  }
+  .table-wrap { overflow-x: auto; }
   table {
     width: 100%; border-collapse: collapse; font-size: 13px;
   }
@@ -108,8 +152,8 @@
   }
   th { color: var(--muted); font-weight: 500; font-size: 12px; }
   tbody tr { cursor: pointer; }
-  tbody tr:hover { background: rgba(56, 189, 248, 0.08); }
-  tbody tr.selected { background: rgba(56, 189, 248, 0.18); }
+  tbody tr:hover { background: rgba(20, 184, 166, 0.08); }
+  tbody tr.selected { background: rgba(20, 184, 166, 0.16); }
   .badge {
     display: inline-block; padding: 2px 6px; font-size: 11px;
     border-radius: 999px; background: rgba(34, 197, 94, 0.18); color: var(--good);
@@ -118,17 +162,18 @@
   .empty {
     text-align: center; color: var(--muted); padding: 24px 0;
   }
+  .chart-card { position: sticky; top: 12px; }
   #chartHost {
-    width: 100%; height: 460px;
-    background: rgba(15, 23, 42, 0.6); border-radius: 8px;
+    width: 100%; height: clamp(380px, calc(100vh - 190px), 680px);
+    background: var(--panel-subtle); border-radius: 8px;
   }
   .chart-meta {
     display: flex; justify-content: space-between; align-items: baseline;
-    margin-bottom: 10px;
+    gap: 12px; margin-bottom: 10px;
   }
   .chart-meta h3 { margin: 0; font-size: 16px; }
   .chart-meta .pattern {
-    color: var(--muted); font-size: 12px;
+    color: var(--muted); font-size: 12px; text-align: right;
   }
   .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 8px; }
   .legend span::before {
@@ -143,6 +188,19 @@
     border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none;
   }
   .toast.show { opacity: 0.95; }
+  @media (max-width: 980px) {
+    header { align-items: flex-start; flex-direction: column; gap: 6px; }
+    main { grid-template-columns: 1fr; padding: 12px; }
+    .chart-card { position: static; }
+    #chartHost { height: 420px; }
+  }
+  @media (max-width: 560px) {
+    .stat-grid { grid-template-columns: 1fr; }
+    .action-grid { grid-template-columns: 1fr; }
+    .field-grid { grid-template-columns: 1fr; }
+    .chart-meta { align-items: flex-start; flex-direction: column; }
+    .chart-meta .pattern { text-align: left; }
+  }
 </style>
 </head>
 <body>
@@ -155,7 +213,6 @@
     <div class="card">
       <h2>覆盖概览</h2>
       <div class="stat-grid" id="overviewGrid">
-        <div class="stat"><div class="label">普通股清单 (universe)</div><div class="value" id="universeSize">—</div><div class="sub">JPX approved</div></div>
         <div class="stat"><div class="label">历史文件备份</div><div class="value" id="csvPoolSize">—</div><div class="sub">local archive</div></div>
         <div class="stat"><div class="label">DB 已入库 instrument</div><div class="value" id="instrumentsInDb">—</div><div class="sub" id="instrumentsWithMd">—</div></div>
         <div class="stat"><div class="label">最新交易日</div><div class="value" id="latestDate">—</div><div class="sub" id="updatedCount">—</div></div>
@@ -165,12 +222,15 @@
     </div>
 
     <div class="card">
-      <h2>更新数据与指标物化</h2>
-      <div style="color: var(--muted); font-size: 12px; margin-bottom: 8px;">
-        刷新 DB 内现有股票的最新行情，并物化 RPS / 52 周高点。耗时取决于更新数量。
+      <div class="card-title-row">
+        <h2>数据维护</h2>
+        <span class="mini-badge" id="updatePhase">空闲</span>
       </div>
-      <button class="primary" id="runUpdate">更新数据并物化</button>
-      <div id="updateStatus" style="margin-top: 10px; font-size: 12px; color: var(--muted);"></div>
+      <div class="action-grid">
+        <button class="primary" id="runRefresh">更新数据</button>
+        <button class="secondary" id="runMaterialize">物化指标</button>
+      </div>
+      <div id="updateStatus" class="status-box">尚未执行</div>
     </div>
 
     <div class="card">
@@ -195,6 +255,112 @@
         <input type="checkbox" id="useCupHandle" />
         <span>启用 欧奈尔 杯柄 (Cup-with-Handle) 筛选</span>
       </label>
+      <div class="field-grid">
+        <div class="field">
+          <label>整体最短周期</label>
+          <input type="number" id="cupMinTotal" min="10" max="600" value="120" />
+        </div>
+        <div class="field">
+          <label>整体最长周期</label>
+          <input type="number" id="cupMaxTotal" min="10" max="600" value="260" />
+        </div>
+        <div class="field">
+          <label>杯身最短</label>
+          <input type="number" id="cupMinDuration" min="5" max="500" value="60" />
+        </div>
+        <div class="field">
+          <label>杯身最长</label>
+          <input type="number" id="cupMaxDuration" min="5" max="500" value="220" />
+        </div>
+        <div class="field">
+          <label>把手最短</label>
+          <input type="number" id="handleMinDuration" min="1" max="120" value="5" />
+        </div>
+        <div class="field">
+          <label>把手最长</label>
+          <input type="number" id="handleMaxDuration" min="1" max="120" value="40" />
+        </div>
+        <div class="field">
+          <label>杯深最小 %</label>
+          <input type="number" id="cupMinDepth" min="0" max="100" step="0.1" value="12" />
+        </div>
+        <div class="field">
+          <label>杯深最大 %</label>
+          <input type="number" id="cupMaxDepth" min="0" max="100" step="0.1" value="33" />
+        </div>
+        <div class="field">
+          <label>把手回调最小 %</label>
+          <input type="number" id="handleMinPullback" min="0" max="100" step="0.1" value="3" />
+        </div>
+        <div class="field">
+          <label>把手回调最大 %</label>
+          <input type="number" id="handleMaxPullback" min="0" max="100" step="0.1" value="12" />
+        </div>
+        <div class="field">
+          <label>右唇容差 %</label>
+          <input type="number" id="rightLipMaxDelta" min="0" max="50" step="0.1" value="5" />
+        </div>
+        <div class="field">
+          <label>前置上涨回看</label>
+          <input type="number" id="priorUptrendLookback" min="1" max="500" value="120" />
+        </div>
+        <div class="field">
+          <label>前置上涨最小 %</label>
+          <input type="number" id="priorUptrendMinPct" min="0" max="300" step="0.1" value="30" />
+        </div>
+        <div class="field">
+          <label>把手最低位置 %</label>
+          <input type="number" id="handleLowPosition" min="0" max="100" step="0.1" value="66" />
+        </div>
+        <div class="field">
+          <label>把手/杯深最大 %</label>
+          <input type="number" id="handleDepthToCupDepth" min="0" max="100" step="0.1" value="35" />
+        </div>
+        <div class="field">
+          <label>把手高出右唇 %</label>
+          <input type="number" id="handleHighAboveLip" min="0" max="50" step="0.1" value="2" />
+        </div>
+        <div class="field">
+          <label>杯底停留天数</label>
+          <input type="number" id="bottomDwellDays" min="1" max="120" value="5" />
+        </div>
+        <div class="field">
+          <label>杯底区域 %</label>
+          <input type="number" id="bottomZonePct" min="0" max="100" step="0.1" value="20" />
+        </div>
+        <div class="field">
+          <label>杯底跨度 %</label>
+          <input type="number" id="bottomSpanPct" min="0" max="100" step="0.1" value="10" />
+        </div>
+        <div class="field">
+          <label>杯底两侧最小 %</label>
+          <input type="number" id="cupSideDurationPct" min="0" max="50" step="0.1" value="20" />
+        </div>
+        <div class="field">
+          <label>突破回看</label>
+          <input type="number" id="breakoutLookback" min="1" max="120" value="30" />
+        </div>
+        <div class="field">
+          <label>形态回看窗口</label>
+          <input type="number" id="cupLookback" min="30" max="750" value="520" />
+        </div>
+        <div class="field">
+          <label>突破量均线天数</label>
+          <input type="number" id="breakoutVolumeAvgDays" min="1" max="250" value="50" />
+        </div>
+        <div class="field">
+          <label>突破量倍数</label>
+          <input type="number" id="breakoutVolumeMultiplier" min="0" max="10" step="0.1" value="1.4" />
+        </div>
+      </div>
+      <label class="row" style="margin-top: 10px;">
+        <input type="checkbox" id="requirePriorUptrend" checked />
+        <span>要求杯柄前已有明显上涨</span>
+      </label>
+      <label class="row">
+        <input type="checkbox" id="requireBreakoutVolume" />
+        <span>要求突破日放量确认</span>
+      </label>
       <div class="field">
         <label>截止交易日 (留空 = 最新)</label>
         <input type="date" id="cutoffDate" />
@@ -203,22 +369,72 @@
     </div>
 
     <div class="card">
+      <h2>历史回测</h2>
+      <div class="field-grid">
+        <div class="field">
+          <label>开始日期</label>
+          <input type="date" id="backtestStartDate" />
+        </div>
+        <div class="field">
+          <label>结束日期</label>
+          <input type="date" id="backtestEndDate" />
+        </div>
+        <div class="field">
+          <label>持有交易日</label>
+          <input type="number" id="backtestHoldingDays" min="1" max="500" value="120" />
+        </div>
+        <div class="field">
+          <label>止损比例</label>
+          <input type="number" id="backtestStopLoss" min="-0.99" max="-0.01" step="0.01" value="-0.08" />
+        </div>
+        <div class="field">
+          <label>每日最多买入</label>
+          <input type="number" id="backtestPortfolioCap" min="1" max="200" value="20" />
+        </div>
+        <div class="field">
+          <label>进场等待窗口</label>
+          <input type="number" id="backtestEntryWindow" min="1" max="60" value="5" />
+        </div>
+      </div>
+      <button class="secondary" id="runStrategyBacktest" style="margin-top: 10px;">回测当前参数</button>
+      <div id="backtestStatus" class="status-box">尚未运行</div>
+      <div class="stat-grid" id="backtestStats" style="display:none; margin-top: 10px;">
+        <div class="stat"><div class="label">信号日</div><div class="value" id="btSignalDays">—</div><div class="sub" id="btObservations">—</div></div>
+        <div class="stat"><div class="label">完成交易</div><div class="value" id="btCompletedTrades">—</div><div class="sub" id="btExcludedTrades">—</div></div>
+        <div class="stat"><div class="label">平均收益</div><div class="value" id="btAverageReturn">—</div><div class="sub" id="btMedianReturn">—</div></div>
+        <div class="stat"><div class="label">胜率</div><div class="value" id="btWinRate">—</div><div class="sub" id="btBestWorst">—</div></div>
+      </div>
+      <div class="table-wrap" style="margin-top: 10px;">
+        <table>
+          <thead>
+            <tr>
+              <th>信号日</th><th>代码</th><th>进场</th><th>退出</th><th>收益</th>
+            </tr>
+          </thead>
+          <tbody id="backtestTradesBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>命中股票 <span id="hitsCount" class="badge">0</span></h2>
-      <table>
-        <thead>
-          <tr>
-            <th>代码</th><th>名称</th>
-            <th>RPS50</th><th>RPS120</th><th>RPS250</th><th>杯柄</th>
-          </tr>
-        </thead>
-        <tbody id="hitsBody"></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>代码</th><th>名称</th>
+              <th>RPS50</th><th>RPS120</th><th>RPS250</th><th>杯柄</th>
+            </tr>
+          </thead>
+          <tbody id="hitsBody"></tbody>
+        </table>
+      </div>
       <div class="empty" id="hitsEmpty">尚未运行筛选</div>
     </div>
   </section>
 
   <section>
-    <div class="card">
+    <div class="card chart-card">
       <div class="chart-meta">
         <h3 id="chartTitle">选择左侧股票查看 K 线</h3>
         <div class="pattern" id="chartPattern"></div>
@@ -265,6 +481,49 @@
     return res.json();
   }
 
+  function readInt(id, fallback) {
+    const raw = document.getElementById(id).value;
+    const value = parseInt(raw || '', 10);
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  function readFloat(id, fallback) {
+    const raw = document.getElementById(id).value;
+    const value = parseFloat(raw || '');
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  function getCupHandleParams() {
+    return {
+      min_cup_duration: readInt('cupMinDuration', 60),
+      max_cup_duration: readInt('cupMaxDuration', 220),
+      min_handle_duration: readInt('handleMinDuration', 5),
+      max_handle_duration: readInt('handleMaxDuration', 40),
+      min_total_duration: readInt('cupMinTotal', 120),
+      max_total_duration: readInt('cupMaxTotal', 260),
+      min_cup_depth_pct: readFloat('cupMinDepth', 12),
+      max_cup_depth_pct: readFloat('cupMaxDepth', 33),
+      min_handle_pullback_pct: readFloat('handleMinPullback', 3),
+      max_handle_pullback_pct: readFloat('handleMaxPullback', 12),
+      max_right_lip_delta_pct: readFloat('rightLipMaxDelta', 5),
+      require_prior_uptrend: document.getElementById('requirePriorUptrend').checked,
+      prior_uptrend_lookback_days: readInt('priorUptrendLookback', 120),
+      min_prior_uptrend_pct: readFloat('priorUptrendMinPct', 30),
+      min_handle_low_position_pct: readFloat('handleLowPosition', 66),
+      max_handle_depth_to_cup_depth_pct: readFloat('handleDepthToCupDepth', 35),
+      max_handle_high_above_lip_pct: readFloat('handleHighAboveLip', 2),
+      min_bottom_dwell_days: readInt('bottomDwellDays', 5),
+      bottom_zone_pct: readFloat('bottomZonePct', 20),
+      min_bottom_span_pct: readFloat('bottomSpanPct', 10),
+      min_cup_side_duration_pct: readFloat('cupSideDurationPct', 20),
+      require_breakout_volume: document.getElementById('requireBreakoutVolume').checked,
+      breakout_volume_avg_days: readInt('breakoutVolumeAvgDays', 50),
+      min_breakout_volume_multiplier: readFloat('breakoutVolumeMultiplier', 1.4),
+      breakout_lookback_days: readInt('breakoutLookback', 30),
+      lookback_days: readInt('cupLookback', 520),
+    };
+  }
+
   function getCriteria() {
     const windows = Array.from(
       document.querySelectorAll('#rpsWindows input:checked')
@@ -275,6 +534,7 @@
       rps_threshold: parseInt(document.getElementById('rpsThreshold').value || '0', 10),
       selected_rps_windows: windows,
       use_cup_handle: document.getElementById('useCupHandle').checked,
+      cup_handle_params: getCupHandleParams(),
       trade_date: cutoffRaw || null,
     };
   }
@@ -284,7 +544,6 @@
       const data = await api('GET', '/dashboard/api/overview');
       state.overview = data.overview;
       const o = data.overview;
-      document.getElementById('universeSize').textContent = o.universe_size.toLocaleString();
       document.getElementById('csvPoolSize').textContent = o.csv_pool_size.toLocaleString();
       document.getElementById('instrumentsInDb').textContent = o.instruments_in_db.toLocaleString();
       document.getElementById('instrumentsWithMd').textContent =
@@ -300,9 +559,59 @@
       document.getElementById('lastTradeMeta').textContent = o.latest_trade_date
         ? `行情截至 ${o.latest_trade_date} · 指标 ${o.latest_indicator_date || '—'} · ` +
           `DB ${o.instruments_with_market_data}/${o.instruments_in_db}`
-        : '尚无数据 · 请先点 "更新数据并物化"';
+        : '尚无数据';
+      seedBacktestDates(o.latest_trade_date);
     } catch (err) {
       showToast('加载概览失败: ' + err.message);
+    }
+  }
+
+  function seedBacktestDates(latestTradeDate) {
+    if (!latestTradeDate) return;
+    const endInput = document.getElementById('backtestEndDate');
+    const startInput = document.getElementById('backtestStartDate');
+    if (!endInput.value) endInput.value = latestTradeDate;
+    if (!startInput.value) {
+      const start = new Date(latestTradeDate + 'T00:00:00');
+      start.setFullYear(start.getFullYear() - 1);
+      startInput.value = start.toISOString().slice(0, 10);
+    }
+  }
+
+  function fmt(value) {
+    return Number(value || 0).toLocaleString();
+  }
+
+  function formatRatioPct(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    return (Number(value) * 100).toFixed(1) + '%';
+  }
+
+  function setMaintenanceButtons(disabled, activeAction) {
+    const refreshBtn = document.getElementById('runRefresh');
+    const materializeBtn = document.getElementById('runMaterialize');
+    refreshBtn.disabled = disabled;
+    materializeBtn.disabled = disabled;
+    refreshBtn.textContent = activeAction === 'refresh' ? '更新中…' : '更新数据';
+    materializeBtn.textContent = activeAction === 'materialize' ? '物化中…' : '物化指标';
+  }
+
+  function updatePhaseBadge(state) {
+    const el = document.getElementById('updatePhase');
+    el.classList.toggle('running', state && state.status === 'running');
+    el.classList.toggle('failed', state && state.status === 'failed');
+    if (!state || state.status === 'idle') {
+      el.textContent = '空闲';
+    } else if (state.status === 'failed') {
+      el.textContent = '失败';
+    } else if (state.status === 'completed') {
+      el.textContent = '完成';
+    } else if (state.phase === 'refresh') {
+      el.textContent = '更新中';
+    } else if (state.phase === 'materialize') {
+      el.textContent = '物化中';
+    } else {
+      el.textContent = '运行中';
     }
   }
 
@@ -310,13 +619,20 @@
     if (!state || state.status === 'idle') return '尚未执行';
     if (state.status === 'failed') return '失败：' + (state.error || 'unknown');
     if (state.status === 'completed') {
-      return `完成 · 行情 +${state.refresh_inserted}/~${state.refresh_updated}` +
-        ` · 指标 +${state.materialize_inserted}/~${state.materialize_updated}`;
+      if (state.job_kind === 'refresh') {
+        return `更新完成 · 行情 +${fmt(state.refresh_inserted)}/~${fmt(state.refresh_updated)}` +
+          ` · 最新 ${state.refresh_latest_trade_date || '—'}`;
+      }
+      if (state.job_kind === 'materialize') {
+        return `物化完成 · 指标 +${fmt(state.materialize_inserted)}/~${fmt(state.materialize_updated)}`;
+      }
+      return `完成 · 行情 +${fmt(state.refresh_inserted)}/~${fmt(state.refresh_updated)}` +
+        ` · 指标 +${fmt(state.materialize_inserted)}/~${fmt(state.materialize_updated)}`;
     }
     // running
     if (state.phase === 'refresh') {
       const provider = state.refresh_provider ? ` · ${state.refresh_provider}` : '';
-      return `更新行情中${provider} · ${state.universe_count.toLocaleString()} 只 · 已处理 ${state.refresh_processed.toLocaleString()} 行`;
+      return `更新行情中${provider} · ${fmt(state.universe_count)} 只 · 已处理 ${fmt(state.refresh_processed)} 行`;
     }
     if (state.phase === 'materialize') {
       const total = state.materialize_total_dates || 0;
@@ -325,9 +641,9 @@
       const scanTotal = state.materialize_scan_total_dates || 0;
       const latest = state.materialize_latest_trade_date || '';
       if (state.materialize_since_date && processed === 0) {
-        return `预热历史数据中 · 已扫 ${scanned}/${scanTotal} 交易日 · 当前 ${latest} · 目标从 ${state.materialize_since_date} 开始`;
+        return `预热历史数据中 · 已扫 ${fmt(scanned)}/${fmt(scanTotal)} 交易日 · 当前 ${latest} · 目标从 ${state.materialize_since_date} 开始`;
       }
-      return `物化指标中 · ${processed}/${total} 交易日 · 当前 ${latest}`;
+      return `物化指标中 · ${fmt(processed)}/${fmt(total)} 交易日 · 当前 ${latest}`;
     }
     return '运行中…';
   }
@@ -336,34 +652,43 @@
     try {
       const data = await api('GET', '/dashboard/api/update/status');
       const s = data.state;
+      updatePhaseBadge(s);
       document.getElementById('updateStatus').textContent = describeUpdateState(s);
       if (s.status === 'running') {
+        setMaintenanceButtons(true, s.phase === 'materialize' ? 'materialize' : 'refresh');
         setTimeout(pollUpdate, 2000);
       } else if (s.status === 'completed' || s.status === 'failed') {
-        document.getElementById('runUpdate').disabled = false;
-        document.getElementById('runUpdate').textContent = '更新数据并物化';
+        setMaintenanceButtons(false);
         loadOverview();
+      } else {
+        setMaintenanceButtons(false);
       }
     } catch (err) {
       // backend unreachable; stop polling silently
     }
   }
 
-  async function runUpdate() {
-    const btn = document.getElementById('runUpdate');
-    btn.disabled = true;
-    btn.textContent = '更新中…';
+  async function runMaintenance(action) {
+    const config = {
+      refresh: {
+        path: '/dashboard/api/update/refresh',
+        body: null,
+        failedMessage: '启动更新失败: ',
+      },
+      materialize: {
+        path: '/dashboard/api/update/materialize',
+        body: { materialize_since_days: 30 },
+        failedMessage: '启动物化失败: ',
+      },
+    }[action];
+    setMaintenanceButtons(true, action);
     try {
-      const data = await api('POST', '/dashboard/api/update', {
-        materialize_since_days: 320,
-        skip_refresh: false,
-      });
+      const data = await api('POST', config.path, config.body);
       if (!data.started) showToast('已有任务在运行');
       pollUpdate();
     } catch (err) {
-      showToast('启动更新失败: ' + err.message);
-      btn.disabled = false;
-      btn.textContent = '更新数据并物化';
+      showToast(config.failedMessage + err.message);
+      setMaintenanceButtons(false);
     }
   }
 
@@ -415,6 +740,74 @@
     }
   }
 
+  function renderBacktestResult(result) {
+    document.getElementById('backtestStats').style.display = 'grid';
+    document.getElementById('btSignalDays').textContent = fmt(result.signal_dates_evaluated);
+    document.getElementById('btObservations').textContent =
+      `命中 ${fmt(result.qualifying_observations)} · 候选 ${fmt(result.total_candidates_evaluated)}`;
+    document.getElementById('btCompletedTrades').textContent = fmt(result.completed_trades);
+    document.getElementById('btExcludedTrades').textContent =
+      `排除 ${fmt(result.excluded_trades)} · 选中 ${fmt(result.selected_trades)}`;
+    document.getElementById('btAverageReturn').textContent =
+      formatRatioPct(result.average_trade_return);
+    document.getElementById('btMedianReturn').textContent =
+      `中位数 ${formatRatioPct(result.median_trade_return)}`;
+    document.getElementById('btWinRate').textContent = formatRatioPct(result.win_rate);
+    document.getElementById('btBestWorst').textContent =
+      `最好 ${formatRatioPct(result.best_trade_return)} · 最差 ${formatRatioPct(result.worst_trade_return)}`;
+
+    const body = document.getElementById('backtestTradesBody');
+    body.innerHTML = '';
+    for (const trade of result.trades.slice(0, 30)) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${trade.signal_date}</td>
+        <td><strong>${trade.symbol}</strong><div style="color:var(--muted);font-size:11px">RPS ${trade.rps_score || '—'}</div></td>
+        <td>${trade.entry_date}<div style="color:var(--muted);font-size:11px">${trade.entry_price}</div></td>
+        <td>${trade.exit_date}<div style="color:var(--muted);font-size:11px">${trade.exit_reason}</div></td>
+        <td>${formatRatioPct(trade.realized_return)}</td>
+      `;
+      body.appendChild(tr);
+    }
+  }
+
+  async function runStrategyBacktest() {
+    const btn = document.getElementById('runStrategyBacktest');
+    const startDate = document.getElementById('backtestStartDate').value;
+    const endDate = document.getElementById('backtestEndDate').value;
+    if (!startDate || !endDate) {
+      showToast('请先选择回测开始和结束日期');
+      return;
+    }
+    const criteria = getCriteria();
+    btn.disabled = true;
+    btn.textContent = '回测中…';
+    document.getElementById('backtestStatus').textContent = '正在逐日筛选并模拟持有收益…';
+    try {
+      const data = await api('POST', '/dashboard/api/backtest/cup-handle-rps', {
+        start_date: startDate,
+        end_date: endDate,
+        rps_threshold: criteria.rps_threshold,
+        selected_rps_windows: criteria.selected_rps_windows,
+        cup_handle_params: criteria.cup_handle_params,
+        holding_days: readInt('backtestHoldingDays', 120),
+        stop_loss_pct: readFloat('backtestStopLoss', -0.08),
+        portfolio_cap: readInt('backtestPortfolioCap', 20),
+        entry_deferral_window_days: readInt('backtestEntryWindow', 5),
+        max_trades_returned: 300,
+      });
+      renderBacktestResult(data.result);
+      document.getElementById('backtestStatus').textContent =
+        `完成 · ${data.result.start_date} → ${data.result.end_date}`;
+    } catch (err) {
+      showToast('回测失败: ' + err.message);
+      document.getElementById('backtestStatus').textContent = '回测失败：' + err.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '回测当前参数';
+    }
+  }
+
   function ensureChart() {
     if (state.chart) return;
     const host = document.getElementById('chartHost');
@@ -457,7 +850,7 @@
       const rpsDates = new Set(data.rps_marker_dates || []);
       for (const d of rpsDates) {
         markers.push({
-          time: d, position: 'aboveBar', color: '#38bdf8',
+          time: d, position: 'aboveBar', color: '#14b8a6',
           shape: 'circle', text: 'R',
         });
       }
@@ -474,8 +867,16 @@
 
       if (data.cup_handle_pattern) {
         const p = data.cup_handle_pattern;
+        const quality = [
+          p.handle_position_pct ? `把手位置 ${p.handle_position_pct}%` : null,
+          p.handle_depth_to_cup_depth_pct ? `把手/杯深 ${p.handle_depth_to_cup_depth_pct}%` : null,
+          p.prior_uptrend_pct ? `前涨 ${p.prior_uptrend_pct}%` : null,
+          p.breakout_volume_ratio ? `放量 ${p.breakout_volume_ratio}x` : null,
+        ].filter(Boolean).join(' · ');
         document.getElementById('chartPattern').textContent =
+          `周期 ${p.total_duration}日 · 杯身 ${p.cup_duration}日 · 把手 ${p.handle_duration}日 · ` +
           `杯深 ${p.cup_depth_pct}% · 把手回调 ${p.handle_depth_pct}% · ` +
+          (quality ? `${quality} · ` : '') +
           `左唇 ${p.left_lip_date} → 杯底 ${p.cup_bottom_date} → 右唇 ${p.right_lip_date} → 突破 ${p.breakout_date}`;
       } else {
         const rpsCount = data.rps_marker_dates ? data.rps_marker_dates.length : 0;
@@ -489,7 +890,9 @@
   }
 
   document.getElementById('runScreen').addEventListener('click', runScreen);
-  document.getElementById('runUpdate').addEventListener('click', runUpdate);
+  document.getElementById('runRefresh').addEventListener('click', () => runMaintenance('refresh'));
+  document.getElementById('runMaterialize').addEventListener('click', () => runMaintenance('materialize'));
+  document.getElementById('runStrategyBacktest').addEventListener('click', runStrategyBacktest);
   pollUpdate();
 
   document.querySelectorAll('#rpsWindows label').forEach((label) => {

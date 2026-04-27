@@ -16,8 +16,9 @@ class NormalizedEodRecord:
 
 
 def resolve_data_status(bar: ProviderDailyBar) -> str:
-    if bar.data_status in VALID_DATA_STATUSES:
-        return bar.data_status
+    requested_status = bar.data_status if bar.data_status in VALID_DATA_STATUSES else None
+    if requested_status == "unavailable":
+        return requested_status
 
     price_fields = [bar.open, bar.high, bar.low, bar.close, bar.adj_close]
     populated = sum(value is not None for value in price_fields)
@@ -25,6 +26,10 @@ def resolve_data_status(bar: ProviderDailyBar) -> str:
         return "unavailable"
     if populated < len(price_fields):
         return "partial"
+    if bar.volume is None or bar.volume <= 0:
+        return "unavailable"
+    if requested_status == "partial":
+        return requested_status
     return "complete"
 
 

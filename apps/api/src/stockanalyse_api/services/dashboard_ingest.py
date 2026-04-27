@@ -26,12 +26,13 @@ from stockanalyse_api.services.ingestion.refresh_service import execute_market_d
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DASHBOARD_MATERIALIZE_SINCE_DAYS = 320
+DEFAULT_DASHBOARD_MATERIALIZE_SINCE_DAYS = 30
 
 
 @dataclass(slots=True)
 class IngestJobState:
     status: str = "idle"  # idle | running | completed | failed
+    job_kind: str | None = None  # refresh | materialize | combined
     phase: str | None = None  # refresh | materialize
     started_at: str | None = None
     finished_at: str | None = None
@@ -84,14 +85,23 @@ def trigger_update_and_materialize(
     *,
     materialize_since_days: int | None = DEFAULT_DASHBOARD_MATERIALIZE_SINCE_DAYS,
     skip_refresh: bool = False,
+    skip_materialize: bool = False,
 ) -> dict[str, object]:
     global _worker_thread
     with _state_lock:
+        if skip_refresh and skip_materialize:
+            return {"started": False, "reason": "no_work", "state": _job_state.to_dict()}
         if _job_state.status == "running":
             return {"started": False, "reason": "already_running", "state": _job_state.to_dict()}
+        job_kind = "combined"
+        if skip_materialize:
+            job_kind = "refresh"
+        elif skip_refresh:
+            job_kind = "materialize"
         # Reset state for a fresh run.
         globals()["_job_state"] = IngestJobState(
             status="running",
+            job_kind=job_kind,
             phase="refresh" if not skip_refresh else "materialize",
             started_at=datetime.now(UTC).isoformat(),
         )
@@ -99,14 +109,23 @@ def trigger_update_and_materialize(
     _worker_thread = threading.Thread(
         target=_run_pipeline,
         name="dashboard-update-materialize",
-        kwargs={"materialize_since_days": materialize_since_days, "skip_refresh": skip_refresh},
+        kwargs={
+            "materialize_since_days": materialize_since_days,
+            "skip_refresh": skip_refresh,
+            "skip_materialize": skip_materialize,
+        },
         daemon=True,
     )
     _worker_thread.start()
     return {"started": True, "state": get_job_state()}
 
 
-def _run_pipeline(*, materialize_since_days: int | None = None, skip_refresh: bool = False) -> None:
+def _run_pipeline(
+    *,
+    materialize_since_days: int | None = None,
+    skip_refresh: bool = False,
+    skip_materialize: bool = False,
+) -> None:
     try:
         if not skip_refresh:
             _set_state(phase="refresh")
@@ -146,6 +165,15 @@ def _run_pipeline(*, materialize_since_days: int | None = None, skip_refresh: bo
         else:
             _append_log("refresh skipped (skip_refresh=True)")
 
+        if skip_materialize:
+            _append_log("materialization skipped (skip_materialize=True)")
+            _set_state(
+                status="completed",
+                phase=None,
+                finished_at=datetime.now(UTC).isoformat(),
+            )
+            return
+
         _set_state(phase="materialize")
 
         def report_progress(payload: dict[str, object]) -> None:
@@ -179,12 +207,13 @@ def _run_pipeline(*, materialize_since_days: int | None = None, skip_refresh: bo
                 ).scalars().all()
                 if recent_dates:
                     since_date = recent_dates[-1]
+            target_dates = _count_materialize_target_dates(
+                session,
+                since_date=since_date,
+            )
             _set_state(
-                materialize_scan_total_dates=total_dates,
-                materialize_total_dates=_count_materialize_target_dates(
-                    session,
-                    since_date=since_date,
-                ),
+                materialize_scan_total_dates=target_dates if since_date is not None else total_dates,
+                materialize_total_dates=target_dates,
                 materialize_since_date=since_date.isoformat() if since_date else None,
             )
 
