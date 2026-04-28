@@ -66,12 +66,14 @@ def _adjustment_factor(
     raw_close: Decimal | None,
     adj_close: Decimal | None,
 ) -> Decimal | None:
-    if raw_close is None or raw_close == 0 or adj_close is None:
+    if raw_close is None or raw_close <= 0 or adj_close is None:
         return None
     factor = adj_close / raw_close
     if factor <= 0:
         return None
-    if factor > MAX_ADJUSTMENT_FACTOR or factor < Decimal("1") / MAX_ADJUSTMENT_FACTOR:
+    # Long dividend-adjusted histories can legitimately have very small
+    # positive factors; only reject factors that would amplify raw prices.
+    if factor > MAX_ADJUSTMENT_FACTOR:
         return None
     return factor
 

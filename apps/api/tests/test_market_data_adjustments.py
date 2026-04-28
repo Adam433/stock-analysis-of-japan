@@ -37,6 +37,22 @@ class MarketDataAdjustmentTests(unittest.TestCase):
         self.assertEqual(adjusted.low, Decimal("22.5"))
         self.assertEqual(adjusted.close, Decimal("25"))
 
+    def test_adjusted_ohlc_accepts_small_positive_adjustment_factor(self) -> None:
+        adjusted = adjusted_ohlc(
+            Row(
+                open=Decimal("100"),
+                high=Decimal("120"),
+                low=Decimal("80"),
+                close=Decimal("100"),
+                adj_close=Decimal("1"),
+            )
+        )
+
+        self.assertEqual(adjusted.open, Decimal("1"))
+        self.assertEqual(adjusted.high, Decimal("1.2"))
+        self.assertEqual(adjusted.low, Decimal("0.8"))
+        self.assertEqual(adjusted.close, Decimal("1"))
+
     def test_partial_rows_are_not_complete_for_analysis(self) -> None:
         self.assertFalse(
             is_complete_market_row(
@@ -73,6 +89,22 @@ class MarketDataAdjustmentTests(unittest.TestCase):
                 low=Decimal("19"),
                 close=Decimal("20"),
                 adj_close=Decimal("400000000"),
+            )
+        )
+
+        self.assertEqual(adjusted.open, Decimal("20"))
+        self.assertEqual(adjusted.high, Decimal("22"))
+        self.assertEqual(adjusted.low, Decimal("19"))
+        self.assertEqual(adjusted.close, Decimal("20"))
+
+    def test_adjusted_ohlc_ignores_non_positive_adjustment_factor(self) -> None:
+        adjusted = adjusted_ohlc(
+            Row(
+                open=Decimal("20"),
+                high=Decimal("22"),
+                low=Decimal("19"),
+                close=Decimal("20"),
+                adj_close=Decimal("-5"),
             )
         )
 

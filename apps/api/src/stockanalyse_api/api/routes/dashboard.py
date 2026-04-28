@@ -24,6 +24,7 @@ from stockanalyse_api.services.dashboard import (
 from stockanalyse_api.services.dashboard_ingest import (
     DEFAULT_DASHBOARD_MATERIALIZE_SINCE_DAYS,
     get_job_state,
+    trigger_fundamentals_refresh,
     trigger_update_and_materialize,
 )
 from stockanalyse_api.services.dashboard_strategy_backtest import (
@@ -302,6 +303,12 @@ def post_materialize_indicators(payload: IngestRequest | None = None) -> dict[st
         skip_materialize=False,
         market=payload.market,
     )
+
+
+@router.post("/api/update/fundamentals")
+def post_refresh_fundamentals(payload: IngestRequest | None = None) -> dict[str, object]:
+    payload = payload or IngestRequest(market="us")
+    return trigger_fundamentals_refresh(market=payload.market)
 
 
 @router.get("/api/update/status")

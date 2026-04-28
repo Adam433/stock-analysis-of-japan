@@ -166,6 +166,66 @@ class FactorMaterializationTests(unittest.TestCase):
         self.assertEqual(scores[("US", "AAPL")], Decimal("100.00"))
         self.assertEqual(scores[("US", "MSFT")], Decimal("0.00"))
 
+    def test_materialize_derived_indicator_facts_can_scope_to_one_market(self) -> None:
+        start_date = date(2025, 1, 1)
+        with self.session_factory() as session:
+            jp_leader = Instrument(symbol="7203", exchange="TSE", name="JP Leader")
+            jp_laggard = Instrument(symbol="6758", exchange="TSE", name="JP Laggard")
+            us_leader = Instrument(symbol="AAPL", exchange="US", name="US Leader")
+            us_laggard = Instrument(symbol="MSFT", exchange="US", name="US Laggard")
+            session.add_all([jp_leader, jp_laggard, us_leader, us_laggard])
+            session.flush()
+
+            rows: list[MarketDataDaily] = []
+            for index in range(70):
+                trade_date = start_date + timedelta(days=index)
+                for instrument, multiplier in (
+                    (jp_leader, Decimal("1")),
+                    (jp_laggard, Decimal("0.1")),
+                    (us_leader, Decimal("2")),
+                    (us_laggard, Decimal("0.05")),
+                ):
+                    close = Decimal("100") + Decimal(index) * multiplier
+                    rows.append(
+                        MarketDataDaily(
+                            instrument_id=instrument.id,
+                            trade_date=trade_date,
+                            open=close,
+                            high=close,
+                            low=close,
+                            close=close,
+                            adj_close=close,
+                            volume=1000,
+                            data_status="complete",
+                            data_source="test",
+                        )
+                    )
+            session.add_all(rows)
+            session.commit()
+
+            materialize_derived_indicator_facts(session, exchanges=("US",))
+            rows_after_us = session.execute(
+                select(DerivedIndicatorDaily, Instrument)
+                .join(Instrument, Instrument.id == DerivedIndicatorDaily.instrument_id)
+            ).all()
+            self.assertEqual(
+                {instrument.exchange for _, instrument in rows_after_us},
+                {"US"},
+            )
+
+            materialize_derived_indicator_facts(session, exchanges=("TSE",))
+            rows_after_jp = session.execute(
+                select(DerivedIndicatorDaily, Instrument)
+                .join(Instrument, Instrument.id == DerivedIndicatorDaily.instrument_id)
+            ).all()
+
+        counts_by_exchange: dict[str, int] = {}
+        for _, instrument in rows_after_jp:
+            counts_by_exchange[instrument.exchange] = (
+                counts_by_exchange.get(instrument.exchange, 0) + 1
+            )
+        self.assertEqual(counts_by_exchange, {"TSE": 140, "US": 140})
+
     def test_materialize_derived_indicator_facts_updates_existing_rows(self) -> None:
         self._seed_market_data()
 
@@ -255,6 +315,51 @@ class FactorMaterializationTests(unittest.TestCase):
             row_count = session.execute(select(DerivedIndicatorDaily)).scalars().all()
 
         self.assertEqual(len(row_count), 520)
+
+    def test_materialize_job_entrypoint_can_scope_to_us_exchange(self) -> None:
+        start_date = date(2025, 1, 1)
+        with self.session_factory() as session:
+            tse = Instrument(symbol="7203", exchange="TSE", name="Toyota")
+            us = Instrument(symbol="AAPL", exchange="US", name="Apple")
+            session.add_all([tse, us])
+            session.flush()
+            rows: list[MarketDataDaily] = []
+            for index in range(3):
+                trade_date = start_date + timedelta(days=index)
+                for instrument in (tse, us):
+                    close = Decimal("100") + Decimal(index)
+                    rows.append(
+                        MarketDataDaily(
+                            instrument_id=instrument.id,
+                            trade_date=trade_date,
+                            open=close,
+                            high=close,
+                            low=close,
+                            close=close,
+                            adj_close=close,
+                            volume=1000,
+                            data_status="complete",
+                            data_source="test",
+                        )
+                    )
+            session.add_all(rows)
+            session.commit()
+
+        with patch("stockanalyse_api.jobs.materialize_derived_facts.SessionLocal", self.session_factory):
+            materialize_job_main(["--exchange", "US"])
+
+        with self.session_factory() as session:
+            exchanges = {
+                instrument.exchange
+                for _, instrument in session.execute(
+                    select(DerivedIndicatorDaily, Instrument).join(
+                        Instrument,
+                        Instrument.id == DerivedIndicatorDaily.instrument_id,
+                    )
+                ).all()
+            }
+
+        self.assertEqual(exchanges, {"US"})
 
 
 if __name__ == "__main__":

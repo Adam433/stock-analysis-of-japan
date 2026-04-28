@@ -34,7 +34,11 @@ def get_us_stock_symbols_path() -> Path:
 
 
 def get_us_auto_refresh_provider() -> str:
-    return os.environ.get("STOCKANALYSE_US_AUTO_REFRESH_PROVIDER", "alpha_vantage_daily_adjusted")
+    return os.environ.get("STOCKANALYSE_US_AUTO_REFRESH_PROVIDER", "yahoo_finance_chart_us")
+
+
+def get_us_fundamentals_provider() -> str:
+    return os.environ.get("STOCKANALYSE_US_FUNDAMENTALS_PROVIDER", "sec_companyfacts")
 
 
 def get_local_csv_raw_dir() -> Path:

@@ -71,13 +71,40 @@ def _append_price_point(history: deque[PricePoint], point: PricePoint) -> None:
     history.append(point)
 
 
-def _preload_price_history(session, since_date: date) -> dict[int, deque[PricePoint]]:
+def _normalize_exchanges(exchanges: tuple[str, ...] | list[str] | None) -> tuple[str, ...] | None:
+    if exchanges is None:
+        return None
+    cleaned = tuple(exchange for exchange in exchanges if exchange)
+    return cleaned or None
+
+
+def _instrument_ids_for_exchanges(exchanges: tuple[str, ...]):
+    return select(Instrument.id).where(Instrument.exchange.in_(exchanges))
+
+
+def _load_instrument_exchanges(session, exchanges: tuple[str, ...] | None) -> dict[int, str]:
+    query = select(Instrument.id, Instrument.exchange)
+    if exchanges is not None:
+        query = query.where(Instrument.exchange.in_(exchanges))
+    return dict(session.execute(query).all())
+
+
+def _preload_price_history(
+    session,
+    since_date: date,
+    *,
+    exchanges: tuple[str, ...] | None = None,
+) -> dict[int, deque[PricePoint]]:
     price_history: dict[int, deque[PricePoint]] = defaultdict(
         lambda: deque(maxlen=MAX_HISTORY_WINDOW)
     )
-    instrument_ids = session.execute(
-        select(MarketDataDaily.instrument_id)
-        .where(
+    instrument_ids_query = select(MarketDataDaily.instrument_id)
+    if exchanges is not None:
+        instrument_ids_query = instrument_ids_query.where(
+            MarketDataDaily.instrument_id.in_(_instrument_ids_for_exchanges(exchanges))
+        )
+    instrument_ids_query = (
+        instrument_ids_query.where(
             MarketDataDaily.trade_date < since_date,
             MarketDataDaily.data_status == "complete",
             MarketDataDaily.volume > 0,
@@ -85,7 +112,8 @@ def _preload_price_history(session, since_date: date) -> dict[int, deque[PricePo
         )
         .group_by(MarketDataDaily.instrument_id)
         .order_by(MarketDataDaily.instrument_id.asc())
-    ).scalars().all()
+    )
+    instrument_ids = session.execute(instrument_ids_query).scalars().all()
     for instrument_id in instrument_ids:
         rows = session.execute(
             select(MarketDataDaily)
@@ -124,17 +152,19 @@ def materialize_derived_indicator_facts(
     commit_every_dates: int = DEFAULT_MATERIALIZE_COMMIT_EVERY_DATES,
     progress_callback: Callable[[dict[str, object]], None] | None = None,
     since_date: date | None = None,
+    exchanges: tuple[str, ...] | list[str] | None = None,
 ) -> dict[str, int]:
     """Materialize RPS / 52-week-high facts.
 
-    When ``since_date`` is supplied, market rows older than ``since_date`` are
-    still walked to warm the per-instrument 252-day price history (so that
-    RPS_250 has the right lookback), but no derived rows are written for those
-    earlier trade dates. This lets dashboards refresh the recent slice without
-    paying the cost of the full backfill.
+    When ``since_date`` is supplied, older market rows are preloaded to warm the
+    per-instrument 252-day price history, but no derived rows are written for
+    those earlier trade dates. Passing ``exchanges`` limits both recalculation
+    and stale-row cleanup to that market.
     """
+    exchange_filter = _normalize_exchanges(exchanges)
+    instrument_exchanges = _load_instrument_exchanges(session, exchange_filter)
     price_history: dict[int, deque[PricePoint]] = (
-        _preload_price_history(session, since_date)
+        _preload_price_history(session, since_date, exchanges=exchange_filter)
         if since_date is not None
         else defaultdict(lambda: deque(maxlen=MAX_HISTORY_WINDOW))
     )
@@ -168,11 +198,18 @@ def materialize_derived_indicator_facts(
             current_date_returns = _empty_date_returns()
             return
 
+        existing_rows_query = select(DerivedIndicatorDaily).where(
+            DerivedIndicatorDaily.trade_date == trade_date
+        )
+        if exchange_filter is not None:
+            existing_rows_query = existing_rows_query.where(
+                DerivedIndicatorDaily.instrument_id.in_(
+                    _instrument_ids_for_exchanges(exchange_filter)
+                )
+            )
         existing_rows = {
             row.instrument_id: row
-            for row in session.execute(
-                select(DerivedIndicatorDaily).where(DerivedIndicatorDaily.trade_date == trade_date)
-            ).scalars()
+            for row in session.execute(existing_rows_query).scalars()
         }
 
         if not current_date_facts:
@@ -229,10 +266,13 @@ def materialize_derived_indicator_facts(
         current_date_facts = {}
         current_date_returns = _empty_date_returns()
 
-    trade_dates_query = (
-        select(MarketDataDaily.trade_date)
-        .group_by(MarketDataDaily.trade_date)
-        .order_by(MarketDataDaily.trade_date.asc())
+    trade_dates_query = select(MarketDataDaily.trade_date)
+    if exchange_filter is not None:
+        trade_dates_query = trade_dates_query.where(
+            MarketDataDaily.instrument_id.in_(_instrument_ids_for_exchanges(exchange_filter))
+        )
+    trade_dates_query = trade_dates_query.group_by(MarketDataDaily.trade_date).order_by(
+        MarketDataDaily.trade_date.asc()
     )
     if since_date is not None:
         trade_dates_query = trade_dates_query.where(MarketDataDaily.trade_date >= since_date)
@@ -240,17 +280,37 @@ def materialize_derived_indicator_facts(
 
     for trade_date in trade_dates:
         current_trade_date = trade_date
-        market_rows = session.execute(
-            select(MarketDataDaily, Instrument.exchange)
-            .join(Instrument, Instrument.id == MarketDataDaily.instrument_id)
-            .where(
-                MarketDataDaily.trade_date == trade_date,
-                MarketDataDaily.data_status == "complete",
-                MarketDataDaily.volume > 0,
-                MarketDataDaily.close.is_not(None),
+        if exchange_filter is None:
+            market_rows = session.execute(
+                select(MarketDataDaily, Instrument.exchange)
+                .join(Instrument, Instrument.id == MarketDataDaily.instrument_id)
+                .where(
+                    MarketDataDaily.trade_date == trade_date,
+                    MarketDataDaily.data_status == "complete",
+                    MarketDataDaily.volume > 0,
+                    MarketDataDaily.close.is_not(None),
+                )
+                .order_by(Instrument.exchange.asc(), MarketDataDaily.instrument_id.asc())
+            ).all()
+        else:
+            scoped_rows = session.execute(
+                select(MarketDataDaily)
+                .where(
+                    MarketDataDaily.trade_date == trade_date,
+                    MarketDataDaily.instrument_id.in_(
+                        _instrument_ids_for_exchanges(exchange_filter)
+                    ),
+                    MarketDataDaily.data_status == "complete",
+                    MarketDataDaily.volume > 0,
+                    MarketDataDaily.close.is_not(None),
+                )
+                .order_by(MarketDataDaily.instrument_id.asc())
+            ).scalars()
+            market_rows = (
+                (market_row, instrument_exchanges[market_row.instrument_id])
+                for market_row in scoped_rows
+                if market_row.instrument_id in instrument_exchanges
             )
-            .order_by(Instrument.exchange.asc(), MarketDataDaily.instrument_id.asc())
-        ).all()
 
         for market_row, exchange in market_rows:
             price = _resolve_price(market_row)

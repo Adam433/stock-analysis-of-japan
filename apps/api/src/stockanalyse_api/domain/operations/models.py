@@ -9,7 +9,7 @@ from stockanalyse_api.db.base import Base, TimestampMixin
 
 REFRESH_RUN_STATUS_VALUES = ("running", "succeeded", "partial", "failed")
 REFRESH_UNIVERSE_SCOPE_VALUES = ("symbol_list", "full_universe")
-REFRESH_UNIVERSE_FILTER_VALUES = ("explicit_symbols", "tse_common_stock")
+REFRESH_UNIVERSE_FILTER_VALUES = ("explicit_symbols", "tse_common_stock", "us_common_stock")
 
 
 class MarketDataRefreshRun(TimestampMixin, Base):

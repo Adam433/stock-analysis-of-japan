@@ -39,6 +39,15 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertEqual(provider.credential_boundary, BACKEND_ONLY_BOUNDARY)
         self.assertEqual(provider.market_scope, MVP_MARKET_SCOPE)
 
+    def test_yahoo_finance_chart_us_provider_stays_within_backend_only_boundary(self) -> None:
+        provider = build_ingestion_provider(
+            "yahoo_finance_chart_us",
+            symbols_file=Path("data/us_stock_symbols.txt"),
+        )
+
+        self.assertEqual(provider.credential_boundary, BACKEND_ONLY_BOUNDARY)
+        self.assertEqual(provider.market_scope, "us_equities_eod")
+
 
 if __name__ == "__main__":
     unittest.main()

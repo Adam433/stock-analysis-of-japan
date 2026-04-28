@@ -23,13 +23,30 @@ DEFAULT_REFRESH_COMMIT_EVERY = int(os.environ.get("STOCKANALYSE_REFRESH_COMMIT_E
 DEFAULT_REFRESH_OVERLAP_DAYS = int(os.environ.get("STOCKANALYSE_REFRESH_OVERLAP_DAYS", "30"))
 
 
-def _get_or_create_instrument(session, bar: ProviderDailyBar) -> Instrument:
-    instrument = session.execute(
-        select(Instrument).where(
-            Instrument.symbol == bar.symbol,
-            Instrument.exchange == bar.exchange,
-        )
-    ).scalar_one_or_none()
+def _load_instrument_cache(
+    session,
+    symbols: list[str],
+    *,
+    exchange: str | None = None,
+) -> dict[tuple[str, str], Instrument]:
+    if not symbols:
+        return {}
+    query = select(Instrument).where(Instrument.symbol.in_(symbols))
+    if exchange is not None:
+        query = query.where(Instrument.exchange == exchange)
+    return {
+        (instrument.symbol, instrument.exchange): instrument
+        for instrument in session.execute(query).scalars()
+    }
+
+
+def _get_or_create_instrument(
+    session,
+    bar: ProviderDailyBar,
+    instrument_cache: dict[tuple[str, str], Instrument],
+) -> Instrument:
+    cache_key = (bar.symbol, bar.exchange)
+    instrument = instrument_cache.get(cache_key)
 
     if instrument is None:
         instrument = Instrument(
@@ -40,11 +57,29 @@ def _get_or_create_instrument(session, bar: ProviderDailyBar) -> Instrument:
         )
         session.add(instrument)
         session.flush()
+        instrument_cache[cache_key] = instrument
         return instrument
 
     instrument.name = bar.instrument_name or instrument.name
     instrument.currency = bar.currency or instrument.currency
     return instrument
+
+
+def _load_existing_market_rows_for_symbol(
+    session,
+    *,
+    instrument_id: int,
+    start_after: date | None,
+) -> dict[tuple[int, date], MarketDataDaily]:
+    if start_after is None:
+        return {}
+    rows = session.execute(
+        select(MarketDataDaily).where(
+            MarketDataDaily.instrument_id == instrument_id,
+            MarketDataDaily.trade_date >= start_after + timedelta(days=1),
+        )
+    ).scalars()
+    return {(row.instrument_id, row.trade_date): row for row in rows}
 
 
 def refresh_market_data(
@@ -60,7 +95,17 @@ def refresh_market_data(
     processed = 0
     latest_trade_date: date | None = None
     rows_by_key: dict[tuple[int, date], MarketDataDaily] = {}
+    existing_rows_by_key: dict[tuple[int, date], MarketDataDaily] = {}
     final_status_by_key: dict[tuple[str, str, date], str] = {}
+    provider_exchange = _provider_exchange(provider)
+    instrument_cache = _load_instrument_cache(
+        session,
+        symbols,
+        exchange=provider_exchange,
+    )
+    loaded_existing_symbols: set[tuple[str, str]] = set()
+    current_symbol_key: tuple[str, str] | None = None
+    seen_trade_dates_for_current_symbol: set[date] = set()
 
     def flush_batch() -> None:
         nonlocal rows_by_key
@@ -73,7 +118,7 @@ def refresh_market_data(
         _load_latest_trade_dates_by_symbol(
             session,
             symbols,
-            exchange=_provider_exchange(provider),
+            exchange=provider_exchange,
         ),
         overlap_days=overlap_days,
     )
@@ -85,19 +130,34 @@ def refresh_market_data(
     ):
         processed += 1
         normalized = normalize_daily_bar(raw_bar)
-        instrument = _get_or_create_instrument(session, normalized.bar)
+        instrument = _get_or_create_instrument(session, normalized.bar, instrument_cache)
+        instrument_key = (normalized.bar.symbol, normalized.bar.exchange)
+        if instrument_key != current_symbol_key:
+            current_symbol_key = instrument_key
+            seen_trade_dates_for_current_symbol = set()
+        if instrument_key not in loaded_existing_symbols:
+            existing_rows_by_key.update(
+                _load_existing_market_rows_for_symbol(
+                    session,
+                    instrument_id=instrument.id,
+                    start_after=latest_stored_dates.get(normalized.bar.symbol),
+                )
+            )
+            loaded_existing_symbols.add(instrument_key)
         row_key = (instrument.id, normalized.bar.trade_date)
         if latest_trade_date is None or normalized.bar.trade_date > latest_trade_date:
             latest_trade_date = normalized.bar.trade_date
 
         row = rows_by_key.get(row_key)
         if row is None:
-            row = session.execute(
-                select(MarketDataDaily).where(
-                    MarketDataDaily.instrument_id == instrument.id,
-                    MarketDataDaily.trade_date == normalized.bar.trade_date,
-                )
-            ).scalar_one_or_none()
+            row = existing_rows_by_key.get(row_key)
+            if row is None and normalized.bar.trade_date in seen_trade_dates_for_current_symbol:
+                row = session.execute(
+                    select(MarketDataDaily).where(
+                        MarketDataDaily.instrument_id == instrument.id,
+                        MarketDataDaily.trade_date == normalized.bar.trade_date,
+                    )
+                ).scalar_one_or_none()
 
             if row is None:
                 row = MarketDataDaily(
@@ -112,6 +172,7 @@ def refresh_market_data(
             rows_by_key[row_key] = row
         else:
             updated += 1
+        seen_trade_dates_for_current_symbol.add(normalized.bar.trade_date)
 
         row.open = normalized.bar.open
         row.high = normalized.bar.high

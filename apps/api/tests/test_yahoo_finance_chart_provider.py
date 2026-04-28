@@ -163,6 +163,58 @@ class YahooFinanceChartProviderTests(unittest.TestCase):
 
         self.assertEqual(bars, [])
 
+    def test_us_provider_uses_yahoo_share_class_symbol_but_keeps_internal_symbol(self) -> None:
+        captured_urls: list[str] = []
+        payload = {
+            "chart": {
+                "result": [
+                    {
+                        "meta": {"currency": "USD", "shortName": "Berkshire Hathaway"},
+                        "timestamp": [1710028800],
+                        "indicators": {
+                            "quote": [
+                                {
+                                    "open": [410.0],
+                                    "high": [412.0],
+                                    "low": [408.0],
+                                    "close": [411.0],
+                                    "volume": [1000],
+                                }
+                            ],
+                            "adjclose": [{"adjclose": [411.0]}],
+                        },
+                    }
+                ],
+                "error": None,
+            }
+        }
+
+        def fake_urlopen(request, timeout=0, context=None):
+            captured_urls.append(request.full_url)
+            return _FakeResponse(payload)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            symbols_file = Path(temp_dir) / "symbols.txt"
+            symbols_file.write_text("BRK.B\n", encoding="utf-8")
+            provider = YahooFinanceChartProvider(
+                symbols_file=symbols_file,
+                provider_name="yahoo_finance_chart_us",
+                market_scope="us_equities_eod",
+                exchange="US",
+                currency="USD",
+            )
+
+            with patch(
+                "stockanalyse_api.services.ingestion.providers.yahoo_finance_chart_provider.urlopen",
+                side_effect=fake_urlopen,
+            ):
+                bars = list(provider.fetch_daily_bars(["BRK.B"]))
+
+        self.assertIn("/BRK-B?", captured_urls[0])
+        self.assertEqual(bars[0].symbol, "BRK.B")
+        self.assertEqual(bars[0].exchange, "US")
+        self.assertEqual(bars[0].currency, "USD")
+
 
 if __name__ == "__main__":
     unittest.main()

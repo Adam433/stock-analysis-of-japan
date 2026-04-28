@@ -7,6 +7,7 @@ from decimal import Decimal
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+import stockanalyse_api.domain.market_data.models  # noqa: F401
 from stockanalyse_api.db.base import Base
 from stockanalyse_api.domain.fundamentals.models import FundamentalsAnnual
 from stockanalyse_api.domain.instruments.models import Instrument

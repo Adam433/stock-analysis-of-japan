@@ -128,7 +128,7 @@
   }
   .action-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
   }
   button.primary, button.secondary {
@@ -147,6 +147,16 @@
     min-height: 36px; margin-top: 10px; padding: 8px 10px;
     border-radius: 8px; background: var(--panel-subtle);
     color: var(--muted); font-size: 12px; line-height: 1.45;
+  }
+  .maintenance-hint {
+    margin-top: 10px; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid rgba(245, 158, 11, 0.32);
+    background: rgba(245, 158, 11, 0.08); color: #facc15;
+    font-size: 12px; line-height: 1.45;
+  }
+  .status-log {
+    margin-top: 8px; color: var(--muted); font-size: 11px; line-height: 1.45;
+    white-space: pre-wrap;
   }
   .mini-badge {
     display: inline-flex; align-items: center; min-height: 22px;
@@ -257,8 +267,11 @@
       <div class="action-grid">
         <button class="primary" id="runRefresh">更新数据</button>
         <button class="secondary" id="runMaterialize">物化指标</button>
+        <button class="secondary" id="runFundamentals">刷新业绩</button>
       </div>
+      <div id="maintenanceHint" class="maintenance-hint"></div>
       <div id="updateStatus" class="status-box">尚未执行</div>
+      <div id="updateLog" class="status-log"></div>
     </div>
 
     <div class="card">
@@ -518,6 +531,10 @@
     candleSeries: null,
   };
   const MARKET_LABELS = { jp: '日本', us: '美股' };
+  const MARKET_MAINTENANCE_HINTS = {
+    jp: '日股维护使用当前后端配置的数据源，并按 TSE 普通股范围物化指标。',
+    us: '美股行情默认使用 Yahoo Finance chart 研究数据源回填 20 年左右日线；业绩使用 SEC companyfacts。',
+  };
 
   function showToast(msg) {
     const el = document.getElementById('toast');
@@ -663,6 +680,11 @@
     return Number(value || 0).toLocaleString();
   }
 
+  function updateMaintenanceHint() {
+    document.getElementById('maintenanceHint').textContent =
+      MARKET_MAINTENANCE_HINTS[state.market] || '';
+  }
+
   function formatRatioPct(value) {
     if (value === null || value === undefined || value === '') return '—';
     return (Number(value) * 100).toFixed(1) + '%';
@@ -671,10 +693,13 @@
   function setMaintenanceButtons(disabled, activeAction) {
     const refreshBtn = document.getElementById('runRefresh');
     const materializeBtn = document.getElementById('runMaterialize');
+    const fundamentalsBtn = document.getElementById('runFundamentals');
     refreshBtn.disabled = disabled;
     materializeBtn.disabled = disabled;
+    fundamentalsBtn.disabled = disabled;
     refreshBtn.textContent = activeAction === 'refresh' ? '更新中…' : '更新数据';
     materializeBtn.textContent = activeAction === 'materialize' ? '物化中…' : '物化指标';
+    fundamentalsBtn.textContent = activeAction === 'fundamentals' ? '刷新中…' : '刷新业绩';
   }
 
   function updatePhaseBadge(state) {
@@ -691,14 +716,30 @@
       el.textContent = '更新中';
     } else if (state.phase === 'materialize') {
       el.textContent = '物化中';
+    } else if (state.phase === 'fundamentals') {
+      el.textContent = '业绩中';
     } else {
       el.textContent = '运行中';
     }
   }
 
+  function friendlyUpdateError(state) {
+    const raw = state && state.error ? state.error : 'unknown';
+    if (raw.includes('ALPHAVANTAGE_API_KEY')) {
+      return raw + '。请在后端环境设置 ALPHAVANTAGE_API_KEY 后重试。';
+    }
+    if (raw.includes('No US symbols')) {
+      return raw + '。请先同步 data/us_stock_symbols.txt。';
+    }
+    if (raw.includes('companyfacts') || raw.includes('sec.gov')) {
+      return raw + '。请检查 SEC 访问与 STOCKANALYSE_SEC_USER_AGENT。';
+    }
+    return raw;
+  }
+
   function describeUpdateState(state) {
     if (!state || state.status === 'idle') return '尚未执行';
-    if (state.status === 'failed') return '失败：' + (state.error || 'unknown');
+    if (state.status === 'failed') return '失败：' + friendlyUpdateError(state);
     if (state.status === 'completed') {
       if (state.job_kind === 'refresh') {
         return `更新完成 · 行情 +${fmt(state.refresh_inserted)}/~${fmt(state.refresh_updated)}` +
@@ -706,6 +747,9 @@
       }
       if (state.job_kind === 'materialize') {
         return `物化完成 · 指标 +${fmt(state.materialize_inserted)}/~${fmt(state.materialize_updated)}`;
+      }
+      if (state.job_kind === 'fundamentals') {
+        return `业绩刷新完成 · 成功 ${fmt(state.fundamentals_refreshed)} · 失败 ${fmt(state.fundamentals_failed)}`;
       }
       return `完成 · 行情 +${fmt(state.refresh_inserted)}/~${fmt(state.refresh_updated)}` +
         ` · 指标 +${fmt(state.materialize_inserted)}/~${fmt(state.materialize_updated)}`;
@@ -726,7 +770,17 @@
       }
       return `物化指标中 · ${fmt(processed)}/${fmt(total)} 交易日 · 当前 ${latest}`;
     }
+    if (state.phase === 'fundamentals') {
+      const provider = state.fundamentals_provider ? ` · ${state.fundamentals_provider}` : '';
+      return `刷新业绩中${provider} · 已处理 ${fmt(state.fundamentals_processed)} · 成功 ${fmt(state.fundamentals_refreshed)} · 失败 ${fmt(state.fundamentals_failed)}`;
+    }
     return '运行中…';
+  }
+
+  function renderUpdateLog(state) {
+    const log = document.getElementById('updateLog');
+    const lines = state && Array.isArray(state.log_tail) ? state.log_tail.slice(-5) : [];
+    log.textContent = lines.join('\n');
   }
 
   async function pollUpdate() {
@@ -735,8 +789,14 @@
       const s = data.state;
       updatePhaseBadge(s);
       document.getElementById('updateStatus').textContent = describeUpdateState(s);
+      renderUpdateLog(s);
       if (s.status === 'running') {
-        setMaintenanceButtons(true, s.phase === 'materialize' ? 'materialize' : 'refresh');
+        const activeAction = s.phase === 'materialize'
+          ? 'materialize'
+          : s.phase === 'fundamentals'
+            ? 'fundamentals'
+            : 'refresh';
+        setMaintenanceButtons(true, activeAction);
         setTimeout(pollUpdate, 2000);
       } else if (s.status === 'completed' || s.status === 'failed') {
         setMaintenanceButtons(false);
@@ -760,6 +820,11 @@
         path: '/dashboard/api/update/materialize',
         body: { materialize_since_days: 30 },
         failedMessage: '启动物化失败: ',
+      },
+      fundamentals: {
+        path: '/dashboard/api/update/fundamentals',
+        body: null,
+        failedMessage: '启动业绩刷新失败: ',
       },
     }[action];
     setMaintenanceButtons(true, action);
@@ -921,6 +986,7 @@
       button.setAttribute('aria-pressed', active ? 'true' : 'false');
     });
     resetMarketScopedViews();
+    updateMaintenanceHint();
     loadOverview();
   }
 
@@ -1008,6 +1074,7 @@
   document.getElementById('runScreen').addEventListener('click', runScreen);
   document.getElementById('runRefresh').addEventListener('click', () => runMaintenance('refresh'));
   document.getElementById('runMaterialize').addEventListener('click', () => runMaintenance('materialize'));
+  document.getElementById('runFundamentals').addEventListener('click', () => runMaintenance('fundamentals'));
   document.getElementById('runStrategyBacktest').addEventListener('click', runStrategyBacktest);
   document.querySelectorAll('#marketSwitch button').forEach((button) => {
     button.addEventListener('click', () => setMarket(button.dataset.market));
@@ -1022,6 +1089,7 @@
     sync();
   });
 
+  updateMaintenanceHint();
   loadOverview();
 </script>
 </body>

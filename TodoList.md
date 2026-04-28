@@ -1,8 +1,7 @@
-现在我想增加一个内部预览的dashboard，不用启动前端最好：
-里面需要设置点简单的功能
-1. 我需要知道目前总共有多少股票纳入了统计，其中多少已经更新到最新的交易日。
-2. 在筛选股票的时候我勾选了RPS，就认为要加入筛选条件，而且是and的关系而不是or
-3. 距离1年多新高的那个筛选，选的是欧奈尔的杯柄状，而不是一直在创新高的股票。
-4. 当筛选出来某个股票某些日点符合这些特征的时候，在股票k线显示背景上面加个可以识别的符号即可。
-5. 剩下的你帮我设计就好了
-   
+    □ US price source: add ALPHAVANTAGE_API_KEY path, run small AAPL/MSFT ingest, confirm adjusted OHLCV rows and split handling.
+    □ US universe: replace seed data/us_stock_symbols.txt with a real NYSE/NASDAQ common-stock universe and keep ETF/ADR/noise out.
+    ✓ US fundamentals: run SEC companyfacts refresh for imported US instruments, validate ticker->CIK mapping and net_income annual rows. Completed 2026-04-28: 4,617/4,800 US instruments covered, 21,373 annual net-income rows after 20-F/40-F/IFRS retry.
+    □ US materialization: materialize derived facts after US ingest, verify US RPS is ranked only against US instruments.
+    □ US dashboard UX: show US data-source/key errors clearly, add fundamentals refresh trigger or documented workflow.
+    □ US backtest: run cup-handle + RPS + fundamentals parameter sweeps on US history, record win rate, drawdown, stop-loss sensitivity.
+    □ Provider fallback: evaluate non-Yahoo/non-Alpha alternatives if Alpha adjusted daily is paywalled/rate-limited for full universe.

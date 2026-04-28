@@ -47,6 +47,16 @@ def build_ingestion_provider(
         if symbols_file is None:
             raise ValueError("symbols_file is required for the yahoo_finance_chart provider.")
         provider = YahooFinanceChartProvider(symbols_file=symbols_file)
+    elif provider_name == "yahoo_finance_chart_us":
+        if symbols_file is None:
+            raise ValueError("symbols_file is required for the yahoo_finance_chart_us provider.")
+        provider = YahooFinanceChartProvider(
+            symbols_file=symbols_file,
+            provider_name="yahoo_finance_chart_us",
+            market_scope="us_equities_eod",
+            exchange="US",
+            currency="USD",
+        )
     elif provider_name == "alpha_vantage_daily_adjusted":
         if symbols_file is None:
             raise ValueError("symbols_file is required for the alpha_vantage_daily_adjusted provider.")

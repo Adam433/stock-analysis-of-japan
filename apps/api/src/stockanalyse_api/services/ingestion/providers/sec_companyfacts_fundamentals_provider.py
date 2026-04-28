@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
+import time
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+
+try:
+    import certifi
+except ImportError:  # pragma: no cover - certifi is optional at runtime.
+    certifi = None
 
 from stockanalyse_api.services.ingestion.provider_models import ProviderFundamentalsAnnual
 
@@ -14,6 +21,13 @@ NET_INCOME_TAGS = (
     "ProfitLoss",
     "NetIncomeLossAvailableToCommonStockholdersBasic",
 )
+IFRS_NET_INCOME_TAGS = (
+    "ProfitLossAttributableToOwnersOfParent",
+    "ProfitLossAttributableToOrdinaryEquityHoldersOfParentEntity",
+    "ProfitLoss",
+)
+ANNUAL_FORMS = {"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"}
+MIN_ANNUAL_DURATION_DAYS = 300
 
 
 class SecCompanyFactsFundamentalsProvider:
@@ -21,12 +35,24 @@ class SecCompanyFactsFundamentalsProvider:
     market_scope = "us_equities_fundamentals"
     credential_boundary = "backend_only"
 
-    def __init__(self, *, timeout_seconds: int = 30, user_agent: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        timeout_seconds: int = 30,
+        user_agent: str | None = None,
+        min_request_interval_seconds: float | None = None,
+    ) -> None:
         self.timeout_seconds = timeout_seconds
         self.user_agent = user_agent or os.environ.get(
             "STOCKANALYSE_SEC_USER_AGENT",
             "stockAnalyse/0.1 contact=local@example.com",
         )
+        self.min_request_interval_seconds = (
+            min_request_interval_seconds
+            if min_request_interval_seconds is not None
+            else float(os.environ.get("STOCKANALYSE_SEC_MIN_REQUEST_INTERVAL_SECONDS", "0.12"))
+        )
+        self._last_request_at: float | None = None
         self._ticker_to_cik: dict[str, int] | None = None
 
     def fetch_annual_fundamentals(
@@ -62,6 +88,7 @@ class SecCompanyFactsFundamentalsProvider:
         )
 
     def _fetch_json(self, url: str) -> dict[str, object]:
+        self._throttle_request()
         request = Request(
             quote(url, safe=":/?=&."),
             headers={
@@ -69,8 +96,23 @@ class SecCompanyFactsFundamentalsProvider:
                 "Accept": "application/json",
             },
         )
-        with urlopen(request, timeout=self.timeout_seconds) as response:
+        ssl_context = (
+            ssl.create_default_context(cafile=certifi.where())
+            if certifi is not None
+            else ssl.create_default_context()
+        )
+        with urlopen(request, timeout=self.timeout_seconds, context=ssl_context) as response:
             return json.loads(response.read().decode("utf-8"))
+
+    def _throttle_request(self) -> None:
+        if self.min_request_interval_seconds <= 0:
+            return
+        now = time.monotonic()
+        if self._last_request_at is not None:
+            elapsed = now - self._last_request_at
+            if elapsed < self.min_request_interval_seconds:
+                time.sleep(self.min_request_interval_seconds - elapsed)
+        self._last_request_at = time.monotonic()
 
     def _parse_companyfacts(
         self,
@@ -79,37 +121,59 @@ class SecCompanyFactsFundamentalsProvider:
         payload: dict[str, object],
     ) -> list[ProviderFundamentalsAnnual]:
         facts = payload.get("facts")
-        us_gaap = facts.get("us-gaap") if isinstance(facts, dict) else None
-        if not isinstance(us_gaap, dict):
+        if not isinstance(facts, dict):
             return []
 
-        for tag in NET_INCOME_TAGS:
-            fact = us_gaap.get(tag)
-            units = fact.get("units") if isinstance(fact, dict) else None
-            usd_rows = units.get("USD") if isinstance(units, dict) else None
-            if isinstance(usd_rows, list):
-                parsed = self._parse_net_income_rows(symbol, exchange, usd_rows)
-                if parsed:
-                    return parsed[-10:]
-        return []
+        candidates: list[list[ProviderFundamentalsAnnual]] = []
+        for taxonomy_name, tags in (
+            ("us-gaap", NET_INCOME_TAGS),
+            ("ifrs-full", IFRS_NET_INCOME_TAGS),
+        ):
+            taxonomy = facts.get(taxonomy_name) if isinstance(facts, dict) else None
+            if not isinstance(taxonomy, dict):
+                continue
+            for tag in tags:
+                fact = taxonomy.get(tag)
+                units = fact.get("units") if isinstance(fact, dict) else None
+                if not isinstance(units, dict):
+                    continue
+                for currency, unit_rows in self._iter_currency_unit_rows(units):
+                    parsed = self._parse_net_income_rows(
+                        symbol,
+                        exchange,
+                        unit_rows,
+                        currency=currency,
+                    )
+                    if parsed:
+                        candidates.append(parsed[-10:])
+        if not candidates:
+            return []
+        return max(
+            candidates,
+            key=lambda rows: (rows[-1].fiscal_year_end_date, len(rows)),
+        )
 
     def _parse_net_income_rows(
         self,
         symbol: str,
         exchange: str,
         rows: list[object],
+        *,
+        currency: str = "USD",
     ) -> list[ProviderFundamentalsAnnual]:
         by_fiscal_year_end: dict[date, ProviderFundamentalsAnnual] = {}
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            if row.get("form") != "10-K" or row.get("fp") != "FY":
+            if row.get("form") not in ANNUAL_FORMS or row.get("fp") != "FY":
                 continue
             fiscal_year_end = self._read_date(row.get("end"))
+            fiscal_year_start = self._read_date(row.get("start"))
             filed_date = self._read_date(row.get("filed")) or date.today()
             value = row.get("val")
-            fiscal_year = row.get("fy")
             if fiscal_year_end is None or value is None:
+                continue
+            if not self._is_annual_duration(fiscal_year_start, fiscal_year_end):
                 continue
             existing = by_fiscal_year_end.get(fiscal_year_end)
             if existing is not None and existing.source_as_of_date >= filed_date:
@@ -118,15 +182,33 @@ class SecCompanyFactsFundamentalsProvider:
                 symbol=symbol,
                 exchange=exchange,
                 fiscal_year_end_date=fiscal_year_end,
-                fiscal_year_label=f"FY{fiscal_year or fiscal_year_end.year}",
+                fiscal_year_label=f"FY{fiscal_year_end.year}",
                 net_income=Decimal(str(value)),
-                net_income_currency="USD",
+                net_income_currency=currency,
                 source=self.provider_name,
                 source_as_of_date=filed_date,
                 data_status="partial",
             )
 
         return sorted(by_fiscal_year_end.values(), key=lambda item: item.fiscal_year_end_date)
+
+    @staticmethod
+    def _iter_currency_unit_rows(units: dict[str, object]) -> list[tuple[str, list[object]]]:
+        rows_by_currency = [
+            (currency, rows)
+            for currency, rows in units.items()
+            if isinstance(currency, str)
+            and len(currency) == 3
+            and currency.isalpha()
+            and isinstance(rows, list)
+        ]
+        return sorted(rows_by_currency, key=lambda item: (item[0] != "USD", item[0]))
+
+    @staticmethod
+    def _is_annual_duration(start: date | None, end: date) -> bool:
+        if start is None:
+            return True
+        return (end - start).days >= MIN_ANNUAL_DURATION_DAYS
 
     @staticmethod
     def _read_date(value: object) -> date | None:
