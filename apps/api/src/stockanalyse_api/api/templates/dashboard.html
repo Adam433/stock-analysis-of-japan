@@ -32,11 +32,29 @@
   header {
     padding: 16px 24px;
     border-bottom: 1px solid var(--panel-border);
-    display: flex; justify-content: space-between; align-items: baseline;
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 16px;
     background: var(--panel);
   }
   header h1 { font-size: 18px; margin: 0; }
   header .meta { color: var(--muted); font-size: 13px; }
+  .header-title { min-width: 0; }
+  .header-controls {
+    display: flex; align-items: center; justify-content: flex-end;
+    gap: 12px; flex-wrap: wrap;
+  }
+  .market-switch {
+    display: inline-grid; grid-template-columns: repeat(2, minmax(58px, 1fr));
+    gap: 2px; padding: 2px; border: 1px solid var(--panel-border);
+    background: var(--panel-subtle); border-radius: 8px;
+  }
+  .market-switch button {
+    border: 0; border-radius: 6px; background: transparent; color: var(--muted);
+    padding: 6px 10px; font-weight: 650; cursor: pointer;
+  }
+  .market-switch button.active {
+    background: var(--accent-strong); color: #06201d;
+  }
   main {
     padding: 16px 24px 24px;
     display: grid;
@@ -190,6 +208,7 @@
   .toast.show { opacity: 0.95; }
   @media (max-width: 980px) {
     header { align-items: flex-start; flex-direction: column; gap: 6px; }
+    .header-controls { justify-content: flex-start; }
     main { grid-template-columns: 1fr; padding: 12px; }
     .chart-card { position: static; }
     #chartHost { height: 420px; }
@@ -205,8 +224,16 @@
 </head>
 <body>
 <header>
-  <h1>stockAnalyse · 内部预览 Dashboard</h1>
-  <div class="meta" id="lastTradeMeta">加载中…</div>
+  <div class="header-title">
+    <h1>stockAnalyse · 内部预览 Dashboard</h1>
+  </div>
+  <div class="header-controls">
+    <div class="market-switch" id="marketSwitch" role="group" aria-label="市场切换">
+      <button type="button" data-market="jp" class="active">日本</button>
+      <button type="button" data-market="us">美股</button>
+    </div>
+    <div class="meta" id="lastTradeMeta">加载中…</div>
+  </div>
 </header>
 <main>
   <section>
@@ -215,6 +242,7 @@
       <div class="stat-grid" id="overviewGrid">
         <div class="stat"><div class="label">历史文件备份</div><div class="value" id="csvPoolSize">—</div><div class="sub">local archive</div></div>
         <div class="stat"><div class="label">DB 已入库 instrument</div><div class="value" id="instrumentsInDb">—</div><div class="sub" id="instrumentsWithMd">—</div></div>
+        <div class="stat"><div class="label">业绩数据</div><div class="value" id="fundamentalsRows">—</div><div class="sub" id="fundamentalsCoverage">—</div></div>
         <div class="stat"><div class="label">最新交易日</div><div class="value" id="latestDate">—</div><div class="sub" id="updatedCount">—</div></div>
         <div class="stat"><div class="label">指标最新日</div><div class="value" id="latestIndDate">—</div><div class="sub" id="indicatorsAtLatest">—</div></div>
         <div class="stat"><div class="label">最新日覆盖率</div><div class="value" id="coverageRatio">—</div><div class="sub">updated / with_md</div></div>
@@ -236,12 +264,16 @@
     <div class="card">
       <h2>筛选条件 (AND 关系)</h2>
       <label class="row">
-        <input type="checkbox" id="useRps" />
-        <span>启用 RPS 筛选 (所选窗口全部满足)</span>
+        <input type="checkbox" id="useRps" checked />
+        <span>启用 RPS 筛选</span>
       </label>
       <div class="field">
         <label>RPS 阈值</label>
-        <input type="number" id="rpsThreshold" min="0" max="100" value="90" />
+        <input type="number" id="rpsThreshold" min="0" max="100" value="85" />
+      </div>
+      <div class="field">
+        <label>RPS 达标窗口数</label>
+        <input type="number" id="rpsMinPassing" min="1" max="3" value="2" />
       </div>
       <div class="field">
         <label>RPS 窗口</label>
@@ -252,7 +284,7 @@
         </div>
       </div>
       <label class="row">
-        <input type="checkbox" id="useCupHandle" />
+        <input type="checkbox" id="useCupHandle" checked />
         <span>启用 欧奈尔 杯柄 (Cup-with-Handle) 筛选</span>
       </label>
       <div class="field-grid">
@@ -361,6 +393,32 @@
         <input type="checkbox" id="requireBreakoutVolume" />
         <span>要求突破日放量确认</span>
       </label>
+      <label class="row">
+        <input type="checkbox" id="useFundamentalGrowth" />
+        <span>启用净利润连续增长筛选</span>
+      </label>
+      <div class="field-grid">
+        <div class="field">
+          <label>净利润年份数</label>
+          <input type="number" id="fundamentalYears" min="2" max="10" value="3" />
+        </div>
+        <div class="field">
+          <label>最少增长次数</label>
+          <input type="number" id="fundamentalGrowthCount" min="1" max="9" value="2" />
+        </div>
+        <div class="field">
+          <label>最低 YoY 增长 %</label>
+          <input type="number" id="fundamentalMinYoyPct" min="-100" max="500" step="0.1" value="0" />
+        </div>
+        <div class="field">
+          <label>财报可见延迟天数</label>
+          <input type="number" id="fundamentalLagDays" min="0" max="365" value="120" />
+        </div>
+      </div>
+      <label class="row">
+        <input type="checkbox" id="fundamentalPositiveOnly" checked />
+        <span>净利润必须为正</span>
+      </label>
       <div class="field">
         <label>截止交易日 (留空 = 最新)</label>
         <input type="date" id="cutoffDate" />
@@ -381,7 +439,7 @@
         </div>
         <div class="field">
           <label>持有交易日</label>
-          <input type="number" id="backtestHoldingDays" min="1" max="500" value="120" />
+          <input type="number" id="backtestHoldingDays" min="1" max="500" value="130" />
         </div>
         <div class="field">
           <label>止损比例</label>
@@ -423,7 +481,7 @@
           <thead>
             <tr>
               <th>代码</th><th>名称</th>
-              <th>RPS50</th><th>RPS120</th><th>RPS250</th><th>杯柄</th>
+              <th>RPS50</th><th>RPS120</th><th>RPS250</th><th>杯柄</th><th>业绩</th>
             </tr>
           </thead>
           <tbody id="hitsBody"></tbody>
@@ -452,12 +510,14 @@
 
 <script>
   const state = {
+    market: 'jp',
     overview: null,
     hits: [],
     selectedInstrumentId: null,
     chart: null,
     candleSeries: null,
   };
+  const MARKET_LABELS = { jp: '日本', us: '美股' };
 
   function showToast(msg) {
     const el = document.getElementById('toast');
@@ -524,6 +584,17 @@
     };
   }
 
+  function getFundamentalGrowthParams() {
+    return {
+      enabled: document.getElementById('useFundamentalGrowth').checked,
+      min_years: readInt('fundamentalYears', 3),
+      min_growth_count: readInt('fundamentalGrowthCount', 2),
+      min_yoy_growth_pct: readFloat('fundamentalMinYoyPct', 0),
+      require_positive_net_income: document.getElementById('fundamentalPositiveOnly').checked,
+      reporting_lag_days: readInt('fundamentalLagDays', 120),
+    };
+  }
+
   function getCriteria() {
     const windows = Array.from(
       document.querySelectorAll('#rpsWindows input:checked')
@@ -533,21 +604,31 @@
       use_rps: document.getElementById('useRps').checked,
       rps_threshold: parseInt(document.getElementById('rpsThreshold').value || '0', 10),
       selected_rps_windows: windows,
+      min_rps_windows_passing: readInt('rpsMinPassing', 2),
       use_cup_handle: document.getElementById('useCupHandle').checked,
       cup_handle_params: getCupHandleParams(),
+      fundamental_growth_params: getFundamentalGrowthParams(),
       trade_date: cutoffRaw || null,
+      market: state.market,
     };
   }
 
   async function loadOverview() {
     try {
-      const data = await api('GET', '/dashboard/api/overview');
+      const data = await api(
+        'GET',
+        `/dashboard/api/overview?market=${encodeURIComponent(state.market)}`
+      );
       state.overview = data.overview;
       const o = data.overview;
       document.getElementById('csvPoolSize').textContent = o.csv_pool_size.toLocaleString();
       document.getElementById('instrumentsInDb').textContent = o.instruments_in_db.toLocaleString();
       document.getElementById('instrumentsWithMd').textContent =
         `有行情 ${o.instruments_with_market_data.toLocaleString()}`;
+      document.getElementById('fundamentalsRows').textContent =
+        o.fundamentals_rows.toLocaleString();
+      document.getElementById('fundamentalsCoverage').textContent =
+        `有净利润 ${o.instruments_with_fundamentals.toLocaleString()}`;
       document.getElementById('latestDate').textContent = o.latest_trade_date || '—';
       document.getElementById('updatedCount').textContent =
         `已更新 ${o.instruments_updated_to_latest.toLocaleString()}`;
@@ -557,9 +638,9 @@
       document.getElementById('coverageRatio').textContent =
         (o.coverage_ratio * 100).toFixed(1) + '%';
       document.getElementById('lastTradeMeta').textContent = o.latest_trade_date
-        ? `行情截至 ${o.latest_trade_date} · 指标 ${o.latest_indicator_date || '—'} · ` +
+        ? `${MARKET_LABELS[state.market]} · 行情截至 ${o.latest_trade_date} · 指标 ${o.latest_indicator_date || '—'} · ` +
           `DB ${o.instruments_with_market_data}/${o.instruments_in_db}`
-        : '尚无数据';
+        : `${MARKET_LABELS[state.market]} · 尚无数据`;
       seedBacktestDates(o.latest_trade_date);
     } catch (err) {
       showToast('加载概览失败: ' + err.message);
@@ -683,7 +764,8 @@
     }[action];
     setMaintenanceButtons(true, action);
     try {
-      const data = await api('POST', config.path, config.body);
+      const body = Object.assign({ market: state.market }, config.body || {});
+      const data = await api('POST', config.path, body);
       if (!data.started) showToast('已有任务在运行');
       pollUpdate();
     } catch (err) {
@@ -709,6 +791,7 @@
         <td>${hit.rps_120 ?? '—'}</td>
         <td>${hit.rps_250 ?? '—'}</td>
         <td>${hit.cup_handle_passed ? `<span class="badge warn">突破 ${hit.cup_handle_breakout_date || ''}</span>` : '—'}</td>
+        <td>${hit.fundamental_growth_years ? `<span class="badge ok">${hit.fundamental_growth_count ?? '—'}/${Math.max(hit.fundamental_growth_years - 1, 0)} ${hit.fundamental_growth_latest_year || ''}</span>` : '—'}</td>
       `;
       tr.addEventListener('click', () => {
         document.querySelectorAll('#hitsBody tr.selected').forEach((row) =>
@@ -788,9 +871,12 @@
         start_date: startDate,
         end_date: endDate,
         rps_threshold: criteria.rps_threshold,
+        market: criteria.market,
         selected_rps_windows: criteria.selected_rps_windows,
+        min_rps_windows_passing: criteria.min_rps_windows_passing,
         cup_handle_params: criteria.cup_handle_params,
-        holding_days: readInt('backtestHoldingDays', 120),
+        fundamental_growth_params: criteria.fundamental_growth_params,
+        holding_days: readInt('backtestHoldingDays', 130),
         stop_loss_pct: readFloat('backtestStopLoss', -0.08),
         portfolio_cap: readInt('backtestPortfolioCap', 20),
         entry_deferral_window_days: readInt('backtestEntryWindow', 5),
@@ -806,6 +892,36 @@
       btn.disabled = false;
       btn.textContent = '回测当前参数';
     }
+  }
+
+  function resetMarketScopedViews() {
+    renderHits([]);
+    state.selectedInstrumentId = null;
+    document.getElementById('hitsEmpty').textContent = '尚未运行筛选';
+    document.getElementById('cutoffDate').value = '';
+    document.getElementById('backtestStartDate').value = '';
+    document.getElementById('backtestEndDate').value = '';
+    document.getElementById('backtestStatus').textContent = '尚未运行';
+    document.getElementById('backtestStats').style.display = 'none';
+    document.getElementById('backtestTradesBody').innerHTML = '';
+    document.getElementById('chartTitle').textContent = '选择左侧股票查看 K 线';
+    document.getElementById('chartPattern').textContent = '';
+    if (state.candleSeries) {
+      state.candleSeries.setData([]);
+      state.candleSeries.setMarkers([]);
+    }
+  }
+
+  function setMarket(market) {
+    if (market === state.market) return;
+    state.market = market;
+    document.querySelectorAll('#marketSwitch button').forEach((button) => {
+      const active = button.dataset.market === market;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    resetMarketScopedViews();
+    loadOverview();
   }
 
   function ensureChart() {
@@ -893,6 +1009,10 @@
   document.getElementById('runRefresh').addEventListener('click', () => runMaintenance('refresh'));
   document.getElementById('runMaterialize').addEventListener('click', () => runMaintenance('materialize'));
   document.getElementById('runStrategyBacktest').addEventListener('click', runStrategyBacktest);
+  document.querySelectorAll('#marketSwitch button').forEach((button) => {
+    button.addEventListener('click', () => setMarket(button.dataset.market));
+    button.setAttribute('aria-pressed', button.classList.contains('active') ? 'true' : 'false');
+  });
   pollUpdate();
 
   document.querySelectorAll('#rpsWindows label').forEach((label) => {

@@ -11,6 +11,7 @@ from sqlalchemy import distinct, func, select
 from stockanalyse_api.config.settings import (
     get_local_csv_raw_dir,
 )
+from stockanalyse_api.domain.fundamentals.models import FundamentalsAnnual
 from stockanalyse_api.domain.indicators.models import DerivedIndicatorDaily
 from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
@@ -22,6 +23,10 @@ APPROVED_RPS_WINDOWS = (50, 120, 250)
 DEFAULT_RPS_THRESHOLD = 90
 DEFAULT_CUP_LOOKBACK_DAYS = 520
 DEFAULT_CHART_WINDOW_DAYS = 250
+MARKET_EXCHANGES = {
+    "jp": ("TSE",),
+    "us": ("US",),
+}
 
 # O'Neil cup-with-handle parameters (conservative defaults).
 CUP_MIN_DEPTH_PCT = Decimal("12")
@@ -97,11 +102,49 @@ class CupHandleParams:
 DEFAULT_CUP_HANDLE_PARAMS = CupHandleParams()
 
 
+@dataclass(frozen=True, slots=True)
+class FundamentalGrowthParams:
+    enabled: bool = False
+    min_years: int = 3
+    min_growth_count: int | None = None
+    min_yoy_growth_pct: Decimal = Decimal("0")
+    require_positive_net_income: bool = True
+    reporting_lag_days: int = 120
+
+    @property
+    def effective_min_growth_count(self) -> int:
+        return self.min_growth_count if self.min_growth_count is not None else self.min_years - 1
+
+    def to_dict(self) -> dict[str, object]:
+        payload = asdict(self)
+        for key, value in payload.items():
+            if isinstance(value, Decimal):
+                payload[key] = str(value)
+        payload["effective_min_growth_count"] = self.effective_min_growth_count
+        return payload
+
+
+DEFAULT_FUNDAMENTAL_GROWTH_PARAMS = FundamentalGrowthParams()
+
+
+def normalize_market(value: str | None) -> str:
+    market = (value or "jp").lower()
+    if market not in MARKET_EXCHANGES:
+        raise ValueError("market must be jp or us.")
+    return market
+
+
+def _market_exchanges(market: str | None) -> tuple[str, ...]:
+    return MARKET_EXCHANGES[normalize_market(market)]
+
+
 @dataclass(slots=True)
 class OverviewSnapshot:
     csv_pool_size: int
     instruments_in_db: int
     instruments_with_market_data: int
+    fundamentals_rows: int
+    instruments_with_fundamentals: int
     instruments_updated_to_latest: int
     instruments_with_indicators_at_latest: int
     latest_trade_date: str | None
@@ -123,8 +166,13 @@ class ScreenHit:
     rps_120: str | None
     rps_250: str | None
     rps_passed: bool
+    rps_pass_count: int
     cup_handle_passed: bool
     cup_handle_breakout_date: str | None
+    fundamental_growth_passed: bool
+    fundamental_growth_years: int | None
+    fundamental_growth_count: int | None
+    fundamental_growth_latest_year: str | None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -148,30 +196,83 @@ class _CupCandidate:
     cup_depth_pct: float
 
 
-def get_overview(session) -> OverviewSnapshot:
+def get_overview(session, *, market: str | None = None) -> OverviewSnapshot:
+    exchanges = _market_exchanges(market)
     csv_pool_size = _count_local_csv_pool()
 
-    instruments_in_db = session.execute(select(func.count(Instrument.id))).scalar_one() or 0
-    instruments_with_market_data = session.execute(
-        select(func.count(distinct(MarketDataDaily.instrument_id)))
+    instruments_in_db = session.execute(
+        select(func.count(Instrument.id)).where(Instrument.exchange.in_(exchanges))
     ).scalar_one() or 0
-    latest_trade_date = session.execute(select(func.max(MarketDataDaily.trade_date))).scalar_one()
+    if not instruments_in_db:
+        return OverviewSnapshot(
+            csv_pool_size=csv_pool_size,
+            instruments_in_db=0,
+            instruments_with_market_data=0,
+            fundamentals_rows=0,
+            instruments_with_fundamentals=0,
+            instruments_updated_to_latest=0,
+            instruments_with_indicators_at_latest=0,
+            latest_trade_date=None,
+            latest_indicator_date=None,
+            coverage_ratio=0.0,
+        )
+
+    has_market_data = (
+        select(MarketDataDaily.id)
+        .where(MarketDataDaily.instrument_id == Instrument.id)
+        .exists()
+    )
+    instrument_id_query = select(Instrument.id).where(Instrument.exchange.in_(exchanges))
+    instruments_with_market_data = session.execute(
+        select(func.count(Instrument.id)).where(
+            Instrument.exchange.in_(exchanges),
+            has_market_data,
+        )
+    ).scalar_one() or 0
+    fundamentals_rows = session.execute(
+        select(func.count(FundamentalsAnnual.id)).where(
+            FundamentalsAnnual.instrument_id.in_(instrument_id_query)
+        )
+    ).scalar_one() or 0
+    instruments_with_fundamentals = session.execute(
+        select(func.count(distinct(FundamentalsAnnual.instrument_id))).where(
+            FundamentalsAnnual.instrument_id.in_(instrument_id_query),
+            FundamentalsAnnual.net_income.is_not(None),
+        )
+    ).scalar_one() or 0
+    latest_trade_date = session.execute(
+        select(MarketDataDaily.trade_date)
+        .join(Instrument, Instrument.id == MarketDataDaily.instrument_id)
+        .where(Instrument.exchange.in_(exchanges))
+        .order_by(MarketDataDaily.trade_date.desc())
+        .limit(1)
+    ).scalar_one_or_none()
     latest_indicator_date = session.execute(
-        select(func.max(DerivedIndicatorDaily.trade_date))
-    ).scalar_one()
+        select(DerivedIndicatorDaily.trade_date)
+        .join(Instrument, Instrument.id == DerivedIndicatorDaily.instrument_id)
+        .where(Instrument.exchange.in_(exchanges))
+        .order_by(DerivedIndicatorDaily.trade_date.desc())
+        .limit(1)
+    ).scalar_one_or_none()
 
     updated_to_latest = 0
     indicators_at_latest = 0
     if latest_trade_date is not None:
         updated_to_latest = session.execute(
-            select(func.count(distinct(MarketDataDaily.instrument_id))).where(
-                MarketDataDaily.trade_date == latest_trade_date
+            select(func.count(distinct(MarketDataDaily.instrument_id)))
+            .join(Instrument, Instrument.id == MarketDataDaily.instrument_id)
+            .where(
+                Instrument.exchange.in_(exchanges),
+                MarketDataDaily.trade_date == latest_trade_date,
             )
         ).scalar_one() or 0
     if latest_indicator_date is not None:
         indicators_at_latest = session.execute(
-            select(func.count(distinct(DerivedIndicatorDaily.instrument_id))).where(
-                DerivedIndicatorDaily.trade_date == latest_indicator_date
+            select(func.count(distinct(DerivedIndicatorDaily.instrument_id)))
+            .join(Instrument, Instrument.id == DerivedIndicatorDaily.instrument_id)
+            .where(
+                Instrument.exchange.in_(exchanges),
+                DerivedIndicatorDaily.trade_date == latest_indicator_date,
             )
         ).scalar_one() or 0
 
@@ -182,6 +283,8 @@ def get_overview(session) -> OverviewSnapshot:
         csv_pool_size=csv_pool_size,
         instruments_in_db=instruments_in_db,
         instruments_with_market_data=instruments_with_market_data,
+        fundamentals_rows=fundamentals_rows,
+        instruments_with_fundamentals=instruments_with_fundamentals,
         instruments_updated_to_latest=updated_to_latest,
         instruments_with_indicators_at_latest=indicators_at_latest,
         latest_trade_date=latest_trade_date.isoformat() if latest_trade_date else None,
@@ -277,10 +380,52 @@ def _normalize_rps_windows(values: list[int]) -> list[int]:
     return cleaned
 
 
-def _resolve_target_trade_date(session, requested: date | None) -> date | None:
+def _normalize_min_rps_windows_passing(value: int, selected_windows: list[int]) -> int:
+    if value < 1:
+        raise ValueError("min_rps_windows_passing must be greater than or equal to 1.")
+    if selected_windows and value > len(selected_windows):
+        raise ValueError("min_rps_windows_passing cannot exceed selected RPS window count.")
+    return value
+
+
+def _normalize_fundamental_growth_params(
+    params: FundamentalGrowthParams | None = None,
+) -> FundamentalGrowthParams:
+    params = params or DEFAULT_FUNDAMENTAL_GROWTH_PARAMS
+    if params.min_years < 2:
+        raise ValueError("fundamental min_years must be greater than or equal to 2.")
+    if params.reporting_lag_days < 0:
+        raise ValueError("fundamental reporting_lag_days must be greater than or equal to 0.")
+    if params.min_yoy_growth_pct < Decimal("-100"):
+        raise ValueError("fundamental min_yoy_growth_pct must be greater than or equal to -100.")
+    if params.effective_min_growth_count < 1:
+        raise ValueError("fundamental min_growth_count must be greater than or equal to 1.")
+    if params.effective_min_growth_count > params.min_years - 1:
+        raise ValueError("fundamental min_growth_count cannot exceed min_years - 1.")
+    return params
+
+
+def _resolve_target_trade_date(
+    session,
+    requested: date | None,
+    *,
+    market: str | None = None,
+) -> date | None:
     if requested is not None:
         return requested
-    return session.execute(select(func.max(DerivedIndicatorDaily.trade_date))).scalar_one()
+    exchanges = _market_exchanges(market)
+    has_market_instrument = session.execute(
+        select(Instrument.id).where(Instrument.exchange.in_(exchanges)).limit(1)
+    ).scalar_one_or_none()
+    if has_market_instrument is None:
+        return None
+    return session.execute(
+        select(DerivedIndicatorDaily.trade_date)
+        .join(Instrument, Instrument.id == DerivedIndicatorDaily.instrument_id)
+        .where(Instrument.exchange.in_(exchanges))
+        .order_by(DerivedIndicatorDaily.trade_date.desc())
+        .limit(1)
+    ).scalar_one_or_none()
 
 
 def screen_universe(
@@ -289,14 +434,22 @@ def screen_universe(
     use_rps: bool,
     rps_threshold: int,
     selected_rps_windows: list[int],
-    use_cup_handle: bool,
+    min_rps_windows_passing: int = 1,
+    use_cup_handle: bool = False,
     cup_handle_params: CupHandleParams | None = None,
+    fundamental_growth_params: FundamentalGrowthParams | None = None,
     trade_date: date | None = None,
+    market: str | None = None,
 ) -> dict[str, object]:
+    resolved_market = normalize_market(market)
+    exchanges = _market_exchanges(resolved_market)
     resolved_cup_params = (
         _normalize_cup_handle_params(cup_handle_params) if use_cup_handle else DEFAULT_CUP_HANDLE_PARAMS
     )
-    target_date = _resolve_target_trade_date(session, trade_date)
+    resolved_fundamental_params = _normalize_fundamental_growth_params(
+        fundamental_growth_params
+    )
+    target_date = _resolve_target_trade_date(session, trade_date, market=resolved_market)
     if target_date is None:
         return {
             "trade_date": None,
@@ -304,14 +457,21 @@ def screen_universe(
                 "use_rps": use_rps,
                 "rps_threshold": rps_threshold,
                 "selected_rps_windows": _normalize_rps_windows(selected_rps_windows),
+                "min_rps_windows_passing": min_rps_windows_passing,
                 "use_cup_handle": use_cup_handle,
                 "cup_handle_params": resolved_cup_params.to_dict(),
+                "fundamental_growth_params": resolved_fundamental_params.to_dict(),
+                "market": resolved_market,
             },
             "total_evaluated": 0,
             "hits": [],
         }
 
     selected_windows = _normalize_rps_windows(selected_rps_windows)
+    resolved_min_rps_passing = _normalize_min_rps_windows_passing(
+        min_rps_windows_passing,
+        selected_windows,
+    )
     if use_rps and not selected_windows:
         # User chose RPS but no window — treat as no-op AND condition that fails everything.
         return {
@@ -320,8 +480,11 @@ def screen_universe(
                 "use_rps": use_rps,
                 "rps_threshold": rps_threshold,
                 "selected_rps_windows": [],
+                "min_rps_windows_passing": resolved_min_rps_passing,
                 "use_cup_handle": use_cup_handle,
                 "cup_handle_params": resolved_cup_params.to_dict(),
+                "fundamental_growth_params": resolved_fundamental_params.to_dict(),
+                "market": resolved_market,
             },
             "total_evaluated": 0,
             "hits": [],
@@ -330,12 +493,15 @@ def screen_universe(
     rows = session.execute(
         select(DerivedIndicatorDaily, Instrument)
         .join(Instrument, Instrument.id == DerivedIndicatorDaily.instrument_id)
-        .where(DerivedIndicatorDaily.trade_date == target_date)
+        .where(
+            DerivedIndicatorDaily.trade_date == target_date,
+            Instrument.exchange.in_(exchanges),
+        )
         .order_by(Instrument.symbol.asc())
     ).all()
 
     threshold_decimal = Decimal(rps_threshold)
-    candidates: list[tuple[DerivedIndicatorDaily, Instrument, bool]] = []
+    candidates: list[tuple[DerivedIndicatorDaily, Instrument, bool, int]] = []
 
     for indicator_row, instrument in rows:
         rps_value_by_window = {
@@ -344,30 +510,33 @@ def screen_universe(
             250: indicator_row.rps_250,
         }
 
+        rps_pass_count = sum(
+            1
+            for window in selected_windows
+            if rps_value_by_window[window] is not None
+            and rps_value_by_window[window] >= threshold_decimal
+        )
         if use_rps:
-            rps_passed = all(
-                rps_value_by_window[w] is not None and rps_value_by_window[w] >= threshold_decimal
-                for w in selected_windows
-            )
+            rps_passed = rps_pass_count >= resolved_min_rps_passing
         else:
             rps_passed = True
 
         if use_rps and not rps_passed:
             continue
 
-        candidates.append((indicator_row, instrument, rps_passed))
+        candidates.append((indicator_row, instrument, rps_passed, rps_pass_count))
 
     candles_by_instrument: dict[int, list[_PatternCandle]] = {}
     if use_cup_handle and candidates:
         candles_by_instrument = _load_candles_by_instrument(
             session,
-            instrument_ids=[instrument.id for _, instrument, _ in candidates],
+            instrument_ids=[instrument.id for _, instrument, _, _ in candidates],
             cutoff=target_date,
             limit=resolved_cup_params.effective_lookback_days,
         )
 
     hits: list[ScreenHit] = []
-    for indicator_row, instrument, rps_passed in candidates:
+    for indicator_row, instrument, rps_passed, rps_pass_count in candidates:
         cup_breakout_date: date | None = None
         if use_cup_handle:
             candles = candles_by_instrument.get(instrument.id, [])
@@ -378,6 +547,15 @@ def screen_universe(
             cup_handle_passed = True
         else:
             cup_handle_passed = False
+
+        fundamental_meta = _evaluate_fundamental_growth(
+            session,
+            instrument_id=instrument.id,
+            signal_date=target_date,
+            params=resolved_fundamental_params,
+        )
+        if resolved_fundamental_params.enabled and not fundamental_meta["passed"]:
+            continue
 
         hits.append(
             ScreenHit(
@@ -390,10 +568,15 @@ def screen_universe(
                 rps_120=_format_decimal(indicator_row.rps_120, "0.01"),
                 rps_250=_format_decimal(indicator_row.rps_250, "0.01"),
                 rps_passed=rps_passed,
+                rps_pass_count=rps_pass_count,
                 cup_handle_passed=cup_handle_passed,
                 cup_handle_breakout_date=(
                     cup_breakout_date.isoformat() if cup_breakout_date else None
                 ),
+                fundamental_growth_passed=bool(fundamental_meta["passed"]),
+                fundamental_growth_years=fundamental_meta["available_years"],
+                fundamental_growth_count=fundamental_meta["growth_count"],
+                fundamental_growth_latest_year=fundamental_meta["latest_fiscal_year"],
             )
         )
 
@@ -403,8 +586,11 @@ def screen_universe(
             "use_rps": use_rps,
             "rps_threshold": rps_threshold,
             "selected_rps_windows": selected_windows,
+            "min_rps_windows_passing": resolved_min_rps_passing,
             "use_cup_handle": use_cup_handle,
             "cup_handle_params": resolved_cup_params.to_dict(),
+            "fundamental_growth_params": resolved_fundamental_params.to_dict(),
+            "market": resolved_market,
         },
         "total_evaluated": len(rows),
         "hits": [hit.to_dict() for hit in hits],
@@ -419,9 +605,11 @@ def get_chart_with_markers(
     rps_threshold: int,
     selected_rps_windows: list[int],
     use_cup_handle: bool,
+    min_rps_windows_passing: int = 1,
     cup_handle_params: CupHandleParams | None = None,
     trade_date: date | None = None,
     window_days: int = DEFAULT_CHART_WINDOW_DAYS,
+    market: str | None = None,
 ) -> dict[str, object] | None:
     resolved_cup_params = (
         _normalize_cup_handle_params(cup_handle_params) if use_cup_handle else DEFAULT_CUP_HANDLE_PARAMS
@@ -430,7 +618,10 @@ def get_chart_with_markers(
     if instrument is None:
         return None
 
-    target_date = _resolve_target_trade_date(session, trade_date)
+    chart_market = market
+    if chart_market is None:
+        chart_market = "us" if instrument.exchange == "US" else "jp"
+    target_date = _resolve_target_trade_date(session, trade_date, market=chart_market)
     if target_date is None:
         return None
 
@@ -457,17 +648,22 @@ def get_chart_with_markers(
     ).scalars().all()
 
     selected_windows = _normalize_rps_windows(selected_rps_windows)
+    resolved_min_rps_passing = _normalize_min_rps_windows_passing(
+        min_rps_windows_passing,
+        selected_windows,
+    )
     threshold_decimal = Decimal(rps_threshold)
 
     rps_marker_dates: list[date] = []
     if use_rps and selected_windows:
         for row in indicator_rows:
             rps_values = {50: row.rps_50, 120: row.rps_120, 250: row.rps_250}
-            passes = all(
-                rps_values[w] is not None and rps_values[w] >= threshold_decimal
-                for w in selected_windows
+            pass_count = sum(
+                1
+                for window in selected_windows
+                if rps_values[window] is not None and rps_values[window] >= threshold_decimal
             )
-            if passes:
+            if pass_count >= resolved_min_rps_passing:
                 rps_marker_dates.append(row.trade_date)
 
     cup_breakout_date: date | None = None
@@ -623,6 +819,75 @@ def _load_candles_by_instrument(
             ]
 
     return dict(candles_by_instrument)
+
+
+def _evaluate_fundamental_growth(
+    session,
+    *,
+    instrument_id: int,
+    signal_date: date,
+    params: FundamentalGrowthParams,
+) -> dict[str, object]:
+    if not params.enabled:
+        return {
+            "passed": True,
+            "available_years": None,
+            "growth_count": None,
+            "latest_fiscal_year": None,
+        }
+
+    available_cutoff = signal_date - timedelta(days=params.reporting_lag_days)
+    rows = list(
+        session.execute(
+            select(FundamentalsAnnual)
+            .where(
+                FundamentalsAnnual.instrument_id == instrument_id,
+                FundamentalsAnnual.fiscal_year_end_date <= available_cutoff,
+                FundamentalsAnnual.net_income.is_not(None),
+                FundamentalsAnnual.data_status != "missing",
+            )
+            .order_by(FundamentalsAnnual.fiscal_year_end_date.desc())
+            .limit(params.min_years)
+        ).scalars()
+    )
+    rows.reverse()
+    if len(rows) < params.min_years:
+        return {
+            "passed": False,
+            "available_years": len(rows),
+            "growth_count": None,
+            "latest_fiscal_year": rows[-1].fiscal_year_label if rows else None,
+        }
+
+    net_income_values = [row.net_income for row in rows]
+    if params.require_positive_net_income and any(
+        value is None or value <= 0 for value in net_income_values
+    ):
+        return {
+            "passed": False,
+            "available_years": len(rows),
+            "growth_count": 0,
+            "latest_fiscal_year": rows[-1].fiscal_year_label,
+        }
+
+    growth_multiplier = Decimal("1") + (params.min_yoy_growth_pct / Decimal("100"))
+    growth_count = 0
+    for previous, current in zip(net_income_values, net_income_values[1:]):
+        if previous is None or current is None:
+            continue
+        if previous > 0:
+            passed_growth = current >= previous * growth_multiplier
+        else:
+            passed_growth = current > previous
+        if passed_growth:
+            growth_count += 1
+
+    return {
+        "passed": growth_count >= params.effective_min_growth_count,
+        "available_years": len(rows),
+        "growth_count": growth_count,
+        "latest_fiscal_year": rows[-1].fiscal_year_label,
+    }
 
 
 def _detect_cup_handle_pattern(

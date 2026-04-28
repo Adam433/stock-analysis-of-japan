@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from stockanalyse_api.services.ingestion.providers.alpha_vantage_daily_adjusted_provider import (
+    AlphaVantageDailyAdjustedProvider,
+)
 from stockanalyse_api.services.ingestion.providers.local_csv_directory_provider import (
     LocalCsvDirectoryProvider,
+)
+from stockanalyse_api.services.ingestion.providers.sec_companyfacts_fundamentals_provider import (
+    SecCompanyFactsFundamentalsProvider,
 )
 from stockanalyse_api.services.ingestion.providers.static_provider import StaticFixtureProvider
 from stockanalyse_api.services.ingestion.providers.yahoo_finance_chart_provider import (
@@ -13,6 +19,11 @@ from stockanalyse_api.services.ingestion.providers.yahoo_finance_fundamentals_pr
     YahooFinanceFundamentalsProvider,
 )
 
+ALLOWED_MARKET_SCOPES = {
+    "jp_equities_eod",
+    "us_equities_eod",
+    "us_equities_fundamentals",
+}
 MVP_MARKET_SCOPE = "jp_equities_eod"
 BACKEND_ONLY_BOUNDARY = "backend_only"
 
@@ -36,13 +47,19 @@ def build_ingestion_provider(
         if symbols_file is None:
             raise ValueError("symbols_file is required for the yahoo_finance_chart provider.")
         provider = YahooFinanceChartProvider(symbols_file=symbols_file)
+    elif provider_name == "alpha_vantage_daily_adjusted":
+        if symbols_file is None:
+            raise ValueError("symbols_file is required for the alpha_vantage_daily_adjusted provider.")
+        provider = AlphaVantageDailyAdjustedProvider(symbols_file=symbols_file)
     elif provider_name == "yahoo_finance_fundamentals":
         provider = YahooFinanceFundamentalsProvider()
+    elif provider_name == "sec_companyfacts":
+        provider = SecCompanyFactsFundamentalsProvider()
     else:
         raise ValueError(f"Unsupported provider: {provider_name}")
 
     if getattr(provider, "credential_boundary", None) != BACKEND_ONLY_BOUNDARY:
         raise ValueError("Provider credential boundary must remain backend_only.")
-    if getattr(provider, "market_scope", None) != MVP_MARKET_SCOPE:
-        raise ValueError("Provider market scope must remain Japan-equity EOD for MVP.")
+    if getattr(provider, "market_scope", None) not in ALLOWED_MARKET_SCOPES:
+        raise ValueError("Provider market scope is not enabled.")
     return provider

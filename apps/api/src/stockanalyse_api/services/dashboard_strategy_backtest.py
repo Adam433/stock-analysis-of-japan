@@ -8,8 +8,13 @@ from statistics import median
 from sqlalchemy import distinct, select
 
 from stockanalyse_api.domain.indicators.models import DerivedIndicatorDaily
+from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
-from stockanalyse_api.services.dashboard import CupHandleParams, screen_universe
+from stockanalyse_api.services.dashboard import CupHandleParams
+from stockanalyse_api.services.dashboard import FundamentalGrowthParams
+from stockanalyse_api.services.dashboard import _market_exchanges
+from stockanalyse_api.services.dashboard import normalize_market
+from stockanalyse_api.services.dashboard import screen_universe
 from stockanalyse_api.services.market_data_adjustments import adjusted_close
 from stockanalyse_api.services.market_data_adjustments import adjusted_open
 from stockanalyse_api.services.market_data_adjustments import is_complete_market_row
@@ -93,13 +98,27 @@ def _hit_rps_score(hit: dict[str, object], selected_windows: list[int]) -> Decim
     return max(values)
 
 
-def _load_trade_dates(session, *, start_date: date, end_date: date) -> list[date]:
+def _load_trade_dates(
+    session,
+    *,
+    start_date: date,
+    end_date: date,
+    market: str | None,
+) -> list[date]:
+    exchanges = _market_exchanges(market)
+    has_market_instrument = session.execute(
+        select(Instrument.id).where(Instrument.exchange.in_(exchanges)).limit(1)
+    ).scalar_one_or_none()
+    if has_market_instrument is None:
+        return []
     return list(
         session.execute(
             select(distinct(DerivedIndicatorDaily.trade_date))
+            .join(Instrument, Instrument.id == DerivedIndicatorDaily.instrument_id)
             .where(
                 DerivedIndicatorDaily.trade_date >= start_date,
                 DerivedIndicatorDaily.trade_date <= end_date,
+                Instrument.exchange.in_(exchanges),
             )
             .order_by(DerivedIndicatorDaily.trade_date.asc())
         ).scalars()
@@ -247,7 +266,10 @@ def run_cup_handle_rps_backtest(
     rps_threshold: int,
     selected_rps_windows: list[int],
     cup_handle_params: CupHandleParams,
-    holding_days: int = 120,
+    min_rps_windows_passing: int = 1,
+    fundamental_growth_params: FundamentalGrowthParams | None = None,
+    market: str | None = None,
+    holding_days: int = 130,
     stop_loss_pct: Decimal = Decimal("-0.08"),
     portfolio_cap: int = 20,
     entry_deferral_window_days: int = 5,
@@ -266,7 +288,13 @@ def run_cup_handle_rps_backtest(
     if max_trades_returned < 0:
         raise ValueError("max_trades_returned must be greater than or equal to 0.")
 
-    trade_dates = _load_trade_dates(session, start_date=start_date, end_date=end_date)
+    resolved_market = normalize_market(market)
+    trade_dates = _load_trade_dates(
+        session,
+        start_date=start_date,
+        end_date=end_date,
+        market=resolved_market,
+    )
     signal_days: list[CupHandleRpsSignalDay] = []
     completed_trades: list[CupHandleRpsTrade] = []
     excluded: list[dict[str, object]] = []
@@ -280,9 +308,12 @@ def run_cup_handle_rps_backtest(
             use_rps=True,
             rps_threshold=rps_threshold,
             selected_rps_windows=selected_rps_windows,
+            min_rps_windows_passing=min_rps_windows_passing,
             use_cup_handle=True,
             cup_handle_params=cup_handle_params,
+            fundamental_growth_params=fundamental_growth_params,
             trade_date=signal_date,
+            market=resolved_market,
         )
         hits = list(screen_result["hits"])
         total_candidates_evaluated += int(screen_result["total_evaluated"])
@@ -360,7 +391,14 @@ def run_cup_handle_rps_backtest(
         parameters={
             "rps_threshold": rps_threshold,
             "selected_rps_windows": selected_rps_windows,
+            "min_rps_windows_passing": min_rps_windows_passing,
+            "market": resolved_market,
             "cup_handle_params": cup_handle_params.to_dict(),
+            "fundamental_growth_params": (
+                fundamental_growth_params.to_dict()
+                if fundamental_growth_params is not None
+                else None
+            ),
             "holding_days": holding_days,
             "stop_loss_pct": f"{stop_loss_pct:.4f}",
             "portfolio_cap": portfolio_cap,

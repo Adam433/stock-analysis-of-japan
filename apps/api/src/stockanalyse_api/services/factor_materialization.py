@@ -12,8 +12,8 @@ from sqlalchemy import select
 
 # Ensure SQLAlchemy relationship targets are registered for direct service usage.
 import stockanalyse_api.domain.fundamentals.models  # noqa: F401
-import stockanalyse_api.domain.instruments.models  # noqa: F401
 from stockanalyse_api.domain.indicators.models import DerivedIndicatorDaily
+from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
 from stockanalyse_api.services.market_data_adjustments import adjusted_close
 from stockanalyse_api.services.market_data_adjustments import has_extreme_price_gap
@@ -114,6 +114,10 @@ def _preload_price_history(session, since_date: date) -> dict[int, deque[PricePo
     return price_history
 
 
+def _empty_date_returns():
+    return {lookback: defaultdict(dict) for lookback in RPS_LOOKBACKS}
+
+
 def materialize_derived_indicator_facts(
     session,
     *,
@@ -136,9 +140,7 @@ def materialize_derived_indicator_facts(
     )
     current_trade_date: date | None = None
     current_date_facts: dict[int, dict[str, Decimal | None]] = {}
-    current_date_returns: dict[int, dict[int, Decimal]] = {
-        lookback: {} for lookback in RPS_LOOKBACKS
-    }
+    current_date_returns = _empty_date_returns()
     inserted = 0
     updated = 0
     processed_trade_dates = 0
@@ -163,7 +165,7 @@ def materialize_derived_indicator_facts(
                     }
                 )
             current_date_facts = {}
-            current_date_returns = {lookback: {} for lookback in RPS_LOOKBACKS}
+            current_date_returns = _empty_date_returns()
             return
 
         existing_rows = {
@@ -177,14 +179,15 @@ def materialize_derived_indicator_facts(
             for row in existing_rows.values():
                 session.delete(row)
             processed_trade_dates += 1
-            current_date_returns = {lookback: {} for lookback in RPS_LOOKBACKS}
+            current_date_returns = _empty_date_returns()
             return
 
-        for lookback, returns_by_instrument in current_date_returns.items():
-            percentile_scores = _percentile_scores(returns_by_instrument)
+        for lookback, returns_by_exchange in current_date_returns.items():
             field_name = f"rps_{lookback}"
-            for instrument_id, score in percentile_scores.items():
-                current_date_facts[instrument_id][field_name] = score
+            for returns_by_instrument in returns_by_exchange.values():
+                percentile_scores = _percentile_scores(returns_by_instrument)
+                for instrument_id, score in percentile_scores.items():
+                    current_date_facts[instrument_id][field_name] = score
 
         for instrument_id, row in existing_rows.items():
             if instrument_id not in current_date_facts:
@@ -224,7 +227,7 @@ def materialize_derived_indicator_facts(
                 )
 
         current_date_facts = {}
-        current_date_returns = {lookback: {} for lookback in RPS_LOOKBACKS}
+        current_date_returns = _empty_date_returns()
 
     trade_dates_query = (
         select(MarketDataDaily.trade_date)
@@ -238,17 +241,18 @@ def materialize_derived_indicator_facts(
     for trade_date in trade_dates:
         current_trade_date = trade_date
         market_rows = session.execute(
-            select(MarketDataDaily)
+            select(MarketDataDaily, Instrument.exchange)
+            .join(Instrument, Instrument.id == MarketDataDaily.instrument_id)
             .where(
                 MarketDataDaily.trade_date == trade_date,
                 MarketDataDaily.data_status == "complete",
                 MarketDataDaily.volume > 0,
                 MarketDataDaily.close.is_not(None),
             )
-            .order_by(MarketDataDaily.instrument_id.asc())
-        ).scalars().all()
+            .order_by(Instrument.exchange.asc(), MarketDataDaily.instrument_id.asc())
+        ).all()
 
-        for market_row in market_rows:
+        for market_row, exchange in market_rows:
             price = _resolve_price(market_row)
             if price is None:
                 continue
@@ -281,7 +285,9 @@ def materialize_derived_indicator_facts(
                 if prior_index >= 0:
                     prior_price = history_list[prior_index].price
                     relative_strength = (price / prior_price) - Decimal("1")
-                    current_date_returns[lookback][market_row.instrument_id] = relative_strength
+                    current_date_returns[lookback][exchange][
+                        market_row.instrument_id
+                    ] = relative_strength
 
             current_date_facts[market_row.instrument_id] = facts
 

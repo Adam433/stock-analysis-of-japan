@@ -24,6 +24,19 @@ def get_tse_common_stock_symbols_path() -> Path:
     )
 
 
+def get_us_stock_symbols_path() -> Path:
+    return Path(
+        os.environ.get(
+            "STOCKANALYSE_US_STOCK_SYMBOLS_PATH",
+            get_data_dir() / "us_stock_symbols.txt",
+        )
+    )
+
+
+def get_us_auto_refresh_provider() -> str:
+    return os.environ.get("STOCKANALYSE_US_AUTO_REFRESH_PROVIDER", "alpha_vantage_daily_adjusted")
+
+
 def get_local_csv_raw_dir() -> Path:
     return Path(
         os.environ.get(

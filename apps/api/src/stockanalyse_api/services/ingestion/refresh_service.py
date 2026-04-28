@@ -70,7 +70,11 @@ def refresh_market_data(
         rows_by_key = {}
 
     latest_stored_dates = _apply_refresh_overlap(
-        _load_latest_trade_dates_by_symbol(session, symbols),
+        _load_latest_trade_dates_by_symbol(
+            session,
+            symbols,
+            exchange=_provider_exchange(provider),
+        ),
         overlap_days=overlap_days,
     )
 
@@ -135,22 +139,36 @@ def refresh_market_data(
     }
 
 
-def _load_latest_trade_dates_by_symbol(session, symbols: list[str]) -> dict[str, date]:
+def _provider_exchange(provider: EodMarketDataProvider) -> str | None:
+    market_scope = getattr(provider, "market_scope", "")
+    if market_scope.startswith("jp_"):
+        return "TSE"
+    if market_scope.startswith("us_"):
+        return "US"
+    return None
+
+
+def _load_latest_trade_dates_by_symbol(
+    session,
+    symbols: list[str],
+    *,
+    exchange: str | None = None,
+) -> dict[str, date]:
     if not symbols:
         return {}
 
-    rows = session.execute(
+    query = (
         select(
             Instrument.symbol,
             func.max(MarketDataDaily.trade_date),
         )
         .join(MarketDataDaily, MarketDataDaily.instrument_id == Instrument.id)
-        .where(
-            Instrument.exchange == "TSE",
-            Instrument.symbol.in_(symbols),
-        )
+        .where(Instrument.symbol.in_(symbols))
         .group_by(Instrument.symbol)
-    ).all()
+    )
+    if exchange is not None:
+        query = query.where(Instrument.exchange == exchange)
+    rows = session.execute(query).all()
     return {symbol: latest_trade_date for symbol, latest_trade_date in rows if latest_trade_date is not None}
 
 
@@ -194,6 +212,15 @@ def _filter_supported_instruments(
             instrument
             for instrument in instruments
             if instrument.exchange == "TSE"
+            and instrument.instrument_type == "common_stock"
+            and instrument.is_active
+        ]
+
+    if universe_filter == "us_common_stock":
+        return [
+            instrument
+            for instrument in instruments
+            if instrument.exchange == "US"
             and instrument.instrument_type == "common_stock"
             and instrument.is_active
         ]

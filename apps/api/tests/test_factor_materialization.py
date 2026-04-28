@@ -111,6 +111,61 @@ class FactorMaterializationTests(unittest.TestCase):
         self.assertEqual(leader_fact.high_proximity_ratio, Decimal("1.000000"))
         self.assertLess(laggard_fact.high_proximity_ratio, Decimal("1.000000"))
 
+    def test_materialize_derived_indicator_facts_ranks_rps_within_each_market(self) -> None:
+        start_date = date(2025, 1, 1)
+        with self.session_factory() as session:
+            jp_leader = Instrument(symbol="7203", exchange="TSE", name="JP Leader")
+            jp_laggard = Instrument(symbol="6758", exchange="TSE", name="JP Laggard")
+            us_leader = Instrument(symbol="AAPL", exchange="US", name="US Leader")
+            us_laggard = Instrument(symbol="MSFT", exchange="US", name="US Laggard")
+            session.add_all([jp_leader, jp_laggard, us_leader, us_laggard])
+            session.flush()
+
+            rows: list[MarketDataDaily] = []
+            price_plans = {
+                jp_leader.id: lambda index: Decimal("100") + Decimal(index),
+                jp_laggard.id: lambda index: Decimal("100") + Decimal(index) / Decimal("10"),
+                us_leader.id: lambda index: Decimal("80") + Decimal(index) * Decimal("2"),
+                us_laggard.id: lambda index: Decimal("80") + Decimal(index) / Decimal("20"),
+            }
+            for index in range(70):
+                trade_date = start_date + timedelta(days=index)
+                for instrument_id, price_fn in price_plans.items():
+                    close = price_fn(index)
+                    rows.append(
+                        MarketDataDaily(
+                            instrument_id=instrument_id,
+                            trade_date=trade_date,
+                            open=close,
+                            high=close,
+                            low=close,
+                            close=close,
+                            adj_close=close,
+                            volume=1000,
+                            data_status="complete",
+                            data_source="test",
+                        )
+                    )
+            session.add_all(rows)
+            session.commit()
+
+            materialize_derived_indicator_facts(session)
+            latest_trade_date = start_date + timedelta(days=69)
+            latest_rows = session.execute(
+                select(DerivedIndicatorDaily, Instrument)
+                .join(Instrument, Instrument.id == DerivedIndicatorDaily.instrument_id)
+                .where(DerivedIndicatorDaily.trade_date == latest_trade_date)
+            ).all()
+
+        scores = {
+            (instrument.exchange, instrument.symbol): row.rps_50
+            for row, instrument in latest_rows
+        }
+        self.assertEqual(scores[("TSE", "7203")], Decimal("100.00"))
+        self.assertEqual(scores[("TSE", "6758")], Decimal("0.00"))
+        self.assertEqual(scores[("US", "AAPL")], Decimal("100.00"))
+        self.assertEqual(scores[("US", "MSFT")], Decimal("0.00"))
+
     def test_materialize_derived_indicator_facts_updates_existing_rows(self) -> None:
         self._seed_market_data()
 

@@ -19,7 +19,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Refresh Japan equity EOD market data.")
     parser.add_argument(
         "--provider",
-        choices=["static_fixture", "local_csv_directory", "yahoo_finance_chart"],
+        choices=[
+            "static_fixture",
+            "local_csv_directory",
+            "yahoo_finance_chart",
+            "alpha_vantage_daily_adjusted",
+        ],
         default="static_fixture",
     )
     target_group = parser.add_mutually_exclusive_group(required=True)
@@ -46,7 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--universe-filter",
-        choices=["tse_common_stock"],
+        choices=["tse_common_stock", "explicit_symbols"],
         default=DEFAULT_UNIVERSE_FILTER,
         help="Universe filter applied when --all-supported is used.",
     )

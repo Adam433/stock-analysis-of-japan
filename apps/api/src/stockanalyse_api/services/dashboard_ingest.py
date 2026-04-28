@@ -14,6 +14,8 @@ from stockanalyse_api.config.settings import (
     get_auto_refresh_fixture_path,
     get_auto_refresh_provider,
     get_auto_refresh_symbols_file,
+    get_us_auto_refresh_provider,
+    get_us_stock_symbols_path,
 )
 from stockanalyse_api.db.session import SessionLocal
 from stockanalyse_api.domain.instruments.models import Instrument
@@ -34,6 +36,7 @@ class IngestJobState:
     status: str = "idle"  # idle | running | completed | failed
     job_kind: str | None = None  # refresh | materialize | combined
     phase: str | None = None  # refresh | materialize
+    market: str = "jp"
     started_at: str | None = None
     finished_at: str | None = None
     refresh_provider: str | None = None
@@ -86,6 +89,7 @@ def trigger_update_and_materialize(
     materialize_since_days: int | None = DEFAULT_DASHBOARD_MATERIALIZE_SINCE_DAYS,
     skip_refresh: bool = False,
     skip_materialize: bool = False,
+    market: str = "jp",
 ) -> dict[str, object]:
     global _worker_thread
     with _state_lock:
@@ -103,6 +107,7 @@ def trigger_update_and_materialize(
             status="running",
             job_kind=job_kind,
             phase="refresh" if not skip_refresh else "materialize",
+            market=market,
             started_at=datetime.now(UTC).isoformat(),
         )
 
@@ -113,6 +118,7 @@ def trigger_update_and_materialize(
             "materialize_since_days": materialize_since_days,
             "skip_refresh": skip_refresh,
             "skip_materialize": skip_materialize,
+            "market": market,
         },
         daemon=True,
     )
@@ -125,27 +131,27 @@ def _run_pipeline(
     materialize_since_days: int | None = None,
     skip_refresh: bool = False,
     skip_materialize: bool = False,
+    market: str = "jp",
 ) -> None:
     try:
+        if market not in {"jp", "us"}:
+            raise ValueError("market must be jp or us.")
         if not skip_refresh:
             _set_state(phase="refresh")
-            provider_name = get_auto_refresh_provider()
-            provider = build_ingestion_provider(
-                provider_name,
-                fixture_path=get_auto_refresh_fixture_path(),
-                csv_dir=get_auto_refresh_csv_dir(),
-                symbols_file=get_auto_refresh_symbols_file(),
+            provider_name, provider, symbols, all_supported, universe_filter = _build_refresh_job(
+                market
             )
             with SessionLocal() as session:
-                symbols = _load_existing_tse_symbols(session)
                 _set_state(refresh_provider=provider_name, universe_count=len(symbols))
-                _append_log(f"refresh universe resolved: {len(symbols)} existing TSE symbols")
+                _append_log(
+                    f"refresh universe resolved: {len(symbols)} {market.upper()} symbols"
+                )
                 result = execute_market_data_refresh(
                     session,
                     provider,
-                    symbols,
-                    all_supported=False,
-                    universe_filter=DEFAULT_UNIVERSE_FILTER,
+                    symbols if not all_supported else None,
+                    all_supported=all_supported,
+                    universe_filter=universe_filter,
                     commit_every=get_auto_refresh_commit_every(),
                 )
             _set_state(
@@ -260,6 +266,39 @@ def _load_existing_tse_symbols(session) -> list[str]:
     if not symbols:
         raise ValueError("No TSE instruments are available in the database to refresh.")
     return list(symbols)
+
+
+def _build_refresh_job(market: str):
+    if market == "us":
+        symbols_file = get_us_stock_symbols_path()
+        provider_name = get_us_auto_refresh_provider()
+        provider = build_ingestion_provider(
+            provider_name,
+            symbols_file=symbols_file,
+        )
+        symbols = _read_symbol_file(symbols_file)
+        if not symbols:
+            raise ValueError(f"No US symbols are configured in {symbols_file}.")
+        return provider_name, provider, symbols, True, "explicit_symbols"
+
+    provider_name = get_auto_refresh_provider()
+    provider = build_ingestion_provider(
+        provider_name,
+        fixture_path=get_auto_refresh_fixture_path(),
+        csv_dir=get_auto_refresh_csv_dir(),
+        symbols_file=get_auto_refresh_symbols_file(),
+    )
+    with SessionLocal() as session:
+        symbols = _load_existing_tse_symbols(session)
+    return provider_name, provider, symbols, False, DEFAULT_UNIVERSE_FILTER
+
+
+def _read_symbol_file(path) -> list[str]:
+    return [
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
 
 
 def _count_materialize_target_dates(session, *, since_date) -> int:

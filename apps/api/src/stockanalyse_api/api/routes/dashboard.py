@@ -12,9 +12,11 @@ from stockanalyse_api.db.session import SessionLocal
 from stockanalyse_api.services.dashboard import (
     APPROVED_RPS_WINDOWS,
     DEFAULT_CUP_HANDLE_PARAMS,
+    DEFAULT_FUNDAMENTAL_GROWTH_PARAMS,
     DEFAULT_CHART_WINDOW_DAYS,
     DEFAULT_RPS_THRESHOLD,
     CupHandleParams,
+    FundamentalGrowthParams,
     get_chart_with_markers,
     get_overview,
     screen_universe,
@@ -150,32 +152,76 @@ class CupHandleParamsRequest(BaseModel):
         )
 
 
+class FundamentalGrowthParamsRequest(BaseModel):
+    enabled: bool = DEFAULT_FUNDAMENTAL_GROWTH_PARAMS.enabled
+    min_years: int = Field(default=DEFAULT_FUNDAMENTAL_GROWTH_PARAMS.min_years, ge=2, le=10)
+    min_growth_count: int | None = Field(default=None, ge=1, le=9)
+    min_yoy_growth_pct: float = Field(
+        default=float(DEFAULT_FUNDAMENTAL_GROWTH_PARAMS.min_yoy_growth_pct),
+        ge=-100,
+        le=500,
+    )
+    require_positive_net_income: bool = (
+        DEFAULT_FUNDAMENTAL_GROWTH_PARAMS.require_positive_net_income
+    )
+    reporting_lag_days: int = Field(
+        default=DEFAULT_FUNDAMENTAL_GROWTH_PARAMS.reporting_lag_days,
+        ge=0,
+        le=365,
+    )
+
+    def to_service_params(self) -> FundamentalGrowthParams:
+        return FundamentalGrowthParams(
+            enabled=self.enabled,
+            min_years=self.min_years,
+            min_growth_count=self.min_growth_count,
+            min_yoy_growth_pct=Decimal(str(self.min_yoy_growth_pct)),
+            require_positive_net_income=self.require_positive_net_income,
+            reporting_lag_days=self.reporting_lag_days,
+        )
+
+
 class ScreenRequest(BaseModel):
+    market: str = Field(default="jp", pattern="^(jp|us)$")
     use_rps: bool = False
     rps_threshold: int = Field(default=DEFAULT_RPS_THRESHOLD, ge=0, le=100)
     selected_rps_windows: list[int] = Field(default_factory=lambda: list(APPROVED_RPS_WINDOWS))
+    min_rps_windows_passing: int = Field(default=2, ge=1, le=len(APPROVED_RPS_WINDOWS))
     use_cup_handle: bool = False
     cup_handle_params: CupHandleParamsRequest = Field(default_factory=CupHandleParamsRequest)
+    fundamental_growth_params: FundamentalGrowthParamsRequest = Field(
+        default_factory=FundamentalGrowthParamsRequest
+    )
     trade_date: date | None = None
 
 
 class ChartRequest(BaseModel):
+    market: str = Field(default="jp", pattern="^(jp|us)$")
     use_rps: bool = False
     rps_threshold: int = Field(default=DEFAULT_RPS_THRESHOLD, ge=0, le=100)
     selected_rps_windows: list[int] = Field(default_factory=lambda: list(APPROVED_RPS_WINDOWS))
+    min_rps_windows_passing: int = Field(default=2, ge=1, le=len(APPROVED_RPS_WINDOWS))
     use_cup_handle: bool = False
     cup_handle_params: CupHandleParamsRequest = Field(default_factory=CupHandleParamsRequest)
+    fundamental_growth_params: FundamentalGrowthParamsRequest = Field(
+        default_factory=FundamentalGrowthParamsRequest
+    )
     trade_date: date | None = None
     window_days: int = Field(default=DEFAULT_CHART_WINDOW_DAYS, ge=30, le=750)
 
 
 class CupHandleRpsBacktestRequest(BaseModel):
+    market: str = Field(default="jp", pattern="^(jp|us)$")
     start_date: date
     end_date: date
     rps_threshold: int = Field(default=DEFAULT_RPS_THRESHOLD, ge=0, le=100)
     selected_rps_windows: list[int] = Field(default_factory=lambda: list(APPROVED_RPS_WINDOWS))
+    min_rps_windows_passing: int = Field(default=2, ge=1, le=len(APPROVED_RPS_WINDOWS))
     cup_handle_params: CupHandleParamsRequest = Field(default_factory=CupHandleParamsRequest)
-    holding_days: int = Field(default=120, ge=1, le=500)
+    fundamental_growth_params: FundamentalGrowthParamsRequest = Field(
+        default_factory=FundamentalGrowthParamsRequest
+    )
+    holding_days: int = Field(default=130, ge=1, le=500)
     stop_loss_pct: float = Field(default=-0.08, gt=-1, lt=0)
     portfolio_cap: int = Field(default=20, ge=1, le=200)
     entry_deferral_window_days: int = Field(default=5, ge=1, le=60)
@@ -190,9 +236,12 @@ def dashboard_index() -> HTMLResponse:
 
 
 @router.get("/api/overview")
-def read_overview() -> dict[str, object]:
-    with SessionLocal() as session:
-        return {"overview": get_overview(session).to_dict()}
+def read_overview(market: str = "jp") -> dict[str, object]:
+    try:
+        with SessionLocal() as session:
+            return {"overview": get_overview(session, market=market).to_dict()}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/api/screen")
@@ -204,15 +253,19 @@ def post_screen(payload: ScreenRequest) -> dict[str, object]:
                 use_rps=payload.use_rps,
                 rps_threshold=payload.rps_threshold,
                 selected_rps_windows=payload.selected_rps_windows,
+                min_rps_windows_passing=payload.min_rps_windows_passing,
                 use_cup_handle=payload.use_cup_handle,
                 cup_handle_params=payload.cup_handle_params.to_service_params(),
+                fundamental_growth_params=payload.fundamental_growth_params.to_service_params(),
                 trade_date=payload.trade_date,
+                market=payload.market,
             )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 class IngestRequest(BaseModel):
+    market: str = Field(default="jp", pattern="^(jp|us)$")
     materialize_since_days: int | None = DEFAULT_DASHBOARD_MATERIALIZE_SINCE_DAYS
     skip_refresh: bool = False
     skip_materialize: bool = False
@@ -225,15 +278,18 @@ def post_update_and_materialize(payload: IngestRequest | None = None) -> dict[st
         materialize_since_days=payload.materialize_since_days,
         skip_refresh=payload.skip_refresh,
         skip_materialize=payload.skip_materialize,
+        market=payload.market,
     )
 
 
 @router.post("/api/update/refresh")
-def post_update_market_data() -> dict[str, object]:
+def post_update_market_data(payload: IngestRequest | None = None) -> dict[str, object]:
+    payload = payload or IngestRequest()
     return trigger_update_and_materialize(
         materialize_since_days=None,
         skip_refresh=False,
         skip_materialize=True,
+        market=payload.market,
     )
 
 
@@ -244,6 +300,7 @@ def post_materialize_indicators(payload: IngestRequest | None = None) -> dict[st
         materialize_since_days=payload.materialize_since_days,
         skip_refresh=True,
         skip_materialize=False,
+        market=payload.market,
     )
 
 
@@ -262,7 +319,10 @@ def post_cup_handle_rps_backtest(payload: CupHandleRpsBacktestRequest) -> dict[s
                 end_date=payload.end_date,
                 rps_threshold=payload.rps_threshold,
                 selected_rps_windows=payload.selected_rps_windows,
+                min_rps_windows_passing=payload.min_rps_windows_passing,
                 cup_handle_params=payload.cup_handle_params.to_service_params(),
+                fundamental_growth_params=payload.fundamental_growth_params.to_service_params(),
+                market=payload.market,
                 holding_days=payload.holding_days,
                 stop_loss_pct=Decimal(str(payload.stop_loss_pct)),
                 portfolio_cap=payload.portfolio_cap,
@@ -285,10 +345,12 @@ def post_chart(instrument_id: int, payload: ChartRequest) -> dict[str, object]:
                 use_rps=payload.use_rps,
                 rps_threshold=payload.rps_threshold,
                 selected_rps_windows=payload.selected_rps_windows,
+                min_rps_windows_passing=payload.min_rps_windows_passing,
                 use_cup_handle=payload.use_cup_handle,
                 cup_handle_params=payload.cup_handle_params.to_service_params(),
                 trade_date=payload.trade_date,
                 window_days=payload.window_days,
+                market=payload.market,
             )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
