@@ -143,6 +143,11 @@
     background: transparent; color: var(--text); border-color: var(--panel-border);
   }
   button.primary:disabled, button.secondary:disabled { opacity: 0.6; cursor: progress; }
+  button.maintenance-active,
+  button.maintenance-active:disabled {
+    background: var(--accent-strong); color: #06201d; border-color: transparent;
+    opacity: 1;
+  }
   .status-box {
     min-height: 36px; margin-top: 10px; padding: 8px 10px;
     border-radius: 8px; background: var(--panel-subtle);
@@ -265,7 +270,7 @@
         <span class="mini-badge" id="updatePhase">空闲</span>
       </div>
       <div class="action-grid">
-        <button class="primary" id="runRefresh">更新数据</button>
+        <button class="secondary" id="runRefresh">更新数据</button>
         <button class="secondary" id="runMaterialize">物化指标</button>
         <button class="secondary" id="runFundamentals">刷新业绩</button>
       </div>
@@ -694,9 +699,18 @@
     const refreshBtn = document.getElementById('runRefresh');
     const materializeBtn = document.getElementById('runMaterialize');
     const fundamentalsBtn = document.getElementById('runFundamentals');
+    const buttons = {
+      refresh: refreshBtn,
+      materialize: materializeBtn,
+      fundamentals: fundamentalsBtn,
+    };
+    Object.values(buttons).forEach((button) => button.classList.remove('maintenance-active'));
     refreshBtn.disabled = disabled;
     materializeBtn.disabled = disabled;
     fundamentalsBtn.disabled = disabled;
+    if (disabled && activeAction && buttons[activeAction]) {
+      buttons[activeAction].classList.add('maintenance-active');
+    }
     refreshBtn.textContent = activeAction === 'refresh' ? '更新中…' : '更新数据';
     materializeBtn.textContent = activeAction === 'materialize' ? '物化中…' : '物化指标';
     fundamentalsBtn.textContent = activeAction === 'fundamentals' ? '刷新中…' : '刷新业绩';
@@ -757,7 +771,10 @@
     // running
     if (state.phase === 'refresh') {
       const provider = state.refresh_provider ? ` · ${state.refresh_provider}` : '';
-      return `更新行情中${provider} · ${fmt(state.universe_count)} 只 · 已处理 ${fmt(state.refresh_processed)} 行`;
+      const checked = state.refresh_symbols_processed || 0;
+      const current = state.refresh_current_symbol ? ` · 当前 ${state.refresh_current_symbol}` : '';
+      return `更新行情中${provider} · 已检查 ${fmt(checked)}/${fmt(state.universe_count)} 只${current}` +
+        ` · 已处理 ${fmt(state.refresh_processed)} 行`;
     }
     if (state.phase === 'materialize') {
       const total = state.materialize_total_dates || 0;

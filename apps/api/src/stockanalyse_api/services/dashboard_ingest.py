@@ -51,6 +51,8 @@ class IngestJobState:
     finished_at: str | None = None
     refresh_provider: str | None = None
     universe_count: int = 0
+    refresh_symbols_processed: int = 0
+    refresh_current_symbol: str | None = None
     refresh_processed: int = 0
     refresh_inserted: int = 0
     refresh_updated: int = 0
@@ -182,6 +184,39 @@ def _run_pipeline(
                 _append_log(
                     f"refresh universe resolved: {len(symbols)} {market.upper()} symbols"
                 )
+
+                last_logged_symbols = 0
+
+                def report_refresh_progress(payload: dict[str, object]) -> None:
+                    nonlocal last_logged_symbols
+                    symbols_processed = int(payload.get("symbols_processed", 0) or 0)
+                    current_symbol = payload.get("current_symbol")
+                    _set_state(
+                        refresh_symbols_processed=symbols_processed,
+                        refresh_current_symbol=str(current_symbol) if current_symbol else None,
+                        refresh_processed=int(payload.get("processed", 0) or 0),
+                        refresh_inserted=int(payload.get("inserted", 0) or 0),
+                        refresh_updated=int(payload.get("updated", 0) or 0),
+                        refresh_latest_trade_date=str(payload.get("latest_trade_date") or "") or None,
+                    )
+                    should_log = (
+                        symbols_processed == 1
+                        or symbols_processed == len(symbols)
+                        or symbols_processed - last_logged_symbols >= 25
+                    )
+                    if should_log:
+                        last_logged_symbols = symbols_processed
+                        _append_log(
+                            "refresh progress: symbols={}/{} rows={} inserted={} updated={} current={}".format(
+                                symbols_processed,
+                                len(symbols),
+                                int(payload.get("processed", 0) or 0),
+                                int(payload.get("inserted", 0) or 0),
+                                int(payload.get("updated", 0) or 0),
+                                str(current_symbol or "—"),
+                            )
+                        )
+
                 result = execute_market_data_refresh(
                     session,
                     provider,
@@ -189,6 +224,7 @@ def _run_pipeline(
                     all_supported=all_supported,
                     universe_filter=universe_filter,
                     commit_every=get_auto_refresh_commit_every(),
+                    progress_callback=report_refresh_progress,
                 )
             _set_state(
                 refresh_processed=int(result.get("processed", result.get("rows_processed", 0)) or 0),

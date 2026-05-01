@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date, timedelta
 from datetime import UTC, datetime
 import inspect
@@ -21,6 +22,7 @@ from stockanalyse_api.services.normalization.eod_normalizer import normalize_dai
 DEFAULT_UNIVERSE_FILTER = "tse_common_stock"
 DEFAULT_REFRESH_COMMIT_EVERY = int(os.environ.get("STOCKANALYSE_REFRESH_COMMIT_EVERY", "500"))
 DEFAULT_REFRESH_OVERLAP_DAYS = int(os.environ.get("STOCKANALYSE_REFRESH_OVERLAP_DAYS", "30"))
+RefreshProgressCallback = Callable[[dict[str, object]], None]
 
 
 def _load_instrument_cache(
@@ -89,6 +91,7 @@ def refresh_market_data(
     *,
     commit_every: int = DEFAULT_REFRESH_COMMIT_EVERY,
     overlap_days: int = DEFAULT_REFRESH_OVERLAP_DAYS,
+    progress_callback: RefreshProgressCallback | None = None,
 ) -> dict[str, int | str | None]:
     inserted = 0
     updated = 0
@@ -114,6 +117,21 @@ def refresh_market_data(
         session.commit()
         rows_by_key = {}
 
+    def report_progress(*, current_symbol: str | None = None, symbols_processed: int = 0) -> None:
+        if progress_callback is None:
+            return
+        progress_callback(
+            {
+                "processed": processed,
+                "inserted": inserted,
+                "updated": updated,
+                "latest_trade_date": latest_trade_date.isoformat() if latest_trade_date else None,
+                "current_symbol": current_symbol,
+                "symbols_processed": symbols_processed,
+                "symbols_total": len(symbols),
+            }
+        )
+
     latest_stored_dates = _apply_refresh_overlap(
         _load_latest_trade_dates_by_symbol(
             session,
@@ -123,71 +141,91 @@ def refresh_market_data(
         overlap_days=overlap_days,
     )
 
-    for raw_bar in _fetch_provider_daily_bars(
-        provider,
-        symbols,
-        start_after_by_symbol=latest_stored_dates,
-    ):
-        processed += 1
-        normalized = normalize_daily_bar(raw_bar)
-        instrument = _get_or_create_instrument(session, normalized.bar, instrument_cache)
-        instrument_key = (normalized.bar.symbol, normalized.bar.exchange)
-        if instrument_key != current_symbol_key:
-            current_symbol_key = instrument_key
-            seen_trade_dates_for_current_symbol = set()
-        if instrument_key not in loaded_existing_symbols:
-            existing_rows_by_key.update(
-                _load_existing_market_rows_for_symbol(
-                    session,
-                    instrument_id=instrument.id,
-                    start_after=latest_stored_dates.get(normalized.bar.symbol),
-                )
-            )
-            loaded_existing_symbols.add(instrument_key)
-        row_key = (instrument.id, normalized.bar.trade_date)
-        if latest_trade_date is None or normalized.bar.trade_date > latest_trade_date:
-            latest_trade_date = normalized.bar.trade_date
+    report_progress()
 
-        row = rows_by_key.get(row_key)
-        if row is None:
-            row = existing_rows_by_key.get(row_key)
-            if row is None and normalized.bar.trade_date in seen_trade_dates_for_current_symbol:
-                row = session.execute(
-                    select(MarketDataDaily).where(
-                        MarketDataDaily.instrument_id == instrument.id,
-                        MarketDataDaily.trade_date == normalized.bar.trade_date,
+    symbol_batches = (
+        [(index, symbol, [symbol]) for index, symbol in enumerate(symbols, start=1)]
+        if progress_callback is not None
+        else [(len(symbols), None, symbols)]
+    )
+
+    for symbol_index, symbol, batch_symbols in symbol_batches:
+        if symbol is not None:
+            report_progress(current_symbol=symbol, symbols_processed=symbol_index - 1)
+        for raw_bar in _fetch_provider_daily_bars(
+            provider,
+            batch_symbols,
+            start_after_by_symbol=latest_stored_dates,
+        ):
+            processed += 1
+            normalized = normalize_daily_bar(raw_bar)
+            instrument = _get_or_create_instrument(session, normalized.bar, instrument_cache)
+            instrument_key = (normalized.bar.symbol, normalized.bar.exchange)
+            if instrument_key != current_symbol_key:
+                current_symbol_key = instrument_key
+                seen_trade_dates_for_current_symbol = set()
+            if instrument_key not in loaded_existing_symbols:
+                existing_rows_by_key.update(
+                    _load_existing_market_rows_for_symbol(
+                        session,
+                        instrument_id=instrument.id,
+                        start_after=latest_stored_dates.get(normalized.bar.symbol),
                     )
-                ).scalar_one_or_none()
-
-            if row is None:
-                row = MarketDataDaily(
-                    instrument_id=instrument.id,
-                    trade_date=normalized.bar.trade_date,
                 )
-                session.add(row)
-                inserted += 1
+                loaded_existing_symbols.add(instrument_key)
+            row_key = (instrument.id, normalized.bar.trade_date)
+            if latest_trade_date is None or normalized.bar.trade_date > latest_trade_date:
+                latest_trade_date = normalized.bar.trade_date
+
+            row = rows_by_key.get(row_key)
+            if row is None:
+                row = existing_rows_by_key.get(row_key)
+                if row is None and normalized.bar.trade_date in seen_trade_dates_for_current_symbol:
+                    row = session.execute(
+                        select(MarketDataDaily).where(
+                            MarketDataDaily.instrument_id == instrument.id,
+                            MarketDataDaily.trade_date == normalized.bar.trade_date,
+                        )
+                    ).scalar_one_or_none()
+
+                if row is None:
+                    row = MarketDataDaily(
+                        instrument_id=instrument.id,
+                        trade_date=normalized.bar.trade_date,
+                    )
+                    session.add(row)
+                    inserted += 1
+                else:
+                    updated += 1
+
+                rows_by_key[row_key] = row
             else:
                 updated += 1
+            seen_trade_dates_for_current_symbol.add(normalized.bar.trade_date)
 
-            rows_by_key[row_key] = row
-        else:
-            updated += 1
-        seen_trade_dates_for_current_symbol.add(normalized.bar.trade_date)
+            row.open = normalized.bar.open
+            row.high = normalized.bar.high
+            row.low = normalized.bar.low
+            row.close = normalized.bar.close
+            row.adj_close = normalized.bar.adj_close
+            row.volume = normalized.bar.volume
+            row.data_source = normalized.bar.data_source
+            row.data_status = normalized.bar.data_status or "complete"
+            final_status_by_key[
+                (normalized.bar.symbol, normalized.bar.exchange, normalized.bar.trade_date)
+            ] = row.data_status
 
-        row.open = normalized.bar.open
-        row.high = normalized.bar.high
-        row.low = normalized.bar.low
-        row.close = normalized.bar.close
-        row.adj_close = normalized.bar.adj_close
-        row.volume = normalized.bar.volume
-        row.data_source = normalized.bar.data_source
-        row.data_status = normalized.bar.data_status or "complete"
-        final_status_by_key[(normalized.bar.symbol, normalized.bar.exchange, normalized.bar.trade_date)] = row.data_status
-
-        if processed % commit_every == 0:
-            flush_batch()
+            if processed % commit_every == 0:
+                flush_batch()
+                report_progress(
+                    current_symbol=symbol or normalized.bar.symbol,
+                    symbols_processed=symbol_index - 1,
+                )
+        if symbol is not None:
+            report_progress(current_symbol=symbol, symbols_processed=symbol_index)
 
     flush_batch()
+    report_progress(symbols_processed=len(symbols))
     partial_rows = sum(1 for status in final_status_by_key.values() if status == "partial")
     unavailable_rows = sum(1 for status in final_status_by_key.values() if status == "unavailable")
     return {
@@ -322,6 +360,7 @@ def execute_market_data_refresh(
     all_supported: bool = False,
     universe_filter: str = DEFAULT_UNIVERSE_FILTER,
     commit_every: int = DEFAULT_REFRESH_COMMIT_EVERY,
+    progress_callback: RefreshProgressCallback | None = None,
 ) -> dict[str, int | str | None]:
     provider_name = getattr(provider, "provider_name", provider.__class__.__name__)
     resolved_symbols, universe_scope, resolved_universe_filter = resolve_refresh_symbols(
@@ -350,6 +389,7 @@ def execute_market_data_refresh(
             provider,
             resolved_symbols,
             commit_every=commit_every,
+            progress_callback=progress_callback,
         )
         refresh_run = session.get(MarketDataRefreshRun, refresh_run.id)
         refresh_run.status = (

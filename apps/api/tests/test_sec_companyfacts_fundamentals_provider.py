@@ -10,6 +10,26 @@ from stockanalyse_api.services.ingestion.providers.sec_companyfacts_fundamentals
 
 
 class SecCompanyFactsFundamentalsProviderTests(unittest.TestCase):
+    def test_add_exchange_ticker_mapping_fills_symbols_missing_from_company_mapping(self) -> None:
+        mapping: dict[str, int] = {}
+        SecCompanyFactsFundamentalsProvider._add_company_ticker_mapping(
+            mapping,
+            {"0": {"ticker": "AAPL", "cik_str": 320193}},
+        )
+        SecCompanyFactsFundamentalsProvider._add_exchange_ticker_mapping(
+            mapping,
+            {
+                "fields": ["cik", "name", "ticker", "exchange"],
+                "data": [
+                    [1759186, "Coeptis Therapeutics Holdings, Inc.", "ZSQR", "Nasdaq"],
+                    [999999, "Apple Duplicate", "AAPL", "Nasdaq"],
+                ],
+            },
+        )
+
+        self.assertEqual(mapping["AAPL"], 320193)
+        self.assertEqual(mapping["ZSQR"], 1759186)
+
     def test_parse_companyfacts_keeps_annual_net_income_rows(self) -> None:
         provider = SecCompanyFactsFundamentalsProvider()
         payload = {
@@ -179,6 +199,122 @@ class SecCompanyFactsFundamentalsProviderTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].fiscal_year_label, "FY2025")
         self.assertEqual(rows[0].net_income, Decimal("3750612000"))
+
+    def test_parse_companyfacts_falls_back_to_annual_form_without_fp_when_full_year(self) -> None:
+        provider = SecCompanyFactsFundamentalsProvider()
+        payload = {
+            "facts": {
+                "ifrs-full": {
+                    "ProfitLoss": {
+                        "units": {
+                            "CAD": [
+                                {
+                                    "form": "40-F",
+                                    "fp": None,
+                                    "start": "2025-01-01",
+                                    "end": "2025-12-31",
+                                    "filed": "2026-03-31",
+                                    "val": -19722261,
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+
+        rows = provider._parse_companyfacts("AEC", "US", payload)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].fiscal_year_label, "FY2025")
+        self.assertEqual(rows[0].net_income, Decimal("-19722261"))
+        self.assertEqual(rows[0].net_income_currency, "CAD")
+
+    def test_parse_companyfacts_falls_back_to_full_year_6_k_when_no_annual_report_exists(self) -> None:
+        provider = SecCompanyFactsFundamentalsProvider()
+        payload = {
+            "facts": {
+                "us-gaap": {
+                    "NetIncomeLoss": {
+                        "units": {
+                            "CAD": [
+                                {
+                                    "form": "6-K",
+                                    "fp": "FY",
+                                    "start": "2025-01-01",
+                                    "end": "2025-12-31",
+                                    "filed": "2026-02-04",
+                                    "val": 4720000000,
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+
+        rows = provider._parse_companyfacts("CNI", "US", payload)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].fiscal_year_label, "FY2025")
+        self.assertEqual(rows[0].net_income, Decimal("4720000000"))
+        self.assertEqual(rows[0].net_income_currency, "CAD")
+
+    def test_parse_companyfacts_ignores_short_supplemental_periods(self) -> None:
+        provider = SecCompanyFactsFundamentalsProvider()
+        payload = {
+            "facts": {
+                "ifrs-full": {
+                    "ProfitLoss": {
+                        "units": {
+                            "USD": [
+                                {
+                                    "form": "6-K",
+                                    "fp": None,
+                                    "start": "2023-06-22",
+                                    "end": "2023-12-31",
+                                    "filed": "2026-02-20",
+                                    "val": -11431,
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+
+        rows = provider._parse_companyfacts("KWM", "US", payload)
+
+        self.assertEqual(rows, [])
+
+    def test_parse_companyfacts_falls_back_to_registration_statement_full_year(self) -> None:
+        provider = SecCompanyFactsFundamentalsProvider()
+        payload = {
+            "facts": {
+                "us-gaap": {
+                    "NetIncomeLoss": {
+                        "units": {
+                            "USD": [
+                                {
+                                    "form": "S-1",
+                                    "fp": None,
+                                    "start": "2024-07-01",
+                                    "end": "2025-06-30",
+                                    "filed": "2026-04-17",
+                                    "val": -14065948,
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+
+        rows = provider._parse_companyfacts("CAST", "US", payload)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].fiscal_year_label, "FY2025")
+        self.assertEqual(rows[0].net_income, Decimal("-14065948"))
 
 
 if __name__ == "__main__":

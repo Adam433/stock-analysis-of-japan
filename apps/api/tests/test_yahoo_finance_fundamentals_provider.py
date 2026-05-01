@@ -54,6 +54,36 @@ class YahooFinanceFundamentalsProviderTests(unittest.TestCase):
         self.assertEqual(rows[1].pe, Decimal("10.1"))
         self.assertEqual(rows[1].pb, Decimal("1.11"))
 
+    def test_parse_quote_summary_payload_uses_financial_currency_when_available(self) -> None:
+        provider = YahooFinanceFundamentalsProvider(default_currency="USD")
+        payload = {
+            "quoteSummary": {
+                "result": [
+                    {
+                        "incomeStatementHistory": {
+                            "incomeStatementHistory": [
+                                {
+                                    "endDate": {"raw": _timestamp(2025, 12, 31)},
+                                    "netIncome": {"raw": 4720000000},
+                                }
+                            ]
+                        },
+                        "price": {
+                            "financialCurrency": "CAD",
+                            "currency": "USD",
+                        },
+                    }
+                ],
+                "error": None,
+            }
+        }
+
+        rows = provider._parse_quote_summary_payload("CNI", "US", payload)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].net_income_currency, "CAD")
+        self.assertEqual(rows[0].source, "yahoo_finance_fundamentals")
+
 
 if __name__ == "__main__":
     unittest.main()

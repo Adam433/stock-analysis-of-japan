@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from datetime import date, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -44,9 +45,15 @@ class FundamentalsRefreshTests(unittest.TestCase):
         Base.metadata.drop_all(self.engine)
         self.engine.dispose()
 
-    def _seed_instrument(self) -> int:
+    def _seed_instrument(
+        self,
+        *,
+        symbol: str = "7203.T",
+        exchange: str = "TSE",
+        name: str = "Toyota",
+    ) -> int:
         with self.session_factory() as session:
-            instrument = Instrument(symbol="7203.T", exchange="TSE", name="Toyota")
+            instrument = Instrument(symbol=symbol, exchange=exchange, name=name)
             session.add(instrument)
             session.commit()
             return instrument.id
@@ -117,6 +124,25 @@ class FundamentalsRefreshTests(unittest.TestCase):
         self.assertFalse(refreshed)
         self.assertEqual(row.data_status, "complete")
         self.assertGreaterEqual(row.source_as_of_date, original_as_of)
+
+    def test_refresh_instrument_fundamentals_uses_us_default_provider_for_us_instruments(self) -> None:
+        instrument_id = self._seed_instrument(symbol="AAPL", exchange="US", name="Apple")
+
+        with (
+            patch(
+                "stockanalyse_api.services.fundamentals_refresh.get_us_fundamentals_provider",
+                return_value="sec_companyfacts_yahoo_fallback",
+            ),
+            patch(
+                "stockanalyse_api.services.fundamentals_refresh.build_ingestion_provider",
+                return_value=_StubFundamentalsProvider([]),
+            ) as build_provider,
+            self.session_factory() as session,
+        ):
+            refreshed = refresh_instrument_fundamentals(session, instrument_id=instrument_id)
+
+        self.assertFalse(refreshed)
+        build_provider.assert_called_once_with("sec_companyfacts_yahoo_fallback")
 
 
 if __name__ == "__main__":

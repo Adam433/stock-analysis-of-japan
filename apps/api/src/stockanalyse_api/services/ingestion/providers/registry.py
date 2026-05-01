@@ -5,6 +5,9 @@ from pathlib import Path
 from stockanalyse_api.services.ingestion.providers.alpha_vantage_daily_adjusted_provider import (
     AlphaVantageDailyAdjustedProvider,
 )
+from stockanalyse_api.services.ingestion.providers.fallback_fundamentals_provider import (
+    FallbackFundamentalsProvider,
+)
 from stockanalyse_api.services.ingestion.providers.local_csv_directory_provider import (
     LocalCsvDirectoryProvider,
 )
@@ -65,6 +68,18 @@ def build_ingestion_provider(
         provider = YahooFinanceFundamentalsProvider()
     elif provider_name == "sec_companyfacts":
         provider = SecCompanyFactsFundamentalsProvider()
+    elif provider_name == "sec_companyfacts_yahoo_fallback":
+        provider = FallbackFundamentalsProvider(
+            (
+                SecCompanyFactsFundamentalsProvider(),
+                YahooFinanceFundamentalsProvider(
+                    provider_name="yahoo_finance_fundamentals_us",
+                    market_scope="us_equities_fundamentals",
+                    default_currency="USD",
+                ),
+            ),
+            provider_name="sec_companyfacts_yahoo_fallback",
+        )
     else:
         raise ValueError(f"Unsupported provider: {provider_name}")
 

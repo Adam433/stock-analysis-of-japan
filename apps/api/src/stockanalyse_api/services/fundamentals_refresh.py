@@ -4,6 +4,7 @@ from datetime import date
 
 from sqlalchemy import select
 
+from stockanalyse_api.config.settings import get_us_fundamentals_provider
 from stockanalyse_api.domain.fundamentals.models import FundamentalsAnnual
 from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.services.ingestion.provider_models import ProviderFundamentalsAnnual
@@ -17,7 +18,7 @@ def refresh_instrument_fundamentals(session, *, instrument_id: int, provider=Non
     if instrument is None:
         raise ValueError("Instrument not found.")
 
-    provider = provider or build_ingestion_provider(DEFAULT_FUNDAMENTALS_PROVIDER)
+    provider = provider or build_ingestion_provider(_default_provider_for_exchange(instrument.exchange))
     existing_rows = session.execute(
         select(FundamentalsAnnual)
         .where(FundamentalsAnnual.instrument_id == instrument_id)
@@ -75,3 +76,9 @@ def _apply_provider_row(row: FundamentalsAnnual, provider_row: ProviderFundament
     row.source = provider_row.source
     row.source_as_of_date = provider_row.source_as_of_date or date.today()
     row.data_status = provider_row.data_status
+
+
+def _default_provider_for_exchange(exchange: str) -> str:
+    if exchange == "US":
+        return get_us_fundamentals_provider()
+    return DEFAULT_FUNDAMENTALS_PROVIDER

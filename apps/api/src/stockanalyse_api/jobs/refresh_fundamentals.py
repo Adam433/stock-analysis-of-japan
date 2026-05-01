@@ -54,7 +54,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
     symbols = args.symbols or None
     exchange = args.exchange
-    if exchange is None and args.provider == "sec_companyfacts":
+    if exchange is None and args.provider in {"sec_companyfacts", "sec_companyfacts_yahoo_fallback"}:
         exchange = "US"
     provider = build_ingestion_provider(args.provider)
     refreshed = 0

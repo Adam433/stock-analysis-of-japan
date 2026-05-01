@@ -48,6 +48,12 @@ class SecurityBoundaryTests(unittest.TestCase):
         self.assertEqual(provider.credential_boundary, BACKEND_ONLY_BOUNDARY)
         self.assertEqual(provider.market_scope, "us_equities_eod")
 
+    def test_us_fundamentals_fallback_provider_stays_within_backend_only_boundary(self) -> None:
+        provider = build_ingestion_provider("sec_companyfacts_yahoo_fallback")
+
+        self.assertEqual(provider.credential_boundary, BACKEND_ONLY_BOUNDARY)
+        self.assertEqual(provider.market_scope, "us_equities_fundamentals")
+
 
 if __name__ == "__main__":
     unittest.main()

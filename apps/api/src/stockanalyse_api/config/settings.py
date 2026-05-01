@@ -38,7 +38,7 @@ def get_us_auto_refresh_provider() -> str:
 
 
 def get_us_fundamentals_provider() -> str:
-    return os.environ.get("STOCKANALYSE_US_FUNDAMENTALS_PROVIDER", "sec_companyfacts")
+    return os.environ.get("STOCKANALYSE_US_FUNDAMENTALS_PROVIDER", "sec_companyfacts_yahoo_fallback")
 
 
 def get_local_csv_raw_dir() -> Path:

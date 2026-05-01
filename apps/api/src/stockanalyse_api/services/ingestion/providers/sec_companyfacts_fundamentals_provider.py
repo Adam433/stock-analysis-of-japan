@@ -27,6 +27,8 @@ IFRS_NET_INCOME_TAGS = (
     "ProfitLoss",
 )
 ANNUAL_FORMS = {"10-K", "10-K/A", "20-F", "20-F/A", "40-F", "40-F/A"}
+SUPPLEMENTAL_ANNUAL_FORMS = {"6-K", "6-K/A"}
+REGISTRATION_ANNUAL_FORMS = {"S-1", "S-1/A", "F-1", "F-1/A"}
 MIN_ANNUAL_DURATION_DAYS = 300
 
 
@@ -69,18 +71,50 @@ class SecCompanyFactsFundamentalsProvider:
 
     def _resolve_cik(self, symbol: str) -> int | None:
         if self._ticker_to_cik is None:
-            payload = self._fetch_json("https://www.sec.gov/files/company_tickers.json")
             mapping: dict[str, int] = {}
-            if isinstance(payload, dict):
-                for row in payload.values():
-                    if not isinstance(row, dict):
-                        continue
-                    ticker = row.get("ticker")
-                    cik = row.get("cik_str")
-                    if ticker and cik is not None:
-                        mapping[str(ticker).upper()] = int(cik)
+            self._add_company_ticker_mapping(
+                mapping,
+                self._fetch_json("https://www.sec.gov/files/company_tickers.json"),
+            )
+            self._add_exchange_ticker_mapping(
+                mapping,
+                self._fetch_json("https://www.sec.gov/files/company_tickers_exchange.json"),
+            )
             self._ticker_to_cik = mapping
         return self._ticker_to_cik.get(symbol.replace(".", "-").upper())
+
+    @staticmethod
+    def _add_company_ticker_mapping(mapping: dict[str, int], payload: dict[str, object]) -> None:
+        if not isinstance(payload, dict):
+            return
+        for row in payload.values():
+            if not isinstance(row, dict):
+                continue
+            ticker = row.get("ticker")
+            cik = row.get("cik_str")
+            if ticker and cik is not None:
+                mapping[str(ticker).upper()] = int(cik)
+
+    @staticmethod
+    def _add_exchange_ticker_mapping(mapping: dict[str, int], payload: dict[str, object]) -> None:
+        if not isinstance(payload, dict):
+            return
+        fields = payload.get("fields")
+        data = payload.get("data")
+        if not isinstance(fields, list) or not isinstance(data, list):
+            return
+        try:
+            cik_index = fields.index("cik")
+            ticker_index = fields.index("ticker")
+        except ValueError:
+            return
+        for row in data:
+            if not isinstance(row, list) or len(row) <= max(cik_index, ticker_index):
+                continue
+            ticker = row[ticker_index]
+            cik = row[cik_index]
+            if ticker and cik is not None:
+                mapping.setdefault(str(ticker).upper(), int(cik))
 
     def _fetch_companyfacts(self, cik: int) -> dict[str, object]:
         return self._fetch_json(
@@ -124,12 +158,43 @@ class SecCompanyFactsFundamentalsProvider:
         if not isinstance(facts, dict):
             return []
 
+        for accepted_forms, allow_missing_fp, require_start_date in (
+            (ANNUAL_FORMS, False, False),
+            (ANNUAL_FORMS, True, True),
+            (SUPPLEMENTAL_ANNUAL_FORMS, True, True),
+            (REGISTRATION_ANNUAL_FORMS, True, True),
+        ):
+            candidates = self._collect_net_income_candidates(
+                symbol,
+                exchange,
+                facts,
+                accepted_forms=accepted_forms,
+                allow_missing_fp=allow_missing_fp,
+                require_start_date=require_start_date,
+            )
+            if candidates:
+                return max(
+                    candidates,
+                    key=lambda rows: (rows[-1].fiscal_year_end_date, len(rows)),
+                )
+        return []
+
+    def _collect_net_income_candidates(
+        self,
+        symbol: str,
+        exchange: str,
+        facts: dict[str, object],
+        *,
+        accepted_forms: set[str],
+        allow_missing_fp: bool,
+        require_start_date: bool,
+    ) -> list[list[ProviderFundamentalsAnnual]]:
         candidates: list[list[ProviderFundamentalsAnnual]] = []
         for taxonomy_name, tags in (
             ("us-gaap", NET_INCOME_TAGS),
             ("ifrs-full", IFRS_NET_INCOME_TAGS),
         ):
-            taxonomy = facts.get(taxonomy_name) if isinstance(facts, dict) else None
+            taxonomy = facts.get(taxonomy_name)
             if not isinstance(taxonomy, dict):
                 continue
             for tag in tags:
@@ -143,15 +208,13 @@ class SecCompanyFactsFundamentalsProvider:
                         exchange,
                         unit_rows,
                         currency=currency,
+                        accepted_forms=accepted_forms,
+                        allow_missing_fp=allow_missing_fp,
+                        require_start_date=require_start_date,
                     )
                     if parsed:
                         candidates.append(parsed[-10:])
-        if not candidates:
-            return []
-        return max(
-            candidates,
-            key=lambda rows: (rows[-1].fiscal_year_end_date, len(rows)),
-        )
+        return candidates
 
     def _parse_net_income_rows(
         self,
@@ -160,18 +223,27 @@ class SecCompanyFactsFundamentalsProvider:
         rows: list[object],
         *,
         currency: str = "USD",
+        accepted_forms: set[str] = ANNUAL_FORMS,
+        allow_missing_fp: bool = False,
+        require_start_date: bool = False,
     ) -> list[ProviderFundamentalsAnnual]:
         by_fiscal_year_end: dict[date, ProviderFundamentalsAnnual] = {}
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            if row.get("form") not in ANNUAL_FORMS or row.get("fp") != "FY":
+            form = row.get("form")
+            fiscal_period = row.get("fp")
+            if form not in accepted_forms:
+                continue
+            if fiscal_period != "FY" and not (allow_missing_fp and fiscal_period is None):
                 continue
             fiscal_year_end = self._read_date(row.get("end"))
             fiscal_year_start = self._read_date(row.get("start"))
             filed_date = self._read_date(row.get("filed")) or date.today()
             value = row.get("val")
             if fiscal_year_end is None or value is None:
+                continue
+            if require_start_date and fiscal_year_start is None:
                 continue
             if not self._is_annual_duration(fiscal_year_start, fiscal_year_end):
                 continue

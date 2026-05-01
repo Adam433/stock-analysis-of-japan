@@ -108,6 +108,35 @@ class ZeroVolumeProvider:
         ]
 
 
+class ProgressProvider:
+    def list_supported_instruments(self) -> list[ProviderInstrument]:
+        return [
+            ProviderInstrument(symbol="7203", exchange="TSE", instrument_type="common_stock"),
+            ProviderInstrument(symbol="6758", exchange="TSE", instrument_type="common_stock"),
+        ]
+
+    def fetch_daily_bars(
+        self,
+        symbols: list[str],
+        *,
+        start_after_by_symbol: dict[str, date] | None = None,
+    ) -> list[ProviderDailyBar]:
+        if symbols != ["7203"]:
+            return []
+        return [
+            ProviderDailyBar(
+                symbol="7203",
+                exchange="TSE",
+                trade_date=date(2026, 4, 12),
+                close=Decimal("1025"),
+                adj_close=Decimal("1025"),
+                volume=150,
+                data_source="test_provider",
+                instrument_name="Toyota Motor",
+            )
+        ]
+
+
 class IngestionReviewRegressionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
@@ -223,6 +252,22 @@ class IngestionReviewRegressionTests(unittest.TestCase):
             },
         )
         self.assertEqual(row.data_status, "unavailable")
+
+    def test_refresh_market_data_reports_symbol_progress_even_when_symbol_has_no_rows(self) -> None:
+        progress: list[dict[str, object]] = []
+
+        with self.session_factory() as session:
+            result = refresh_market_data(
+                session,
+                ProgressProvider(),
+                ["7203", "6758"],
+                progress_callback=progress.append,
+            )
+
+        self.assertEqual(result["processed"], 1)
+        self.assertIn(2, [payload.get("symbols_processed") for payload in progress])
+        self.assertEqual(progress[-1]["symbols_processed"], 2)
+        self.assertEqual(progress[-1]["processed"], 1)
 
     def test_resolve_fixture_path_falls_back_to_app_root_for_repo_root_execution(self) -> None:
         original_cwd = Path.cwd()
