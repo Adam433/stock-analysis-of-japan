@@ -34,6 +34,7 @@ from stockanalyse_api.services.dashboard_strategy_backtest import (
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 _INDEX_HTML_PATH = Path(__file__).resolve().parent.parent / "templates" / "dashboard.html"
+_CHART_HTML_PATH = Path(__file__).resolve().parent.parent / "templates" / "chart_view.html"
 
 
 class CupHandleParamsRequest(BaseModel):
@@ -218,13 +219,19 @@ class CupHandleRpsBacktestRequest(BaseModel):
     rps_threshold: int = Field(default=DEFAULT_RPS_THRESHOLD, ge=0, le=100)
     selected_rps_windows: list[int] = Field(default_factory=lambda: list(APPROVED_RPS_WINDOWS))
     min_rps_windows_passing: int = Field(default=2, ge=1, le=len(APPROVED_RPS_WINDOWS))
+    use_cup_handle: bool = True
     cup_handle_params: CupHandleParamsRequest = Field(default_factory=CupHandleParamsRequest)
     fundamental_growth_params: FundamentalGrowthParamsRequest = Field(
         default_factory=FundamentalGrowthParamsRequest
     )
     holding_days: int = Field(default=130, ge=1, le=500)
     stop_loss_pct: float = Field(default=-0.08, gt=-1, lt=0)
-    portfolio_cap: int = Field(default=20, ge=1, le=200)
+    take_profit_pct: float | None = Field(default=None, gt=0, le=10)
+    rps_exit_threshold: int | None = Field(default=None, ge=0, le=100)
+    portfolio_cap: int = Field(default=10, ge=1, le=200)
+    position_weight_pct: float = Field(default=0.10, gt=0, le=1)
+    allow_reentry_while_open: bool = False
+    entry_delay_days: int = Field(default=0, ge=0, le=60)
     entry_deferral_window_days: int = Field(default=5, ge=1, le=60)
     max_trades_returned: int = Field(default=300, ge=0, le=2000)
 
@@ -234,6 +241,221 @@ class CupHandleRpsBacktestRequest(BaseModel):
 def dashboard_index() -> HTMLResponse:
     html = _INDEX_HTML_PATH.read_text(encoding="utf-8")
     return HTMLResponse(content=html)
+
+
+@router.get("/chart-view", response_class=HTMLResponse, include_in_schema=False)
+def dashboard_chart_view() -> HTMLResponse:
+    html = _CHART_HTML_PATH.read_text(encoding="utf-8")
+    return HTMLResponse(content=html)
+
+
+@router.get("/optimization-results/{result_id}", response_class=HTMLResponse, include_in_schema=False)
+def dashboard_optimization_result_detail(result_id: int) -> HTMLResponse:
+    html = """
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>策略交易明细 · stockAnalyse</title>
+<style>
+  :root {
+    --bg: #111315; --panel: #191c20; --panel-subtle: #14171a;
+    --panel-border: #30363d; --text: #eef2f6; --muted: #9aa4b2;
+    --accent: #2dd4bf; --bad: #f43f5e; --good: #22c55e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Microsoft YaHei", sans-serif; font-size: 14px;
+  }
+  header {
+    padding: 16px 24px; border-bottom: 1px solid var(--panel-border);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    background: var(--panel);
+  }
+  h1 { margin: 0; font-size: 18px; }
+  main { padding: 16px 24px 28px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 8px; padding: 14px 16px; margin-bottom: 12px;
+  }
+  .muted { color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .stat { background: var(--panel-subtle); border-radius: 8px; padding: 10px; }
+  .stat .label { color: var(--muted); font-size: 12px; }
+  .stat .value { font-weight: 700; margin-top: 4px; overflow-wrap: anywhere; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--panel-border); }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  td { vertical-align: top; }
+  .reason { min-width: 180px; }
+  .gain { color: var(--good); }
+  .loss { color: var(--bad); }
+  button {
+    border: 1px solid var(--panel-border); border-radius: 8px; padding: 8px 12px;
+    background: transparent; color: var(--text); cursor: pointer; font-weight: 650;
+  }
+  .tabs { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .tabs button.active { background: var(--accent); color: #06201d; border-color: transparent; }
+  .empty { color: var(--muted); padding: 20px 0; text-align: center; }
+  @media (max-width: 760px) {
+    header { align-items: flex-start; flex-direction: column; }
+    main { padding: 12px; }
+    .grid { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>策略交易明细</h1>
+    <div class="muted" id="subtitle">加载中...</div>
+  </div>
+  <button type="button" onclick="window.location.href='/dashboard'">返回 Dashboard</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid" id="summaryGrid"></div>
+  </div>
+  <div class="card">
+    <div class="tabs">
+      <button type="button" class="active" data-period="validation">验证期</button>
+      <button type="button" data-period="train">训练期</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>股票代码</th>
+            <th>信号日</th>
+            <th>买入时间</th>
+            <th>买入价</th>
+            <th>买入原因</th>
+            <th>卖出时间</th>
+            <th>卖出价</th>
+            <th>卖出原因</th>
+            <th>收益</th>
+            <th>RPS</th>
+          </tr>
+        </thead>
+        <tbody id="tradeBody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="emptyState" style="display:none;">没有可显示的交易明细</div>
+  </div>
+</main>
+<script>
+  const resultId = __RESULT_ID__;
+  let detail = null;
+  let activePeriod = 'validation';
+
+  function escapeHtml(value) {
+    return String(value ?? '—').replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[char]));
+  }
+
+  function pct(value) {
+    if (value === null || value === undefined || value === '—') return '—';
+    const number = Number(value);
+    if (!Number.isFinite(number)) return escapeHtml(value);
+    return `${(number * 100).toFixed(2)}%`;
+  }
+
+  async function api(path) {
+    const res = await fetch(path);
+    if (!res.ok) {
+      let detailText = res.statusText;
+      try { detailText = (await res.json()).detail || detailText; } catch (_) {}
+      throw new Error(detailText);
+    }
+    return res.json();
+  }
+
+  function stat(label, value) {
+    return `<div class="stat"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div></div>`;
+  }
+
+  function formatHoldingDays(value) {
+    return value === null || value === undefined || value === '' ? '不限定' : value;
+  }
+
+  function renderSummary() {
+    const result = detail.optimization_result || {};
+    const params = detail.parameters || {};
+    const metrics = (result.validation_metrics || result.train_metrics || {});
+    document.getElementById('subtitle').textContent =
+      `结果 #${result.id} · 任务 #${result.optimization_run_id} · 排名 ${result.rank ?? '—'}`;
+    document.getElementById('summaryGrid').innerHTML = [
+      stat('参数', `RPS ${params.rps_threshold ?? '—'} · ${(params.selected_rps_windows || []).join('+') || '—'}`),
+      stat('卖点', `止损 ${params.stop_loss_pct ?? '—'} · RPS退 ${params.rps_exit_threshold ?? '—'} · 持有 ${formatHoldingDays(params.holding_days)}`),
+      stat('交易', `${metrics.completed_trades ?? '—'} 笔 · 胜率 ${pct(metrics.win_rate)}`),
+      stat('收益/风险', `总 ${pct(metrics.total_return)} · 回撤 ${pct(metrics.max_drawdown)}`),
+    ].join('');
+  }
+
+  function activeTrades() {
+    const section = detail[activePeriod];
+    return section && Array.isArray(section.trades) ? section.trades : [];
+  }
+
+  function renderTrades() {
+    const trades = activeTrades();
+    const body = document.getElementById('tradeBody');
+    document.getElementById('emptyState').style.display = trades.length ? 'none' : 'block';
+    body.innerHTML = trades.map((trade) => {
+      const ret = Number(trade.realized_return);
+      const returnClass = Number.isFinite(ret) && ret >= 0 ? 'gain' : 'loss';
+      return `
+        <tr>
+          <td>${escapeHtml(trade.symbol)}</td>
+          <td>${escapeHtml(trade.signal_date)}</td>
+          <td>${escapeHtml(trade.entry_date)}</td>
+          <td>${escapeHtml(trade.entry_price)}</td>
+          <td class="reason">${escapeHtml(trade.entry_reason)}</td>
+          <td>${escapeHtml(trade.exit_date)}</td>
+          <td>${escapeHtml(trade.exit_price)}</td>
+          <td class="reason">${escapeHtml(trade.exit_reason_label || trade.exit_reason)}</td>
+          <td class="${returnClass}">${pct(trade.realized_return)}</td>
+          <td>${escapeHtml(trade.rps_score)}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  document.querySelectorAll('[data-period]').forEach((button) => {
+    button.addEventListener('click', () => {
+      activePeriod = button.dataset.period;
+      document.querySelectorAll('[data-period]').forEach((item) =>
+        item.classList.toggle('active', item === button)
+      );
+      renderTrades();
+    });
+  });
+
+  api(`/backtests/optimization/results/${resultId}/detail?max_trades_returned=1000`)
+    .then((payload) => {
+      detail = payload.detail;
+      renderSummary();
+      if (!detail.validation) {
+        activePeriod = 'train';
+        document.querySelector('[data-period="validation"]').style.display = 'none';
+        document.querySelector('[data-period="train"]').classList.add('active');
+      }
+      renderTrades();
+    })
+    .catch((err) => {
+      document.getElementById('subtitle').textContent = `加载失败：${err.message}`;
+      document.getElementById('emptyState').style.display = 'block';
+    });
+</script>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html.replace("__RESULT_ID__", str(result_id)))
 
 
 @router.get("/api/overview")
@@ -327,12 +549,22 @@ def post_cup_handle_rps_backtest(payload: CupHandleRpsBacktestRequest) -> dict[s
                 rps_threshold=payload.rps_threshold,
                 selected_rps_windows=payload.selected_rps_windows,
                 min_rps_windows_passing=payload.min_rps_windows_passing,
+                use_cup_handle=payload.use_cup_handle,
                 cup_handle_params=payload.cup_handle_params.to_service_params(),
                 fundamental_growth_params=payload.fundamental_growth_params.to_service_params(),
                 market=payload.market,
                 holding_days=payload.holding_days,
                 stop_loss_pct=Decimal(str(payload.stop_loss_pct)),
+                take_profit_pct=(
+                    Decimal(str(payload.take_profit_pct))
+                    if payload.take_profit_pct is not None
+                    else None
+                ),
+                rps_exit_threshold=payload.rps_exit_threshold,
                 portfolio_cap=payload.portfolio_cap,
+                position_weight_pct=Decimal(str(payload.position_weight_pct)),
+                allow_reentry_while_open=payload.allow_reentry_while_open,
+                entry_delay_days=payload.entry_delay_days,
                 entry_deferral_window_days=payload.entry_deferral_window_days,
                 max_trades_returned=payload.max_trades_returned,
             )

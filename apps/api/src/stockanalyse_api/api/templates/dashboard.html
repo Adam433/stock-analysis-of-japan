@@ -4,7 +4,6 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>stockAnalyse · 内部预览 Dashboard</title>
-<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
   :root {
     --bg: #111315;
@@ -57,11 +56,11 @@
   }
   main {
     padding: 16px 24px 24px;
-    display: grid;
-    grid-template-columns: minmax(340px, 380px) 1fr;
-    gap: 16px;
-    align-items: start;
+    display: block;
+    max-width: 1400px;
+    margin: 0 auto;
   }
+  main > section { min-width: 0; }
   .card {
     background: var(--panel);
     border: 1px solid var(--panel-border);
@@ -103,16 +102,45 @@
   label.row input[type="checkbox"] { accent-color: var(--accent); }
   .field { margin-bottom: 10px; }
   .field label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
-  .field input[type="number"], .field input[type="date"] {
+  .label-with-hint {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .hint {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: rgba(154, 164, 178, 0.18);
+    color: var(--muted);
+    font-size: 10px; font-weight: 700;
+    cursor: help; position: relative; user-select: none;
+    line-height: 1;
+  }
+  .hint:hover, .hint:focus { color: var(--text); background: rgba(20, 184, 166, 0.25); }
+  .hint::after {
+    content: attr(data-tip);
+    position: absolute; left: 50%; top: calc(100% + 6px);
+    transform: translateX(-12px);
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--panel-border); border-radius: 6px;
+    padding: 8px 10px; font-size: 12px; font-weight: 400;
+    white-space: pre-line;
+    line-height: 1.45;
+    width: max-content; max-width: 260px;
+    z-index: 100;
+    opacity: 0; pointer-events: none;
+    transition: opacity .12s ease;
+    box-shadow: 0 6px 16px rgba(0,0,0,.35);
+  }
+  .hint:hover::after, .hint:focus::after { opacity: 1; }
+  .field input[type="number"], .field input[type="date"], .field input[type="text"], .field select {
     width: 100%; padding: 7px 8px; background: var(--panel-subtle);
     border: 1px solid var(--panel-border); color: var(--text); border-radius: 6px;
   }
   .field-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px 10px;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px 12px;
   }
-  .field-grid .field { margin-bottom: 0; }
+  .field-grid .field { margin-bottom: 0; min-width: 0; }
   .windows {
     display: flex; gap: 8px;
   }
@@ -135,6 +163,11 @@
     width: 100%; padding: 9px 12px; border-radius: 8px;
     border: 1px solid transparent; font-weight: 650; cursor: pointer;
     white-space: nowrap;
+  }
+  button.inline-action {
+    width: auto; padding: 5px 8px; border-radius: 6px;
+    border: 1px solid var(--panel-border); background: transparent; color: var(--text);
+    font-size: 12px; font-weight: 650; cursor: pointer; white-space: nowrap;
   }
   button.primary {
     background: var(--accent-strong); color: #06201d;
@@ -175,6 +208,29 @@
   .mini-badge.failed {
     background: rgba(244, 63, 94, 0.14); color: var(--bad);
   }
+  .button-row {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 8px; margin-top: 10px;
+  }
+  .progress-track {
+    width: 100%; height: 8px; border-radius: 999px;
+    background: var(--panel-subtle); overflow: hidden; margin-top: 8px;
+  }
+  .progress-fill {
+    width: 0%; height: 100%; border-radius: inherit;
+    background: var(--accent-strong); transition: width .2s ease;
+  }
+  .metric-muted { color: var(--muted); font-size: 11px; }
+  .comparison-box {
+    margin-top: 10px; padding: 10px; border-radius: 8px;
+    background: var(--panel-subtle); border: 1px solid var(--panel-border);
+  }
+  .comparison-chart {
+    width: 100%; height: 160px; margin-bottom: 10px;
+  }
+  .comparison-chart svg {
+    width: 100%; height: 100%; display: block;
+  }
   .table-wrap { overflow-x: auto; }
   table {
     width: 100%; border-collapse: collapse; font-size: 13px;
@@ -195,26 +251,6 @@
   .empty {
     text-align: center; color: var(--muted); padding: 24px 0;
   }
-  .chart-card { position: sticky; top: 12px; }
-  #chartHost {
-    width: 100%; height: clamp(380px, calc(100vh - 190px), 680px);
-    background: var(--panel-subtle); border-radius: 8px;
-  }
-  .chart-meta {
-    display: flex; justify-content: space-between; align-items: baseline;
-    gap: 12px; margin-bottom: 10px;
-  }
-  .chart-meta h3 { margin: 0; font-size: 16px; }
-  .chart-meta .pattern {
-    color: var(--muted); font-size: 12px; text-align: right;
-  }
-  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 8px; }
-  .legend span::before {
-    content: ""; display: inline-block; width: 8px; height: 8px;
-    border-radius: 50%; margin-right: 6px; vertical-align: middle;
-  }
-  .legend .rps::before { background: var(--accent); }
-  .legend .cup::before { background: var(--warn); }
   .toast {
     position: fixed; right: 18px; bottom: 18px;
     background: var(--bad); color: #fff; padding: 10px 14px;
@@ -224,16 +260,13 @@
   @media (max-width: 980px) {
     header { align-items: flex-start; flex-direction: column; gap: 6px; }
     .header-controls { justify-content: flex-start; }
-    main { grid-template-columns: 1fr; padding: 12px; }
-    .chart-card { position: static; }
-    #chartHost { height: 420px; }
+    main { padding: 12px; }
   }
   @media (max-width: 560px) {
     .stat-grid { grid-template-columns: 1fr; }
     .action-grid { grid-template-columns: 1fr; }
+    .button-row { grid-template-columns: 1fr; }
     .field-grid { grid-template-columns: 1fr; }
-    .chart-meta { align-items: flex-start; flex-direction: column; }
-    .chart-meta .pattern { text-align: left; }
   }
 </style>
 </head>
@@ -244,8 +277,8 @@
   </div>
   <div class="header-controls">
     <div class="market-switch" id="marketSwitch" role="group" aria-label="市场切换">
-      <button type="button" data-market="jp" class="active">日本</button>
-      <button type="button" data-market="us">美股</button>
+      <button type="button" data-market="jp">日本</button>
+      <button type="button" data-market="us" class="active">美股</button>
     </div>
     <div class="meta" id="lastTradeMeta">加载中…</div>
   </div>
@@ -464,8 +497,20 @@
           <input type="number" id="backtestStopLoss" min="-0.99" max="-0.01" step="0.01" value="-0.08" />
         </div>
         <div class="field">
-          <label>每日最多买入</label>
-          <input type="number" id="backtestPortfolioCap" min="1" max="200" value="20" />
+          <label>RPS 退出阈值</label>
+          <input type="number" id="backtestRpsExit" min="0" max="100" value="80" />
+        </div>
+        <div class="field">
+          <label>持仓上限</label>
+          <input type="number" id="backtestPortfolioCap" min="1" max="200" value="10" />
+        </div>
+        <div class="field">
+          <label>单票权重</label>
+          <input type="number" id="backtestPositionWeight" min="0.01" max="1" step="0.01" value="0.10" />
+        </div>
+        <div class="field">
+          <label>进场延迟日</label>
+          <input type="number" id="backtestEntryDelay" min="0" max="60" value="0" />
         </div>
         <div class="field">
           <label>进场等待窗口</label>
@@ -479,6 +524,7 @@
         <div class="stat"><div class="label">完成交易</div><div class="value" id="btCompletedTrades">—</div><div class="sub" id="btExcludedTrades">—</div></div>
         <div class="stat"><div class="label">平均收益</div><div class="value" id="btAverageReturn">—</div><div class="sub" id="btMedianReturn">—</div></div>
         <div class="stat"><div class="label">胜率</div><div class="value" id="btWinRate">—</div><div class="sub" id="btBestWorst">—</div></div>
+        <div class="stat"><div class="label">风险</div><div class="value" id="btStopLossRatio">—</div><div class="sub" id="btLossStreak">—</div></div>
       </div>
       <div class="table-wrap" style="margin-top: 10px;">
         <table>
@@ -490,6 +536,179 @@
           <tbody id="backtestTradesBody"></tbody>
         </table>
       </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title-row">
+        <h2>美股参数优化</h2>
+        <span class="mini-badge" id="optimizationPhase">未运行</span>
+      </div>
+      <div class="field-grid">
+        <div class="field">
+          <label>训练开始</label>
+          <input type="date" id="optimizationTrainStartDate" />
+        </div>
+        <div class="field">
+          <label>训练结束</label>
+          <input type="date" id="optimizationTrainEndDate" />
+        </div>
+        <div class="field">
+          <label>验证开始</label>
+          <input type="date" id="optimizationValidationStartDate" />
+        </div>
+        <div class="field">
+          <label>验证结束</label>
+          <input type="date" id="optimizationValidationEndDate" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>RPS 阈值</span>
+            <span class="hint" tabindex="0" data-tip="可输入多个 RPS 阈值并以逗号或空格分隔。&#10;例：85,90,95 表示同时尝试 85 / 90 / 95 三档。">?</span>
+          </label>
+          <input type="text" id="optimizationRpsThresholds" value="85,90,95" title="多值用逗号或空格分隔，例：85,90,95" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>RPS 窗口组合</span>
+            <span class="hint" tabindex="0" data-tip="多组窗口用分号 ; 分隔；同一组内的窗口用 + 连接。&#10;例：50+120;120+250;50+120+250 共三组。">?</span>
+          </label>
+          <input type="text" id="optimizationWindowSets" value="50+120;120+250;50+120+250" title="组间用 ; 组内用 + ，例：50+120;120+250;50+120+250" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>持有交易日（留空不限）</span>
+            <span class="hint" tabindex="0" data-tip="可输入多个持有日，用逗号分隔。&#10;留空表示不设上限（持有到退出条件触发）。&#10;例：60,100,130">?</span>
+          </label>
+          <input type="text" id="optimizationHoldingDays" value="60,100,130" title="多值用逗号分隔，留空表示不限定" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>止损比例</span>
+            <span class="hint" tabindex="0" data-tip="负数表示亏损阈值；可输入多个用逗号分隔。&#10;例：-0.06,-0.08,-0.10 即 -6% / -8% / -10%。">?</span>
+          </label>
+          <input type="text" id="optimizationStopLosses" value="-0.06,-0.08,-0.10" title="多值用逗号分隔，负数。例：-0.06,-0.08,-0.10" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>RPS 退出阈值</span>
+            <span class="hint" tabindex="0" data-tip="持仓中 RPS 跌破该阈值即退出；多个值用逗号分隔。&#10;留空表示不基于 RPS 退出。&#10;例：80,85">?</span>
+          </label>
+          <input type="text" id="optimizationRpsExits" value="80,85" title="多值用逗号分隔，留空不启用 RPS 退出" />
+        </div>
+        <div class="field">
+          <label>持仓上限</label>
+          <input type="number" id="optimizationPortfolioCap" min="1" max="200" value="10" />
+        </div>
+        <div class="field">
+          <label>单票权重</label>
+          <input type="number" id="optimizationPositionWeight" min="0.01" max="1" step="0.01" value="0.10" />
+        </div>
+        <div class="field">
+          <label>进场等待窗口</label>
+          <input type="number" id="optimizationEntryWindow" min="1" max="60" value="5" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>进场延迟日</span>
+            <span class="hint" tabindex="0" data-tip="信号出现后再延迟 N 个交易日才下单；可输入多个用逗号分隔。&#10;例：0,1,2">?</span>
+          </label>
+          <input type="text" id="optimizationEntryDelays" value="0" title="多值用逗号分隔，例：0,1,2" />
+        </div>
+        <div class="field">
+          <label>最大组合数</label>
+          <input type="number" id="optimizationMaxSets" min="1" max="5000" value="1000" />
+        </div>
+        <div class="field">
+          <label>搜索方式</label>
+          <select id="optimizationSearchMode">
+            <option value="grid">网格搜索</option>
+            <option value="random">随机搜索</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>随机种子</label>
+          <input type="number" id="optimizationRandomSeed" min="0" max="999999" value="42" />
+        </div>
+        <div class="field">
+          <label>排序目标</label>
+          <select id="optimizationObjective">
+            <option value="score">综合得分</option>
+            <option value="average_annualized_return">平均年化收益</option>
+            <option value="annualized_return">最高年化收益</option>
+            <option value="max_drawdown">最低回撤</option>
+            <option value="return_drawdown_ratio">最高收益回撤比</option>
+            <option value="win_rate">最高胜率</option>
+            <option value="total_return">最高总收益</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>预计组合数</label>
+          <input type="text" id="optimizationComboCount" value="—" readonly />
+        </div>
+      </div>
+      <label class="row" style="margin-top: 10px;">
+        <input type="checkbox" id="optimizationFundamentalOff" checked />
+        <span>包含财务条件关闭</span>
+      </label>
+      <label class="row">
+        <input type="checkbox" id="optimizationFundamentalGrowth" checked />
+        <span>包含 3 年正利润且至少 2 次增长</span>
+      </label>
+      <label class="row">
+        <input type="checkbox" id="optimizationCupShapeVariants" />
+        <span>加入杯柄形态组合</span>
+      </label>
+      <div class="button-row">
+        <button class="primary" id="runOptimization">创建并运行</button>
+        <button class="secondary" id="cancelOptimization">取消任务</button>
+        <button class="secondary" id="deleteOptimizationRun">删除任务</button>
+      </div>
+      <div id="optimizationStatus" class="status-box">尚未运行</div>
+      <div class="progress-track" aria-hidden="true">
+        <div class="progress-fill" id="optimizationProgress"></div>
+      </div>
+      <div class="table-wrap" style="margin-top: 10px;">
+        <table>
+          <thead>
+            <tr>
+              <th>对比</th><th>排名</th><th>得分</th><th>参数</th><th>验证指标</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="optimizationResultsBody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="optimizationResultsEmpty">尚无优化结果</div>
+      <div class="comparison-box" id="optimizationComparison" style="display:none;">
+        <div class="comparison-chart" id="optimizationComparisonChart"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>结果</th><th>参数</th><th>收益</th><th>风险</th><th>年度</th>
+              </tr>
+            </thead>
+            <tbody id="optimizationComparisonBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title-row">
+        <h2>策略预设</h2>
+        <button class="inline-action" id="refreshStrategyPresets">刷新</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>名称</th><th>参数</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="strategyPresetsBody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="strategyPresetsEmpty">尚无策略预设</div>
     </div>
 
     <div class="card">
@@ -508,38 +727,45 @@
       <div class="empty" id="hitsEmpty">尚未运行筛选</div>
     </div>
   </section>
-
-  <section>
-    <div class="card chart-card">
-      <div class="chart-meta">
-        <h3 id="chartTitle">选择左侧股票查看 K 线</h3>
-        <div class="pattern" id="chartPattern"></div>
-      </div>
-      <div id="chartHost"></div>
-      <div class="legend">
-        <span class="rps">RPS 满足条件日</span>
-        <span class="cup">杯柄突破日</span>
-      </div>
-    </div>
-  </section>
 </main>
 
 <div class="toast" id="toast"></div>
 
 <script>
   const state = {
-    market: 'jp',
+    market: 'us',
     overview: null,
     hits: [],
     selectedInstrumentId: null,
-    chart: null,
-    candleSeries: null,
+    optimizationRunId: null,
+    currentOptimizationRun: null,
+    optimizationPollTimer: null,
+    optimizationTicker: null,
+    optimizationResults: [],
+    selectedOptimizationResultIds: new Set(),
+    strategyPresets: [],
   };
   const MARKET_LABELS = { jp: '日本', us: '美股' };
+  const OPTIMIZATION_OBJECTIVE_LABELS = {
+    score: '综合得分',
+    average_annualized_return: '平均年化收益',
+    annualized_return: '最高年化收益',
+    max_drawdown: '最低回撤',
+    return_drawdown_ratio: '最高收益回撤比',
+    win_rate: '最高胜率',
+    total_return: '最高总收益',
+  };
   const MARKET_MAINTENANCE_HINTS = {
     jp: '日股维护使用当前后端配置的数据源，并按 TSE 普通股范围物化指标。',
     us: '美股行情默认使用 Yahoo Finance chart 研究数据源回填 20 年左右日线；业绩使用 SEC companyfacts。',
   };
+
+  function escapeHtml(value) {
+    if (value === null || value === undefined) return '';
+    return String(value).replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[char]));
+  }
 
   function showToast(msg) {
     const el = document.getElementById('toast');
@@ -573,6 +799,13 @@
     const raw = document.getElementById(id).value;
     const value = parseFloat(raw || '');
     return Number.isFinite(value) ? value : fallback;
+  }
+
+  function readOptionalInt(id) {
+    const raw = document.getElementById(id).value.trim();
+    if (!raw) return null;
+    const value = parseInt(raw, 10);
+    return Number.isFinite(value) ? value : null;
   }
 
   function getCupHandleParams() {
@@ -635,6 +868,13 @@
     };
   }
 
+  function syncRpsWindowLabels() {
+    document.querySelectorAll('#rpsWindows label').forEach((label) => {
+      const input = label.querySelector('input');
+      label.classList.toggle('active', input.checked);
+    });
+  }
+
   async function loadOverview() {
     try {
       const data = await api(
@@ -664,6 +904,8 @@
           `DB ${o.instruments_with_market_data}/${o.instruments_in_db}`
         : `${MARKET_LABELS[state.market]} · 尚无数据`;
       seedBacktestDates(o.latest_trade_date);
+      seedOptimizationDates(o.latest_trade_date);
+      updateOptimizationPreview();
     } catch (err) {
       showToast('加载概览失败: ' + err.message);
     }
@@ -679,6 +921,38 @@
       start.setFullYear(start.getFullYear() - 1);
       startInput.value = start.toISOString().slice(0, 10);
     }
+  }
+
+  function toIsoDate(value) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  function shiftYears(value, years) {
+    const shifted = new Date(value);
+    shifted.setFullYear(shifted.getFullYear() + years);
+    return shifted;
+  }
+
+  function shiftDays(value, days) {
+    const shifted = new Date(value);
+    shifted.setDate(shifted.getDate() + days);
+    return shifted;
+  }
+
+  function seedOptimizationDates(latestTradeDate) {
+    if (!latestTradeDate) return;
+    const trainStart = document.getElementById('optimizationTrainStartDate');
+    const trainEnd = document.getElementById('optimizationTrainEndDate');
+    const validationStart = document.getElementById('optimizationValidationStartDate');
+    const validationEnd = document.getElementById('optimizationValidationEndDate');
+    const latest = new Date(latestTradeDate + 'T00:00:00');
+    const defaultValidationStart = shiftYears(latest, -1);
+    const defaultTrainEnd = shiftDays(defaultValidationStart, -1);
+    const defaultTrainStart = shiftYears(defaultTrainEnd, -2);
+    if (!validationEnd.value) validationEnd.value = toIsoDate(latest);
+    if (!validationStart.value) validationStart.value = toIsoDate(defaultValidationStart);
+    if (!trainEnd.value) trainEnd.value = toIsoDate(defaultTrainEnd);
+    if (!trainStart.value) trainStart.value = toIsoDate(defaultTrainStart);
   }
 
   function fmt(value) {
@@ -867,23 +1141,38 @@
       const tr = document.createElement('tr');
       tr.dataset.id = hit.instrument_id;
       tr.innerHTML = `
-        <td><strong>${hit.symbol}</strong><div style="color:var(--muted);font-size:11px">${hit.exchange}</div></td>
-        <td>${hit.name || '—'}</td>
+        <td><strong>${escapeHtml(hit.symbol)}</strong><div style="color:var(--muted);font-size:11px">${escapeHtml(hit.exchange)}</div></td>
+        <td>${escapeHtml(hit.name) || '—'}</td>
         <td>${hit.rps_50 ?? '—'}</td>
         <td>${hit.rps_120 ?? '—'}</td>
         <td>${hit.rps_250 ?? '—'}</td>
-        <td>${hit.cup_handle_passed ? `<span class="badge warn">突破 ${hit.cup_handle_breakout_date || ''}</span>` : '—'}</td>
-        <td>${hit.fundamental_growth_years ? `<span class="badge ok">${hit.fundamental_growth_count ?? '—'}/${Math.max(hit.fundamental_growth_years - 1, 0)} ${hit.fundamental_growth_latest_year || ''}</span>` : '—'}</td>
+        <td>${hit.cup_handle_passed ? `<span class="badge warn">突破 ${escapeHtml(hit.cup_handle_breakout_date || '')}</span>` : '—'}</td>
+        <td>${renderFundamentalStatus(hit)}</td>
       `;
       tr.addEventListener('click', () => {
         document.querySelectorAll('#hitsBody tr.selected').forEach((row) =>
           row.classList.remove('selected')
         );
         tr.classList.add('selected');
-        loadChart(hit.instrument_id, hit.symbol, hit.name);
+        openChartWindow(hit.instrument_id, hit.symbol, hit.name);
       });
       body.appendChild(tr);
     }
+  }
+
+  function renderFundamentalStatus(hit) {
+    const status = hit.fundamental_growth_status || 'not_required';
+    if (status === 'not_required') return '关闭';
+    if (status === 'passed') {
+      return `<span class="badge ok">${hit.fundamental_growth_count ?? '—'}/${Math.max((hit.fundamental_growth_years || 1) - 1, 0)} ${hit.fundamental_growth_latest_year || ''}</span>`;
+    }
+    const labels = {
+      missing: '缺失',
+      insufficient_history: '年份不足',
+      not_positive: '非正利润',
+      growth_failed: '增长不足',
+    };
+    return `<span class="badge warn">${labels[status] || status}</span>`;
   }
 
   async function runScreen() {
@@ -896,6 +1185,10 @@
       renderHits(data.hits);
       if (data.hits.length === 0) {
         showToast('共扫描 ' + data.total_evaluated + ' 支股票，无命中');
+      } else if (data.diagnostics && data.diagnostics.fundamental_growth_status_counts) {
+        const counts = data.diagnostics.fundamental_growth_status_counts;
+        const missing = (counts.missing || 0) + (counts.insufficient_history || 0);
+        if (missing) showToast(`财务数据缺失/不足 ${fmt(missing)} 支已按当前条件跳过`);
       }
     } catch (err) {
       showToast('筛选失败: ' + err.message);
@@ -920,16 +1213,20 @@
     document.getElementById('btWinRate').textContent = formatRatioPct(result.win_rate);
     document.getElementById('btBestWorst').textContent =
       `最好 ${formatRatioPct(result.best_trade_return)} · 最差 ${formatRatioPct(result.worst_trade_return)}`;
+    document.getElementById('btStopLossRatio').textContent =
+      formatRatioPct(result.stop_loss_trigger_ratio);
+    document.getElementById('btLossStreak').textContent =
+      `止损 ${fmt(result.stop_loss_trades)} · RPS退 ${fmt(result.rps_exit_trades)} · 连亏 ${fmt(result.max_consecutive_losses)}`;
 
     const body = document.getElementById('backtestTradesBody');
     body.innerHTML = '';
     for (const trade of result.trades.slice(0, 30)) {
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td>${trade.signal_date}</td>
-        <td><strong>${trade.symbol}</strong><div style="color:var(--muted);font-size:11px">RPS ${trade.rps_score || '—'}</div></td>
-        <td>${trade.entry_date}<div style="color:var(--muted);font-size:11px">${trade.entry_price}</div></td>
-        <td>${trade.exit_date}<div style="color:var(--muted);font-size:11px">${trade.exit_reason}</div></td>
+        <td>${escapeHtml(trade.signal_date)}</td>
+        <td><strong>${escapeHtml(trade.symbol)}</strong><div style="color:var(--muted);font-size:11px">RPS ${escapeHtml(trade.rps_score) || '—'}</div></td>
+        <td>${escapeHtml(trade.entry_date)}<div style="color:var(--muted);font-size:11px">${escapeHtml(trade.entry_price)}</div></td>
+        <td>${escapeHtml(trade.exit_date)}<div style="color:var(--muted);font-size:11px">${escapeHtml(trade.exit_reason)}</div></td>
         <td>${formatRatioPct(trade.realized_return)}</td>
       `;
       body.appendChild(tr);
@@ -960,7 +1257,11 @@
         fundamental_growth_params: criteria.fundamental_growth_params,
         holding_days: readInt('backtestHoldingDays', 130),
         stop_loss_pct: readFloat('backtestStopLoss', -0.08),
-        portfolio_cap: readInt('backtestPortfolioCap', 20),
+        rps_exit_threshold: readOptionalInt('backtestRpsExit'),
+        portfolio_cap: readInt('backtestPortfolioCap', 10),
+        position_weight_pct: readFloat('backtestPositionWeight', 0.10),
+        allow_reentry_while_open: false,
+        entry_delay_days: readInt('backtestEntryDelay', 0),
         entry_deferral_window_days: readInt('backtestEntryWindow', 5),
         max_trades_returned: 300,
       });
@@ -976,6 +1277,855 @@
     }
   }
 
+  function parseNumberList(id, fallback, integerOnly) {
+    const raw = document.getElementById(id).value.trim();
+    const source = raw ? raw.split(/[,，\s]+/) : fallback;
+    const values = source
+      .map((item) => integerOnly ? parseInt(item, 10) : parseFloat(item))
+      .filter((value) => Number.isFinite(value));
+    return values.length ? values : fallback.map((item) => integerOnly ? parseInt(item, 10) : parseFloat(item));
+  }
+
+  function parseOptionalNumberList(id, integerOnly) {
+    const raw = document.getElementById(id).value.trim();
+    if (!raw) return [null];
+    const values = raw
+      .split(/[,，\s]+/)
+      .map((item) => integerOnly ? parseInt(item, 10) : parseFloat(item))
+      .filter((value) => Number.isFinite(value));
+    return values.length ? values : [null];
+  }
+
+  function formatHoldingDays(value) {
+    return value === null || value === undefined || value === '' ? '不限定' : value;
+  }
+
+  function parseWindowSets() {
+    const raw = document.getElementById('optimizationWindowSets').value.trim();
+    const groups = raw ? raw.split(/[;；]+/) : ['50+120+250'];
+    const parsed = groups
+      .map((group) => group
+        .split(/[+＋,，\s]+/)
+        .map((item) => parseInt(item, 10))
+        .filter((value) => Number.isFinite(value))
+      )
+      .filter((group) => group.length);
+    return parsed.length ? parsed : [[50, 120, 250]];
+  }
+
+  function getOptimizationFundamentalModes() {
+    const modes = [];
+    if (document.getElementById('optimizationFundamentalOff').checked) {
+      modes.push({ enabled: false });
+    }
+    if (document.getElementById('optimizationFundamentalGrowth').checked) {
+      modes.push({
+        enabled: true,
+        min_years: 3,
+        min_growth_count: 2,
+        min_yoy_growth_pct: '0',
+        require_positive_net_income: true,
+        reporting_lag_days: 120,
+      });
+    }
+    return modes.length ? modes : [{ enabled: false }];
+  }
+
+  function getOptimizationCupHandleParamSets() {
+    const base = getCupHandleParams();
+    if (!document.getElementById('optimizationCupShapeVariants').checked) {
+      return [base];
+    }
+    return [
+      Object.assign({}, base),
+      Object.assign({}, base, {
+        min_cup_depth_pct: 15,
+        max_cup_depth_pct: 40,
+        min_handle_pullback_pct: 8,
+        max_handle_pullback_pct: 20,
+      }),
+      Object.assign({}, base, {
+        require_breakout_volume: true,
+        min_breakout_volume_multiplier: 1.5,
+      }),
+      Object.assign({}, base, {
+        require_prior_uptrend: true,
+        min_prior_uptrend_pct: 20,
+        require_breakout_volume: true,
+        min_breakout_volume_multiplier: 1.5,
+      }),
+    ];
+  }
+
+  function getOptimizationParameterSpace() {
+    return {
+      rps_threshold: parseNumberList('optimizationRpsThresholds', ['90'], true),
+      selected_rps_windows: parseWindowSets(),
+      min_rps_windows_passing: [readInt('rpsMinPassing', 2)],
+      cup_handle_params: getOptimizationCupHandleParamSets(),
+      fundamental_growth_params: getOptimizationFundamentalModes(),
+      holding_days: parseOptionalNumberList('optimizationHoldingDays', true),
+      stop_loss_pct: parseNumberList('optimizationStopLosses', ['-0.08'], false).map((value) =>
+        value.toFixed(4)
+      ),
+      take_profit_pct: [null],
+      rps_exit_threshold: parseOptionalNumberList('optimizationRpsExits', true),
+      portfolio_cap: [readInt('optimizationPortfolioCap', 10)],
+      position_weight_pct: [readFloat('optimizationPositionWeight', 0.10).toFixed(4)],
+      allow_reentry_while_open: [false],
+      entry_delay_days: parseNumberList('optimizationEntryDelays', ['0'], true),
+      entry_deferral_window_days: [readInt('optimizationEntryWindow', 5)],
+    };
+  }
+
+  function stableStringify(value) {
+    if (value === null || typeof value !== 'object') {
+      return JSON.stringify(value === undefined ? null : value);
+    }
+    if (Array.isArray(value)) {
+      return '[' + value.map(stableStringify).join(',') + ']';
+    }
+    const keys = Object.keys(value).sort();
+    return '{' + keys.map((key) => JSON.stringify(key) + ':' + stableStringify(value[key])).join(',') + '}';
+  }
+
+  function countOptimizationCombinations(parameterSpace) {
+    const axes = [
+      parameterSpace.rps_threshold,
+      parameterSpace.selected_rps_windows,
+      parameterSpace.min_rps_windows_passing,
+      parameterSpace.cup_handle_params,
+      parameterSpace.fundamental_growth_params,
+      parameterSpace.holding_days,
+      parameterSpace.stop_loss_pct,
+      parameterSpace.take_profit_pct,
+      parameterSpace.rps_exit_threshold,
+      parameterSpace.portfolio_cap,
+      parameterSpace.position_weight_pct,
+      parameterSpace.allow_reentry_while_open,
+      parameterSpace.entry_delay_days,
+      parameterSpace.entry_deferral_window_days,
+    ].map((values) => Array.isArray(values) && values.length ? values : [null]);
+    const seen = new Set();
+    const current = new Array(axes.length);
+    function recurse(index) {
+      if (index === axes.length) {
+        seen.add(stableStringify(current));
+        return;
+      }
+      for (const value of axes[index]) {
+        current[index] = value;
+        recurse(index + 1);
+      }
+    }
+    recurse(0);
+    return seen.size;
+  }
+
+  function updateOptimizationPreview() {
+    try {
+      const count = countOptimizationCombinations(getOptimizationParameterSpace());
+      const maxSets = readInt('optimizationMaxSets', 1000);
+      const searchMode = document.getElementById('optimizationSearchMode').value;
+      const scheduledCount = searchMode === 'random' ? Math.min(count, maxSets) : count;
+      const overview = state.overview;
+      const dataText = overview
+        ? ` · 行情 ${fmt(overview.instruments_with_market_data)} · 指标 ${fmt(overview.instruments_with_indicators_at_latest)} · 业绩 ${fmt(overview.instruments_with_fundamentals)}`
+        : '';
+      document.getElementById('optimizationComboCount').value = searchMode === 'random'
+        ? `${fmt(scheduledCount)} / ${fmt(count)}`
+        : fmt(count);
+      if (!state.optimizationRunId) {
+        const modeText = searchMode === 'random' ? '随机抽样' : '网格搜索';
+        document.getElementById('optimizationStatus').textContent =
+          `${modeText} · 预计 ${fmt(scheduledCount)} 组参数 · 上限 ${fmt(maxSets)} · ` +
+          `${OPTIMIZATION_OBJECTIVE_LABELS[document.getElementById('optimizationObjective').value] || '综合得分'}${dataText}`;
+      }
+    } catch (err) {
+      document.getElementById('optimizationComboCount').value = '参数错误';
+    }
+  }
+
+  function updateOptimizationPhase(status) {
+    const el = document.getElementById('optimizationPhase');
+    el.classList.toggle('running', status === 'running' || status === 'cancel_requested');
+    el.classList.toggle('failed', status === 'failed');
+    const labels = {
+      running: '运行中',
+      completed: '完成',
+      failed: '失败',
+      cancel_requested: '取消中',
+      cancelled: '已取消',
+    };
+    el.textContent = labels[status] || '未运行';
+  }
+
+  function formatDuration(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return '—';
+    const total = Math.floor(seconds);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    if (h > 0) return `${h}时${m}分${s}秒`;
+    if (m > 0) return `${m}分${s}秒`;
+    return `${s}秒`;
+  }
+
+  function computeRunTiming(run) {
+    if (!run || !run.started_at) return { elapsedSec: null, etaSec: null, totalSec: null };
+    const start = Date.parse(run.started_at);
+    if (!Number.isFinite(start)) return { elapsedSec: null, etaSec: null, totalSec: null };
+    const end = run.completed_at ? Date.parse(run.completed_at) : Date.now();
+    const elapsedSec = Math.max(0, (end - start) / 1000);
+    const total = Number(run.total_parameter_sets || 0);
+    const done = Number(run.completed_parameter_sets || 0) + Number(run.failed_parameter_sets || 0);
+    let etaSec = null;
+    let totalSec = null;
+    if (total > 0 && done > 0 && !run.completed_at) {
+      totalSec = (elapsedSec / done) * total;
+      etaSec = Math.max(0, totalSec - elapsedSec);
+    }
+    return { elapsedSec, etaSec, totalSec };
+  }
+
+  function startOptimizationTicker() {
+    if (state.optimizationTicker) return;
+    state.optimizationTicker = window.setInterval(() => {
+      const run = state.currentOptimizationRun;
+      if (!run || (run.status !== 'running' && run.status !== 'cancel_requested')) {
+        window.clearInterval(state.optimizationTicker);
+        state.optimizationTicker = null;
+        return;
+      }
+      renderOptimizationRun(run);
+    }, 1000);
+  }
+
+  function renderOptimizationRun(run) {
+    state.optimizationRunId = run.id;
+    state.currentOptimizationRun = run;
+    updateOptimizationPhase(run.status);
+    if (run.status === 'running' || run.status === 'cancel_requested') {
+      startOptimizationTicker();
+    }
+    const total = Number(run.total_parameter_sets || 0);
+    const completed = Number(run.completed_parameter_sets || 0);
+    const failed = Number(run.failed_parameter_sets || 0);
+    const done = completed + failed;
+    const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    document.getElementById('optimizationProgress').style.width = pct + '%';
+    const best = run.best_result_id ? ` · 当前最佳 #${run.best_result_id}` : '';
+    const error = run.error_message ? ` · ${run.error_message}` : '';
+    const modeText = run.search_mode === 'random' ? '随机抽样' : '网格搜索';
+    const timing = computeRunTiming(run);
+    const timingParts = [];
+    if (timing.elapsedSec !== null) {
+      timingParts.push(`已运行 ${formatDuration(timing.elapsedSec)}`);
+    }
+    if (timing.etaSec !== null) {
+      timingParts.push(`预计剩余 ${formatDuration(timing.etaSec)}`);
+    }
+    const timingText = timingParts.length ? ` · ${timingParts.join(' · ')}` : '';
+    document.getElementById('optimizationStatus').textContent =
+      `${run.status} · ${modeText} · ${OPTIMIZATION_OBJECTIVE_LABELS[run.objective] || run.objective} · ` +
+      `进度 ${fmt(done)}/${fmt(total)} (${pct}%) · 失败 ${fmt(failed)}${timingText}${best}${error}`;
+    const running = run.status === 'running' || run.status === 'cancel_requested';
+    document.getElementById('runOptimization').disabled = running;
+    document.getElementById('runOptimization').textContent = running ? '运行中…' : '创建并运行';
+    document.getElementById('cancelOptimization').disabled = !running;
+  }
+
+  function renderOptimizationResults(results) {
+    state.optimizationResults = results;
+    const liveIds = new Set(results.map((result) => result.id));
+    state.selectedOptimizationResultIds.forEach((id) => {
+      if (!liveIds.has(id)) state.selectedOptimizationResultIds.delete(id);
+    });
+    const body = document.getElementById('optimizationResultsBody');
+    body.innerHTML = '';
+    document.getElementById('optimizationResultsEmpty').style.display = results.length ? 'none' : 'block';
+    for (const result of results) {
+      const params = result.parameters || {};
+      const metrics = result.validation_metrics || result.train_metrics || {};
+      const windows = Array.isArray(params.selected_rps_windows)
+        ? params.selected_rps_windows.join('+')
+        : '—';
+      const statusBadge = result.status === 'completed'
+        ? `<span class="badge">完成</span>`
+        : `<span class="badge warn">失败</span>`;
+      const tr = document.createElement('tr');
+      if (result.status === 'completed') {
+        tr.dataset.detailResult = result.id;
+      }
+      tr.innerHTML = `
+        <td>
+          ${result.status === 'completed' ? `<input type="checkbox" data-compare-result="${result.id}" ${state.selectedOptimizationResultIds.has(result.id) ? 'checked' : ''} />` : '—'}
+        </td>
+        <td>${result.rank || '—'}<div class="metric-muted">${statusBadge}</div></td>
+        <td>${result.score || '—'}</td>
+        <td>
+          RPS ${params.rps_threshold || '—'} · ${windows}
+          <div class="metric-muted">持有 ${formatHoldingDays(params.holding_days)} · 延迟 ${params.entry_delay_days || 0} · 止损 ${params.stop_loss_pct || '—'}</div>
+          <div class="metric-muted">RPS 退出 ${params.rps_exit_threshold || '—'} · 持仓 ${params.portfolio_cap || '—'} · 权重 ${formatRatioPct(params.position_weight_pct)}</div>
+        </td>
+        <td>
+          年化 ${formatRatioPct(metrics.annualized_return)} · 回撤 ${formatRatioPct(metrics.max_drawdown)}
+          <div class="metric-muted">交易 ${fmt(metrics.completed_trades)} · 胜率 ${formatRatioPct(metrics.win_rate)} · 均值 ${formatRatioPct(metrics.average_trade_return)}</div>
+          <div class="metric-muted">总收益 ${formatRatioPct(metrics.total_return)} · 收益/回撤 ${metrics.return_drawdown_ratio || '—'}</div>
+          <div class="metric-muted">止损 ${formatRatioPct(metrics.stop_loss_trigger_ratio)} · RPS退 ${formatRatioPct(metrics.rps_exit_trigger_ratio)}</div>
+          <div class="metric-muted">平均年化 ${formatRatioPct(metrics.average_annualized_return)} · 连亏 ${fmt(metrics.max_consecutive_losses)}</div>
+          <div class="metric-muted">${optimizationRankSummary(result)}</div>
+        </td>
+        <td>
+          ${result.status === 'completed' ? `
+            <button class="inline-action" data-detail-result="${result.id}">详情</button>
+            <button class="inline-action" data-save-preset="${result.id}">保存</button>
+            <button class="inline-action" data-rerun-result="${result.id}">重跑</button>
+          ` : ''}
+          <button class="inline-action" data-delete-result="${result.id}">删除</button>
+        </td>
+      `;
+      body.appendChild(tr);
+    }
+    body.querySelectorAll('tr[data-detail-result]').forEach((row) => {
+      row.addEventListener('click', () => {
+        window.open(`/dashboard/optimization-results/${row.dataset.detailResult}`, '_blank');
+      });
+    });
+    body.querySelectorAll('[data-compare-result]').forEach((input) => {
+      input.addEventListener('click', (event) => event.stopPropagation());
+      input.addEventListener('change', (event) => {
+        event.stopPropagation();
+        const id = parseInt(input.dataset.compareResult, 10);
+        if (input.checked) {
+          state.selectedOptimizationResultIds.add(id);
+        } else {
+          state.selectedOptimizationResultIds.delete(id);
+        }
+        renderOptimizationComparison();
+      });
+    });
+    body.querySelectorAll('[data-detail-result]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        window.open(`/dashboard/optimization-results/${button.dataset.detailResult}`, '_blank');
+      });
+    });
+    body.querySelectorAll('[data-save-preset]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        saveOptimizationPreset(parseInt(button.dataset.savePreset, 10));
+      });
+    });
+    body.querySelectorAll('[data-rerun-result]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        rerunOptimizationResult(parseInt(button.dataset.rerunResult, 10));
+      });
+    });
+    body.querySelectorAll('[data-delete-result]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        deleteOptimizationResult(parseInt(button.dataset.deleteResult, 10));
+      });
+    });
+    renderOptimizationComparison();
+  }
+
+  async function deleteOptimizationResult(resultId) {
+    if (!window.confirm(`删除该参数组结果（#${resultId}）？此操作不可恢复。`)) return;
+    try {
+      await api('DELETE', `/backtests/optimization/results/${resultId}`);
+      showToast('已删除');
+      state.selectedOptimizationResultIds.delete(resultId);
+      if (state.optimizationRunId) {
+        await loadOptimizationResults(state.optimizationRunId);
+      } else {
+        renderOptimizationResults(state.optimizationResults.filter((r) => r.id !== resultId));
+      }
+    } catch (err) {
+      showToast('删除失败: ' + err.message);
+    }
+  }
+
+  async function deleteOptimizationRun() {
+    const runId = state.optimizationRunId;
+    if (!runId) return;
+    const run = state.currentOptimizationRun;
+    if (run && (run.status === 'running' || run.status === 'cancel_requested')) {
+      showToast('请先取消任务再删除');
+      return;
+    }
+    if (!window.confirm(`删除整次优化任务 #${runId} 及其所有结果？此操作不可恢复。`)) return;
+    try {
+      await api('DELETE', `/backtests/optimization/runs/${runId}`);
+      showToast('任务已删除');
+      window.clearTimeout(state.optimizationPollTimer);
+      if (state.optimizationTicker) {
+        window.clearInterval(state.optimizationTicker);
+        state.optimizationTicker = null;
+      }
+      state.optimizationRunId = null;
+      state.currentOptimizationRun = null;
+      state.optimizationResults = [];
+      state.selectedOptimizationResultIds.clear();
+      updateOptimizationPhase(null);
+      renderOptimizationResults([]);
+      renderOptimizationComparison();
+      document.getElementById('optimizationProgress').style.width = '0%';
+      document.getElementById('optimizationStatus').textContent = '尚未运行';
+      document.getElementById('runOptimization').disabled = false;
+      document.getElementById('runOptimization').textContent = '创建并运行';
+      document.getElementById('cancelOptimization').disabled = true;
+      await loadLatestOptimizationRun();
+    } catch (err) {
+      showToast('删除失败: ' + err.message);
+    }
+  }
+
+  function optimizationMetricSource(result) {
+    return result.validation_metrics || result.train_metrics || {};
+  }
+
+  function optimizationRankSummary(result) {
+    const trainMetrics = result.train_metrics || {};
+    const validationMetrics = result.validation_metrics || {};
+    if (result.validation_metrics) {
+      const gap = validationMetrics.train_validation_rank_gap;
+      return `训练 #${trainMetrics.train_rank || '—'} · 验证 #${validationMetrics.validation_rank || '—'} · 差 ${gap === undefined || gap === null ? '—' : gap}`;
+    }
+    if (result.train_metrics) {
+      return `训练 #${trainMetrics.train_rank || result.rank || '—'}`;
+    }
+    return '—';
+  }
+
+  function optimizationParamSummary(parameters) {
+    const windows = Array.isArray(parameters.selected_rps_windows)
+      ? parameters.selected_rps_windows.join('+')
+      : '—';
+    return `RPS ${parameters.rps_threshold || '—'} · ${windows}`;
+  }
+
+  function formatYearlyReturns(yearlyReturns) {
+    if (!yearlyReturns || typeof yearlyReturns !== 'object') return '—';
+    const parts = Object.entries(yearlyReturns)
+      .sort(([left], [right]) => left < right ? -1 : 1)
+      .map(([year, value]) => `${year} ${formatRatioPct(value)}`);
+    return parts.length ? parts.join(' · ') : '—';
+  }
+
+  function renderOptimizationComparisonChart(selectedResults) {
+    const chart = document.getElementById('optimizationComparisonChart');
+    const series = selectedResults
+      .map((result) => ({
+        result,
+        points: (optimizationMetricSource(result).equity_curve || [])
+          .map((point) => Number(point.equity))
+          .filter((value) => Number.isFinite(value)),
+      }))
+      .filter((item) => item.points.length);
+    if (!series.length) {
+      chart.innerHTML = '<div class="empty">暂无可比较的权益曲线</div>';
+      return;
+    }
+    const allValues = series.flatMap((item) => item.points);
+    const minValue = Math.min(...allValues, 1);
+    const maxValue = Math.max(...allValues, 1);
+    const range = Math.max(maxValue - minValue, 0.000001);
+    const colors = ['#2dd4bf', '#f59e0b', '#60a5fa', '#f43f5e', '#a78bfa'];
+    const polylines = series.map((item, index) => {
+      const denominator = Math.max(item.points.length - 1, 1);
+      const points = item.points.map((value, pointIndex) => {
+        const x = 24 + (pointIndex / denominator) * 312;
+        const y = 128 - ((value - minValue) / range) * 104;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(' ');
+      const labelY = 18 + index * 14;
+      const color = colors[index % colors.length];
+      return `
+        <polyline points="${points}" fill="none" stroke="${color}" stroke-width="2" />
+        <text x="24" y="${labelY}" fill="${color}" font-size="10">#${item.result.rank || item.result.id}</text>
+      `;
+    }).join('');
+    chart.innerHTML = `
+      <svg viewBox="0 0 360 150" role="img" aria-label="优化结果权益曲线对比">
+        <line x1="24" y1="128" x2="336" y2="128" stroke="rgba(154,164,178,0.35)" />
+        <line x1="24" y1="24" x2="24" y2="128" stroke="rgba(154,164,178,0.35)" />
+        ${polylines}
+      </svg>
+    `;
+  }
+
+  function renderOptimizationComparison() {
+    const selectedResults = state.optimizationResults.filter((result) =>
+      state.selectedOptimizationResultIds.has(result.id)
+    );
+    const box = document.getElementById('optimizationComparison');
+    if (!selectedResults.length) {
+      box.style.display = 'none';
+      document.getElementById('optimizationComparisonBody').innerHTML = '';
+      document.getElementById('optimizationComparisonChart').innerHTML = '';
+      return;
+    }
+    box.style.display = 'block';
+    renderOptimizationComparisonChart(selectedResults);
+    const body = document.getElementById('optimizationComparisonBody');
+    body.innerHTML = '';
+    for (const result of selectedResults) {
+      const metrics = optimizationMetricSource(result);
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>#${result.rank || result.id}<div class="metric-muted">${result.score || '—'}</div><div class="metric-muted">${optimizationRankSummary(result)}</div></td>
+        <td>${optimizationParamSummary(result.parameters || {})}<div class="metric-muted">持有 ${formatHoldingDays((result.parameters || {}).holding_days)} · 延迟 ${(result.parameters || {}).entry_delay_days || 0} · 止损 ${(result.parameters || {}).stop_loss_pct || '—'} · RPS退 ${(result.parameters || {}).rps_exit_threshold || '—'}</div></td>
+        <td>总 ${formatRatioPct(metrics.total_return)}<div class="metric-muted">年化 ${formatRatioPct(metrics.annualized_return)} · 平均年化 ${formatRatioPct(metrics.average_annualized_return)}</div></td>
+        <td>回撤 ${formatRatioPct(metrics.max_drawdown)}<div class="metric-muted">止损 ${formatRatioPct(metrics.stop_loss_trigger_ratio)} · RPS退 ${formatRatioPct(metrics.rps_exit_trigger_ratio)}</div></td>
+        <td>${formatYearlyReturns(metrics.yearly_returns)}</td>
+      `;
+      body.appendChild(tr);
+    }
+  }
+
+  async function loadOptimizationResults(runId) {
+    try {
+      const data = await api('GET', `/backtests/optimization/runs/${runId}/results?limit=30&offset=0`);
+      renderOptimizationResults(data.results || []);
+    } catch (err) {
+      showToast('加载优化结果失败: ' + err.message);
+    }
+  }
+
+  async function pollOptimizationRun(runId) {
+    window.clearTimeout(state.optimizationPollTimer);
+    try {
+      const data = await api('GET', `/backtests/optimization/runs/${runId}`);
+      const run = data.optimization_run;
+      renderOptimizationRun(run);
+      await loadOptimizationResults(runId);
+      if (run.status === 'running' || run.status === 'cancel_requested') {
+        state.optimizationPollTimer = window.setTimeout(() => pollOptimizationRun(runId), 3000);
+      }
+    } catch (err) {
+      showToast('查询优化任务失败: ' + err.message);
+      document.getElementById('runOptimization').disabled = false;
+      document.getElementById('runOptimization').textContent = '创建并运行';
+    }
+  }
+
+  async function loadLatestOptimizationRun() {
+    try {
+      const data = await api('GET', `/backtests/optimization/runs/latest?market=${state.market}`);
+      const run = data.optimization_run;
+      if (!run) return;
+      renderOptimizationRun(run);
+      await loadOptimizationResults(run.id);
+      if (run.status === 'running' || run.status === 'cancel_requested') {
+        window.clearTimeout(state.optimizationPollTimer);
+        state.optimizationPollTimer = window.setTimeout(() => pollOptimizationRun(run.id), 3000);
+      }
+    } catch (err) {
+      console.warn('load latest optimization run failed', err);
+    }
+  }
+
+  async function runOptimization() {
+    if (state.market !== 'us') {
+      showToast('请先切换到美股市场');
+      return;
+    }
+    const trainStart = document.getElementById('optimizationTrainStartDate').value;
+    const trainEnd = document.getElementById('optimizationTrainEndDate').value;
+    const validationStart = document.getElementById('optimizationValidationStartDate').value;
+    const validationEnd = document.getElementById('optimizationValidationEndDate').value;
+    if (!trainStart || !trainEnd) {
+      showToast('请先选择训练区间');
+      return;
+    }
+    const parameterSpace = getOptimizationParameterSpace();
+    const count = countOptimizationCombinations(parameterSpace);
+    const maxSets = readInt('optimizationMaxSets', 200);
+    const searchMode = document.getElementById('optimizationSearchMode').value;
+    if (searchMode === 'grid' && count > maxSets) {
+      showToast(`参数组合 ${fmt(count)} 超过上限 ${fmt(maxSets)}，请提高最大组合数或切换为随机搜索`);
+      return;
+    }
+    const randomSeed = parseInt(document.getElementById('optimizationRandomSeed').value, 10);
+    const btn = document.getElementById('runOptimization');
+    btn.disabled = true;
+    btn.textContent = '启动中…';
+    document.getElementById('optimizationStatus').textContent = '正在创建优化任务并执行数据预检…';
+    renderOptimizationResults([]);
+    try {
+      const payload = {
+        market: 'us',
+        train_start_date: trainStart,
+        train_end_date: trainEnd,
+        validation_start_date: validationStart || null,
+        validation_end_date: validationEnd || null,
+        parameter_space: parameterSpace,
+        objective: document.getElementById('optimizationObjective').value,
+        max_parameter_sets: maxSets,
+        search_mode: searchMode,
+        random_seed: searchMode === 'random' && Number.isFinite(randomSeed) ? randomSeed : null,
+        execute_immediately: true,
+      };
+      const data = await api('POST', '/backtests/optimization/runs', payload);
+      const run = data.optimization_run;
+      renderOptimizationRun(run);
+      pollOptimizationRun(run.id);
+    } catch (err) {
+      showToast('启动优化失败: ' + err.message);
+      btn.disabled = false;
+      btn.textContent = '创建并运行';
+      updateOptimizationPhase(null);
+      document.getElementById('optimizationStatus').textContent = '启动失败：' + err.message;
+    }
+  }
+
+  async function cancelOptimization() {
+    if (!state.optimizationRunId) return;
+    document.getElementById('cancelOptimization').disabled = true;
+    try {
+      const data = await api('POST', `/backtests/optimization/runs/${state.optimizationRunId}/cancel`);
+      renderOptimizationRun(data.optimization_run);
+      pollOptimizationRun(state.optimizationRunId);
+    } catch (err) {
+      showToast('取消优化失败: ' + err.message);
+    }
+  }
+
+  async function saveOptimizationPreset(resultId) {
+    const result = state.optimizationResults.find((item) => item.id === resultId);
+    if (!result) return;
+    const name = window.prompt('预设名称', `US 参数优化 #${result.rank || result.id}`);
+    if (!name) return;
+    try {
+      await api('POST', '/strategy-presets', {
+        market: 'us',
+        name,
+        description: `来自优化任务 #${result.optimization_run_id} / 结果 #${result.id}`,
+        parameters: result.parameters,
+        source_optimization_run_id: result.optimization_run_id,
+        source_optimization_result_id: result.id,
+      });
+      showToast('策略预设已保存');
+      loadStrategyPresets();
+    } catch (err) {
+      showToast('保存预设失败: ' + err.message);
+    }
+  }
+
+  function setInputValue(id, value) {
+    const el = document.getElementById(id);
+    if (!el || value === undefined || value === null) return;
+    el.value = value;
+  }
+
+  function setCheckboxValue(id, value) {
+    const el = document.getElementById(id);
+    if (!el || value === undefined || value === null) return;
+    el.checked = Boolean(value);
+  }
+
+  function applyStrategyParameters(parameters) {
+    if (!parameters) return;
+    setInputValue('rpsThreshold', parameters.rps_threshold);
+    setInputValue('rpsMinPassing', parameters.min_rps_windows_passing);
+    if (Array.isArray(parameters.selected_rps_windows)) {
+      const windows = new Set(parameters.selected_rps_windows.map((item) => String(item)));
+      document.querySelectorAll('#rpsWindows input').forEach((input) => {
+        input.checked = windows.has(String(input.value));
+      });
+      syncRpsWindowLabels();
+    }
+
+    const cup = parameters.cup_handle_params || {};
+    const cupMappings = {
+      min_cup_duration: 'cupMinDuration',
+      max_cup_duration: 'cupMaxDuration',
+      min_handle_duration: 'handleMinDuration',
+      max_handle_duration: 'handleMaxDuration',
+      min_total_duration: 'cupMinTotal',
+      max_total_duration: 'cupMaxTotal',
+      min_cup_depth_pct: 'cupMinDepth',
+      max_cup_depth_pct: 'cupMaxDepth',
+      min_handle_pullback_pct: 'handleMinPullback',
+      max_handle_pullback_pct: 'handleMaxPullback',
+      max_right_lip_delta_pct: 'rightLipMaxDelta',
+      prior_uptrend_lookback_days: 'priorUptrendLookback',
+      min_prior_uptrend_pct: 'priorUptrendMinPct',
+      min_handle_low_position_pct: 'handleLowPosition',
+      max_handle_depth_to_cup_depth_pct: 'handleDepthToCupDepth',
+      max_handle_high_above_lip_pct: 'handleHighAboveLip',
+      min_bottom_dwell_days: 'bottomDwellDays',
+      bottom_zone_pct: 'bottomZonePct',
+      min_bottom_span_pct: 'bottomSpanPct',
+      min_cup_side_duration_pct: 'cupSideDurationPct',
+      breakout_volume_avg_days: 'breakoutVolumeAvgDays',
+      min_breakout_volume_multiplier: 'breakoutVolumeMultiplier',
+      breakout_lookback_days: 'breakoutLookback',
+      lookback_days: 'cupLookback',
+    };
+    Object.entries(cupMappings).forEach(([key, id]) => setInputValue(id, cup[key]));
+    setCheckboxValue('requirePriorUptrend', cup.require_prior_uptrend);
+    setCheckboxValue('requireBreakoutVolume', cup.require_breakout_volume);
+
+    const fundamentals = parameters.fundamental_growth_params || {};
+    setCheckboxValue('useFundamentalGrowth', fundamentals.enabled);
+    setInputValue('fundamentalYears', fundamentals.min_years);
+    setInputValue('fundamentalGrowthCount', fundamentals.min_growth_count);
+    setInputValue('fundamentalMinYoyPct', fundamentals.min_yoy_growth_pct);
+    setInputValue('fundamentalLagDays', fundamentals.reporting_lag_days);
+    setCheckboxValue('fundamentalPositiveOnly', fundamentals.require_positive_net_income);
+
+    setInputValue('backtestHoldingDays', parameters.holding_days);
+    setInputValue('backtestStopLoss', parameters.stop_loss_pct);
+    setInputValue('backtestRpsExit', parameters.rps_exit_threshold);
+    setInputValue('backtestPortfolioCap', parameters.portfolio_cap);
+    setInputValue('backtestPositionWeight', parameters.position_weight_pct);
+    setInputValue('backtestEntryDelay', parameters.entry_delay_days);
+    setInputValue('backtestEntryWindow', parameters.entry_deferral_window_days);
+
+    setInputValue('optimizationRpsThresholds', parameters.rps_threshold);
+    if (Array.isArray(parameters.selected_rps_windows)) {
+      setInputValue('optimizationWindowSets', parameters.selected_rps_windows.join('+'));
+    }
+    setInputValue('optimizationHoldingDays', parameters.holding_days);
+    setInputValue('optimizationStopLosses', parameters.stop_loss_pct);
+    setInputValue('optimizationRpsExits', parameters.rps_exit_threshold);
+    setInputValue('optimizationPortfolioCap', parameters.portfolio_cap);
+    setInputValue('optimizationPositionWeight', parameters.position_weight_pct);
+    setInputValue('optimizationEntryDelays', parameters.entry_delay_days);
+    setInputValue('optimizationEntryWindow', parameters.entry_deferral_window_days);
+    document.getElementById('optimizationFundamentalOff').checked = !Boolean(fundamentals.enabled);
+    document.getElementById('optimizationFundamentalGrowth').checked = Boolean(fundamentals.enabled);
+    updateOptimizationPreview();
+  }
+
+  async function rerunOptimizationResult(resultId) {
+    const result = state.optimizationResults.find((item) => item.id === resultId);
+    if (!result || !state.currentOptimizationRun) return;
+    applyStrategyParameters(result.parameters);
+    document.getElementById('backtestStartDate').value = state.currentOptimizationRun.train_start_date;
+    document.getElementById('backtestEndDate').value =
+      state.currentOptimizationRun.validation_end_date || state.currentOptimizationRun.train_end_date;
+    await runStrategyBacktest();
+  }
+
+  function renderStrategyPresets(presets) {
+    state.strategyPresets = presets;
+    const body = document.getElementById('strategyPresetsBody');
+    body.innerHTML = '';
+    document.getElementById('strategyPresetsEmpty').style.display = presets.length ? 'none' : 'block';
+    for (const preset of presets) {
+      const params = preset.parameters || {};
+      const windows = Array.isArray(params.selected_rps_windows)
+        ? params.selected_rps_windows.join('+')
+        : '—';
+      const active = preset.is_active ? '<span class="badge">默认</span>' : '';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${escapeHtml(preset.name)}</strong> ${active}<div class="metric-muted">${escapeHtml(preset.description || '')}</div></td>
+        <td>RPS ${escapeHtml(params.rps_threshold) || '—'} · ${escapeHtml(windows)}<div class="metric-muted">持有 ${escapeHtml(formatHoldingDays(params.holding_days))} · 止损 ${escapeHtml(params.stop_loss_pct) || '—'} · RPS退 ${escapeHtml(params.rps_exit_threshold) || '—'} · 持仓 ${escapeHtml(params.portfolio_cap) || '—'}</div></td>
+        <td>
+          <button class="inline-action" data-apply-preset="${preset.id}">应用</button>
+          <button class="inline-action" data-activate-preset="${preset.id}">默认</button>
+          <button class="inline-action" data-copy-preset="${preset.id}">复制</button>
+          <button class="inline-action" data-edit-preset="${preset.id}">改名</button>
+          <button class="inline-action" data-delete-preset="${preset.id}">删除</button>
+        </td>
+      `;
+      body.appendChild(tr);
+    }
+    body.querySelectorAll('[data-apply-preset]').forEach((button) => {
+      button.addEventListener('click', () => applyPreset(parseInt(button.dataset.applyPreset, 10)));
+    });
+    body.querySelectorAll('[data-activate-preset]').forEach((button) => {
+      button.addEventListener('click', () => activatePreset(parseInt(button.dataset.activatePreset, 10)));
+    });
+    body.querySelectorAll('[data-copy-preset]').forEach((button) => {
+      button.addEventListener('click', () => duplicatePreset(parseInt(button.dataset.copyPreset, 10)));
+    });
+    body.querySelectorAll('[data-edit-preset]').forEach((button) => {
+      button.addEventListener('click', () => renamePreset(parseInt(button.dataset.editPreset, 10)));
+    });
+    body.querySelectorAll('[data-delete-preset]').forEach((button) => {
+      button.addEventListener('click', () => deletePreset(parseInt(button.dataset.deletePreset, 10)));
+    });
+  }
+
+  async function loadStrategyPresets(options = {}) {
+    try {
+      const data = await api('GET', `/strategy-presets?market=${encodeURIComponent(state.market)}`);
+      const presets = data.strategy_presets || [];
+      renderStrategyPresets(presets);
+      if (options.applyActive) {
+        const activePreset = presets.find((preset) => preset.is_active);
+        if (activePreset) applyStrategyParameters(activePreset.parameters);
+      }
+    } catch (err) {
+      showToast('加载策略预设失败: ' + err.message);
+    }
+  }
+
+  function applyPreset(presetId) {
+    const preset = state.strategyPresets.find((item) => item.id === presetId);
+    if (!preset) return;
+    if (preset.market !== state.market) setMarket(preset.market);
+    applyStrategyParameters(preset.parameters);
+    showToast('策略预设已应用');
+  }
+
+  async function activatePreset(presetId) {
+    try {
+      await api('POST', `/strategy-presets/${presetId}/activate`);
+      await loadStrategyPresets({ applyActive: true });
+      showToast('默认策略预设已更新');
+    } catch (err) {
+      showToast('设置默认预设失败: ' + err.message);
+    }
+  }
+
+  async function duplicatePreset(presetId) {
+    const preset = state.strategyPresets.find((item) => item.id === presetId);
+    if (!preset) return;
+    const name = window.prompt('复制后的预设名称', `${preset.name} Copy`);
+    if (!name) return;
+    try {
+      await api('POST', `/strategy-presets/${presetId}/duplicate`, { name });
+      await loadStrategyPresets();
+      showToast('策略预设已复制');
+    } catch (err) {
+      showToast('复制预设失败: ' + err.message);
+    }
+  }
+
+  async function renamePreset(presetId) {
+    const preset = state.strategyPresets.find((item) => item.id === presetId);
+    if (!preset) return;
+    const name = window.prompt('新的预设名称', preset.name);
+    if (!name) return;
+    try {
+      await api('PATCH', `/strategy-presets/${presetId}`, { name });
+      await loadStrategyPresets();
+      showToast('策略预设已更新');
+    } catch (err) {
+      showToast('更新预设失败: ' + err.message);
+    }
+  }
+
+  async function deletePreset(presetId) {
+    const preset = state.strategyPresets.find((item) => item.id === presetId);
+    if (!preset || !window.confirm(`删除策略预设「${preset.name}」？`)) return;
+    try {
+      await api('DELETE', `/strategy-presets/${presetId}`);
+      await loadStrategyPresets();
+      showToast('策略预设已删除');
+    } catch (err) {
+      showToast('删除预设失败: ' + err.message);
+    }
+  }
+
   function resetMarketScopedViews() {
     renderHits([]);
     state.selectedInstrumentId = null;
@@ -986,12 +2136,18 @@
     document.getElementById('backtestStatus').textContent = '尚未运行';
     document.getElementById('backtestStats').style.display = 'none';
     document.getElementById('backtestTradesBody').innerHTML = '';
-    document.getElementById('chartTitle').textContent = '选择左侧股票查看 K 线';
-    document.getElementById('chartPattern').textContent = '';
-    if (state.candleSeries) {
-      state.candleSeries.setData([]);
-      state.candleSeries.setMarkers([]);
-    }
+    state.optimizationRunId = null;
+    state.currentOptimizationRun = null;
+    state.selectedOptimizationResultIds.clear();
+    window.clearTimeout(state.optimizationPollTimer);
+    updateOptimizationPhase(null);
+    renderOptimizationResults([]);
+    renderOptimizationComparison();
+    document.getElementById('optimizationProgress').style.width = '0%';
+    document.getElementById('optimizationStatus').textContent = '尚未运行';
+    document.getElementById('runOptimization').disabled = false;
+    document.getElementById('runOptimization').textContent = '创建并运行';
+    document.getElementById('cancelOptimization').disabled = true;
   }
 
   function setMarket(market) {
@@ -1005,87 +2161,21 @@
     resetMarketScopedViews();
     updateMaintenanceHint();
     loadOverview();
+    loadStrategyPresets({ applyActive: true });
+    loadLatestOptimizationRun();
   }
 
-  function ensureChart() {
-    if (state.chart) return;
-    const host = document.getElementById('chartHost');
-    state.chart = LightweightCharts.createChart(host, {
-      layout: { background: { color: 'transparent' }, textColor: '#e2e8f0' },
-      grid: {
-        vertLines: { color: 'rgba(148, 163, 184, 0.1)' },
-        horzLines: { color: 'rgba(148, 163, 184, 0.1)' },
-      },
-      rightPriceScale: { borderColor: 'rgba(148, 163, 184, 0.3)' },
-      timeScale: { borderColor: 'rgba(148, 163, 184, 0.3)' },
-      crosshair: { mode: 1 },
-      autoSize: true,
+  function openChartWindow(instrumentId, symbol, name) {
+    if (!instrumentId) return;
+    const criteria = getCriteria();
+    const params = new URLSearchParams({
+      id: String(instrumentId),
+      symbol: symbol || '',
+      name: name || '',
+      criteria: encodeURIComponent(JSON.stringify(criteria)),
     });
-    state.candleSeries = state.chart.addCandlestickSeries({
-      upColor: '#22c55e', downColor: '#ef4444',
-      borderUpColor: '#22c55e', borderDownColor: '#ef4444',
-      wickUpColor: '#22c55e', wickDownColor: '#ef4444',
-    });
-  }
-
-  async function loadChart(instrumentId, symbol, name) {
-    state.selectedInstrumentId = instrumentId;
-    document.getElementById('chartTitle').textContent =
-      `${symbol}${name ? ' · ' + name : ''}`;
-    document.getElementById('chartPattern').textContent = '加载中…';
-    try {
-      const criteria = getCriteria();
-      const data = await api('POST', `/dashboard/api/chart/${instrumentId}`, criteria);
-      ensureChart();
-      const candles = data.candles
-        .filter((c) => c.open !== null && c.close !== null)
-        .map((c) => ({
-          time: c.trade_date,
-          open: c.open, high: c.high, low: c.low, close: c.close,
-        }));
-      state.candleSeries.setData(candles);
-
-      const markers = [];
-      const rpsDates = new Set(data.rps_marker_dates || []);
-      for (const d of rpsDates) {
-        markers.push({
-          time: d, position: 'aboveBar', color: '#14b8a6',
-          shape: 'circle', text: 'R',
-        });
-      }
-      if (data.cup_handle_breakout_date) {
-        markers.push({
-          time: data.cup_handle_breakout_date,
-          position: 'aboveBar', color: '#f59e0b',
-          shape: 'arrowUp', text: '杯柄突破',
-        });
-      }
-      markers.sort((a, b) => (a.time < b.time ? -1 : 1));
-      state.candleSeries.setMarkers(markers);
-      state.chart.timeScale().fitContent();
-
-      if (data.cup_handle_pattern) {
-        const p = data.cup_handle_pattern;
-        const quality = [
-          p.handle_position_pct ? `把手位置 ${p.handle_position_pct}%` : null,
-          p.handle_depth_to_cup_depth_pct ? `把手/杯深 ${p.handle_depth_to_cup_depth_pct}%` : null,
-          p.prior_uptrend_pct ? `前涨 ${p.prior_uptrend_pct}%` : null,
-          p.breakout_volume_ratio ? `放量 ${p.breakout_volume_ratio}x` : null,
-        ].filter(Boolean).join(' · ');
-        document.getElementById('chartPattern').textContent =
-          `周期 ${p.total_duration}日 · 杯身 ${p.cup_duration}日 · 把手 ${p.handle_duration}日 · ` +
-          `杯深 ${p.cup_depth_pct}% · 把手回调 ${p.handle_depth_pct}% · ` +
-          (quality ? `${quality} · ` : '') +
-          `左唇 ${p.left_lip_date} → 杯底 ${p.cup_bottom_date} → 右唇 ${p.right_lip_date} → 突破 ${p.breakout_date}`;
-      } else {
-        const rpsCount = data.rps_marker_dates ? data.rps_marker_dates.length : 0;
-        document.getElementById('chartPattern').textContent =
-          rpsCount ? `RPS 满足条件日 ${rpsCount} 个` : '';
-      }
-    } catch (err) {
-      showToast('加载 K 线失败: ' + err.message);
-      document.getElementById('chartPattern').textContent = '';
-    }
+    const url = `/dashboard/chart-view?${params.toString()}`;
+    window.open(url, `stockChart-${instrumentId}`, 'noopener,noreferrer');
   }
 
   document.getElementById('runScreen').addEventListener('click', runScreen);
@@ -1093,6 +2183,11 @@
   document.getElementById('runMaterialize').addEventListener('click', () => runMaintenance('materialize'));
   document.getElementById('runFundamentals').addEventListener('click', () => runMaintenance('fundamentals'));
   document.getElementById('runStrategyBacktest').addEventListener('click', runStrategyBacktest);
+  document.getElementById('runOptimization').addEventListener('click', runOptimization);
+  document.getElementById('cancelOptimization').addEventListener('click', cancelOptimization);
+  document.getElementById('deleteOptimizationRun').addEventListener('click', deleteOptimizationRun);
+  document.getElementById('refreshStrategyPresets').addEventListener('click', loadStrategyPresets);
+  document.getElementById('cancelOptimization').disabled = true;
   document.querySelectorAll('#marketSwitch button').forEach((button) => {
     button.addEventListener('click', () => setMarket(button.dataset.market));
     button.setAttribute('aria-pressed', button.classList.contains('active') ? 'true' : 'false');
@@ -1101,13 +2196,37 @@
 
   document.querySelectorAll('#rpsWindows label').forEach((label) => {
     const input = label.querySelector('input');
-    const sync = () => label.classList.toggle('active', input.checked);
-    input.addEventListener('change', sync);
-    sync();
+    input.addEventListener('change', syncRpsWindowLabels);
+  });
+  syncRpsWindowLabels();
+
+  [
+    'optimizationRpsThresholds',
+    'optimizationWindowSets',
+    'optimizationHoldingDays',
+    'optimizationStopLosses',
+    'optimizationRpsExits',
+    'optimizationPortfolioCap',
+    'optimizationPositionWeight',
+    'optimizationEntryDelays',
+    'optimizationEntryWindow',
+    'optimizationMaxSets',
+    'optimizationSearchMode',
+    'optimizationRandomSeed',
+    'optimizationObjective',
+    'optimizationFundamentalOff',
+    'optimizationFundamentalGrowth',
+    'optimizationCupShapeVariants',
+  ].forEach((id) => {
+    document.getElementById(id).addEventListener('input', updateOptimizationPreview);
+    document.getElementById(id).addEventListener('change', updateOptimizationPreview);
   });
 
   updateMaintenanceHint();
+  updateOptimizationPreview();
   loadOverview();
+  loadStrategyPresets({ applyActive: true });
+  loadLatestOptimizationRun();
 </script>
 </body>
 </html>

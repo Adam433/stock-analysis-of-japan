@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from stockanalyse_api.db.base import Base, TimestampMixin
@@ -17,6 +17,14 @@ BACKTEST_RUN_STATUS_VALUES = (
     "failed-data-insufficient",
 )
 BACKTEST_LIFECYCLE_VALUES = ("portfolio_return", "legacy_condition_hit")
+OPTIMIZATION_RUN_STATUS_VALUES = (
+    "running",
+    "completed",
+    "failed",
+    "cancel_requested",
+    "cancelled",
+)
+OPTIMIZATION_RESULT_STATUS_VALUES = ("completed", "failed")
 PORTFOLIO_RETURN_PROVENANCE_CONSTRAINT = (
     "(backtest_lifecycle = 'legacy_condition_hit') OR "
     "(backtest_lifecycle = 'portfolio_return' AND source_screen_run_id IS NOT NULL AND rps_definition_version IS NULL)"
@@ -80,3 +88,89 @@ class BacktestRun(TimestampMixin, Base):
     last_qualified_trade_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     result_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class OptimizationRun(TimestampMixin, Base):
+    __tablename__ = "optimization_runs"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN {OPTIMIZATION_RUN_STATUS_VALUES}",
+            name="optimization_runs_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    market: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    train_start_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    train_end_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    validation_start_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    validation_end_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    objective: Mapped[str] = mapped_column(String(64), nullable=False, default="score", server_default="score")
+    parameter_space_json: Mapped[str] = mapped_column(Text, nullable=False)
+    parameter_sets_json: Mapped[str] = mapped_column(Text, nullable=False)
+    data_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="running", server_default="running")
+    total_parameter_sets: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    completed_parameter_sets: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    failed_parameter_sets: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    best_result_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            "optimization_results.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_optimization_runs_best_result_id_optimization_results",
+        ),
+        nullable=True,
+        index=True,
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class OptimizationResult(TimestampMixin, Base):
+    __tablename__ = "optimization_results"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN {OPTIMIZATION_RESULT_STATUS_VALUES}",
+            name="optimization_results_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    optimization_run_id: Mapped[int] = mapped_column(
+        ForeignKey("optimization_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    parameter_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    parameters_json: Mapped[str] = mapped_column(Text, nullable=False)
+    train_metrics_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    validation_metrics_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    score: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True, index=True)
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="completed", server_default="completed")
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class StrategyPreset(TimestampMixin, Base):
+    __tablename__ = "strategy_presets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    market: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parameters_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    parameters_json: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    source_optimization_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("optimization_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    source_optimization_result_id: Mapped[int | None] = mapped_column(
+        ForeignKey("optimization_results.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )

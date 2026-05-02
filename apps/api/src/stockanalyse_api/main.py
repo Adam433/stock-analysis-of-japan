@@ -16,6 +16,7 @@ from stockanalyse_api.api.routes import health_router
 from stockanalyse_api.api.routes import screening_router
 from stockanalyse_api.api.routes import stocks_router
 from stockanalyse_api.api.routes import strategy_config_router
+from stockanalyse_api.api.routes import strategy_presets_router
 from stockanalyse_api.api.routes import watchlist_router
 from stockanalyse_api.services.operations.auto_refresh import AutoRefreshRuntime
 
@@ -68,6 +69,7 @@ def create_app(*, auto_refresh_runtime: AutoRefreshRuntime | None = None) -> Fas
 
     app.include_router(health_router)
     app.include_router(strategy_config_router)
+    app.include_router(strategy_presets_router)
     app.include_router(screening_router)
     app.include_router(stocks_router)
     app.include_router(watchlist_router)

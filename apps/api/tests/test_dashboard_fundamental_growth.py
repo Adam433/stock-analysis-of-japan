@@ -105,6 +105,7 @@ class DashboardFundamentalGrowthTests(unittest.TestCase):
 
         self.assertEqual([hit["symbol"] for hit in result["hits"]], ["7203.T"])
         self.assertEqual(result["hits"][0]["rps_pass_count"], 2)
+        self.assertEqual(result["hits"][0]["fundamental_growth_status"], "passed")
         self.assertEqual(result["hits"][0]["fundamental_growth_count"], 2)
 
     def test_fundamental_growth_uses_reporting_lag_to_avoid_future_data(self) -> None:
@@ -152,6 +153,42 @@ class DashboardFundamentalGrowthTests(unittest.TestCase):
             )
 
         self.assertEqual(result["hits"], [])
+        self.assertEqual(
+            result["diagnostics"]["fundamental_growth_status_counts"]["insufficient_history"],
+            1,
+        )
+
+    def test_fundamental_growth_reports_missing_status(self) -> None:
+        signal_date = date(2024, 8, 1)
+        with self.session_factory() as session:
+            instrument = Instrument(symbol="AAPL", exchange="US", name="Apple")
+            session.add(instrument)
+            session.flush()
+            session.add(
+                DerivedIndicatorDaily(
+                    instrument_id=instrument.id,
+                    trade_date=signal_date,
+                    rps_50=Decimal("95"),
+                    rps_120=Decimal("95"),
+                    rps_250=Decimal("95"),
+                )
+            )
+            session.commit()
+
+            result = screen_universe(
+                session,
+                use_rps=True,
+                rps_threshold=85,
+                selected_rps_windows=[50, 120, 250],
+                min_rps_windows_passing=2,
+                use_cup_handle=False,
+                fundamental_growth_params=FundamentalGrowthParams(enabled=True),
+                trade_date=signal_date,
+                market="us",
+            )
+
+        self.assertEqual(result["hits"], [])
+        self.assertEqual(result["diagnostics"]["fundamental_growth_status_counts"]["missing"], 1)
 
 
 if __name__ == "__main__":

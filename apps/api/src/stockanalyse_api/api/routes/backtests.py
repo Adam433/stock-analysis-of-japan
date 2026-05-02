@@ -28,6 +28,19 @@ from stockanalyse_api.services.portfolio_backtest_traceability import (
     resolve_screen_run_or_unavailable,
     resolve_semantics_via_source_screen_run,
 )
+from stockanalyse_api.services.optimization_backtest import (
+    build_optimization_result_detail,
+    cancel_optimization_run,
+    create_optimization_run,
+    delete_optimization_result,
+    delete_optimization_run,
+    dispatch_optimization_run_execution,
+    get_optimization_run,
+    get_latest_optimization_run,
+    list_optimization_results,
+    serialize_optimization_result,
+    serialize_optimization_run,
+)
 
 router = APIRouter(prefix="/backtests", tags=["backtests"])
 
@@ -45,6 +58,22 @@ class PortfolioReturnBacktestRunCreateRequest(BaseModel):
     stop_loss_pct: float | None = None
     portfolio_cap: int | None = None
     entry_deferral_window_days: int | None = None
+
+
+class OptimizationRunCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    market: str = "us"
+    train_start_date: date
+    train_end_date: date
+    validation_start_date: date | None = None
+    validation_end_date: date | None = None
+    parameter_space: dict[str, object] | None = None
+    objective: str = "score"
+    max_parameter_sets: int = 1000
+    search_mode: str = "grid"
+    random_seed: int | None = None
+    execute_immediately: bool = True
 
 
 def _require_portfolio_return_completed_run(session, run_id: int):
@@ -91,7 +120,7 @@ def _build_aligned_equity_curve(equity_curve: list[dict[str, object]]) -> list[d
 def _resolve_traceability_or_raise(session, run_id: int) -> dict[str, object]:
     try:
         return resolve_semantics_via_source_screen_run(session, run_id)
-    except SourceScreenRunUnavailableError as exc:
+    except SourceScreenRunUnavailableError:
         raise
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -131,6 +160,119 @@ def _serialize_portfolio_return_result(session, run_id: int) -> dict[str, object
 @router.get("/defaults")
 def read_portfolio_return_backtest_defaults() -> dict[str, object]:
     return {"defaults": get_portfolio_backtest_defaults()}
+
+
+@router.post("/optimization/runs")
+def create_parameter_optimization_run(payload: OptimizationRunCreateRequest) -> dict[str, object]:
+    try:
+        with SessionLocal() as session:
+            run = create_optimization_run(
+                session,
+                market=payload.market,
+                train_start_date=payload.train_start_date,
+                train_end_date=payload.train_end_date,
+                validation_start_date=payload.validation_start_date,
+                validation_end_date=payload.validation_end_date,
+                parameter_space=payload.parameter_space,
+                objective=payload.objective,
+                max_parameter_sets=payload.max_parameter_sets,
+                search_mode=payload.search_mode,
+                random_seed=payload.random_seed,
+                require_data_ready=True,
+            )
+            run_payload = serialize_optimization_run(run)
+        if payload.execute_immediately:
+            dispatch_optimization_run_execution(int(run_payload["id"]))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {"optimization_run": run_payload}
+
+
+@router.get("/optimization/runs/latest")
+def read_latest_parameter_optimization_run(market: str = "us") -> dict[str, object]:
+    try:
+        with SessionLocal() as session:
+            run = get_latest_optimization_run(session, market=market)
+            return {
+                "optimization_run": serialize_optimization_run(run) if run is not None else None
+            }
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/optimization/runs/{run_id}")
+def read_parameter_optimization_run(run_id: int) -> dict[str, object]:
+    with SessionLocal() as session:
+        run = get_optimization_run(session, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Optimization run not found.")
+        return {"optimization_run": serialize_optimization_run(run)}
+
+
+@router.get("/optimization/runs/{run_id}/results")
+def read_parameter_optimization_results(
+    run_id: int,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict[str, object]:
+    with SessionLocal() as session:
+        run = get_optimization_run(session, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Optimization run not found.")
+        results = list_optimization_results(session, run_id=run_id, limit=limit, offset=offset)
+        return {"results": [serialize_optimization_result(result) for result in results]}
+
+
+@router.get("/optimization/results/{result_id}/detail")
+def read_parameter_optimization_result_detail(
+    result_id: int,
+    max_trades_returned: int = 1000,
+) -> dict[str, object]:
+    try:
+        with SessionLocal() as session:
+            detail = build_optimization_result_detail(
+                session,
+                result_id=result_id,
+                max_trades_returned=max_trades_returned,
+            )
+            return {"detail": detail}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/optimization/runs/{run_id}/cancel")
+def cancel_parameter_optimization_run(run_id: int) -> dict[str, object]:
+    try:
+        with SessionLocal() as session:
+            run = cancel_optimization_run(session, run_id)
+            return {"optimization_run": serialize_optimization_run(run)}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/optimization/runs/{run_id}")
+def delete_parameter_optimization_run(run_id: int) -> dict[str, object]:
+    try:
+        with SessionLocal() as session:
+            delete_optimization_run(session, run_id)
+            return {"deleted": True}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.delete("/optimization/results/{result_id}")
+def delete_parameter_optimization_result(result_id: int) -> dict[str, object]:
+    try:
+        with SessionLocal() as session:
+            delete_optimization_result(session, result_id)
+            return {"deleted": True}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/runs")

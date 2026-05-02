@@ -1,7 +1,117 @@
-    □ US price source: add ALPHAVANTAGE_API_KEY path, run small AAPL/MSFT ingest, confirm adjusted OHLCV rows and split handling.
-    □ US universe: replace seed data/us_stock_symbols.txt with a real NYSE/NASDAQ common-stock universe and keep ETF/ADR/noise out.
-    ✓ US fundamentals: run SEC companyfacts refresh for imported US instruments, validate ticker->CIK mapping and net_income annual rows. Completed 2026-04-28: 4,617/4,800 US instruments covered, 21,373 annual net-income rows after 20-F/40-F/IFRS retry.
-    □ US materialization: materialize derived facts after US ingest, verify US RPS is ranked only against US instruments.
-    □ US dashboard UX: show US data-source/key errors clearly, add fundamentals refresh trigger or documented workflow.
-    □ US backtest: run cup-handle + RPS + fundamentals parameter sweeps on US history, record win rate, drawdown, stop-loss sensitivity.
-    □ Provider fallback: evaluate non-Yahoo/non-Alpha alternatives if Alpha adjusted daily is paywalled/rate-limited for full universe.
+# 美股自动化回测与参数优化 TodoList
+
+## 目标
+
+- ✓ 建立一套面向美股市场的自动化回测系统，用于批量测试杯柄形态、RPS、财务增长、买点和卖点策略参数。已完成后端优化任务、参数组合生成、批量执行和结果持久化。
+- ✓ 支持保存参数组合、保存回测结果、比较多组参数表现，并把最优参数一键沉淀为可复用的策略预设。已完成后端预设 API 和 Dashboard 排行榜保存入口。
+- ✓ 优化目标不能只看单次收益，需要同时考虑收益、胜率、最大回撤、交易数量、样本稳定性和过拟合风险。
+
+## 一、数据前置条件
+
+- □ 确认美股行情、RPS、杯柄形态依赖指标、财务数据都已经按 `market=us` 完整物化。
+- ✓ 在回测启动前增加数据健康检查：美股数量、行情覆盖率、RPS 覆盖率、财务覆盖率、最近交易日、缺失交易日。已在优化任务创建时记录 dashboard overview 数据快照并做基础可用性检查。
+- ✓ 对缺失财务数据的股票保留明确状态：跳过、允许无财务过滤、或只在财务条件关闭时参与回测。已返回 `missing`、`insufficient_history`、`not_required` 等状态和诊断计数。
+- ✓ 为每次优化任务记录数据快照信息：起止交易日、数据版本、RPS 定义版本、财务数据源、结果校验值。已记录市场、overview 覆盖指标和捕获时间；更细的数据版本与校验值后续扩展。
+
+## 二、参数空间设计
+
+- ✓ 杯柄形态参数：杯深、柄深、杯持续天数、柄持续天数、总形态持续天数、突破回看天数、是否要求前期上涨、前期涨幅、是否要求突破量能、突破量能倍数。已通过 `cup_handle_params` 参数列表支持完整字段，Dashboard 增加第二阶段常用组合入口。
+- ✓ RPS 参数：阈值范围，例如 80/85/90/92/95；RPS 窗口组合，例如 50、120、250、50+120、120+250、50+120+250；最少通过窗口数。
+- ✓ 财务参数：是否启用、最近几年数量、增长次数要求、最低同比增长率、是否要求净利润为正、财报滞后天数。
+- ✓ 买点参数：信号后第几个交易日买入、允许等待窗口、买入价格口径，默认优先使用次日开盘价。已支持 `entry_delay_days`、`entry_deferral_window_days`，价格口径为窗口内首个有效开盘价。
+- ✓ 卖点参数：前期不做移动止损、分批止盈和 50 日均线卖出；先使用固定持有天数、固定止损、RPS 跌破阈值退出。触发价统一使用复权收盘价，卖出价统一使用触发后的下一个有效复权开盘价。止盈不使用固定百分比，后续按 RPS 走弱和业绩变差扩展；业绩止盈需要财报事件时序，后续单独实现。
+- ✓ 组合参数：优化回测默认单票权重 10%、组合最多 10 只持仓、暂不设置冷却期、不允许同票在持仓中重复开仓。杯柄第一次突破买点已覆盖；财报更新节点买点后续扩展。
+- ✓ 先实现小而稳定的默认搜索空间，避免一次性笛卡尔积爆炸；后续再扩展随机搜索或贝叶斯优化。
+
+## 三、回测与优化引擎
+
+- ✓ 新增 `ParameterSet` 概念，用 JSON 保存完整参数，并生成稳定 hash，保证同一参数可复现、可去重。
+- ✓ 新增 `OptimizationRun` 概念，记录一次自动调参任务：市场、训练区间、验证区间、参数空间、状态、进度、最优目标。
+- ✓ 新增 `OptimizationResult` 概念，记录每个参数组合的回测指标和排名。
+- ✓ 在现有 `run_cup_handle_rps_backtest` 外层封装批量执行器，逐个参数组合运行美股回测。
+- ✓ 增加进度回调：已完成参数数、总参数数、当前参数摘要、当前最优参数、预计剩余时间。已完成总数、完成数、失败数、状态和最佳结果 ID；预计剩余时间后续扩展。
+- ✓ 增加失败隔离：单个参数组合失败不终止整个优化任务，只记录失败原因并继续。
+- ✓ 增加缓存：同一日期、同一筛选条件下的候选股票结果可复用，减少重复扫描全市场。已实现优化任务进程内筛选结果缓存。
+- ✓ 增加任务取消能力，避免长时间参数搜索无法停止。
+
+## 四、评价指标与最优选择
+
+- ✓ 基础指标：总收益、年化收益、平均单笔收益、中位数收益、胜率、交易次数、有效信号天数。
+- ✓ 风险指标：最大回撤、收益回撤比、最差单笔、连续亏损次数、止损触发比例。
+- □ 稳定性指标：训练期排名、验证期排名、分年度表现、牛市/熊市/震荡市表现。已完成训练期排名、验证期排名、训练/验证排名差、分年度收益和平均年化收益排序；市场环境按自然年拆分，牛市/熊市/震荡市建议先用市场基准年度收益定义，后续接入基准行情后实现。
+- ✓ 样本约束：交易次数不足的参数组合不能排名靠前，例如低于 50 笔交易直接标记为样本不足。已加入样本不足惩罚。
+- ✓ 默认最优评分建议：`综合得分 = 年化收益权重 + 收益回撤比权重 + 胜率权重 - 最大回撤惩罚 - 样本不足惩罚`。
+- ✓ 支持用户切换排序目标：综合得分、平均年化收益、最高年化收益、最低回撤、最高收益回撤比、最高胜率、最高总收益。
+- ✓ 必须区分训练集和验证集，不能只按训练区间收益选最优，避免过拟合。
+
+## 五、参数保存与策略预设
+
+- ✓ 支持保存任意参数组合为命名预设，例如 `US CupHandle RPS90 Conservative`。
+- ✓ 支持从优化结果中选择一组参数并保存为预设。已支持保存时带 `source_optimization_run_id` 和 `source_optimization_result_id`。
+- ✓ 预设保存内容包含：杯柄参数、RPS 参数、财务参数、买点参数、卖点参数、组合参数、创建时间、备注。
+- ✓ 支持查看预设历史、复制预设、编辑预设、删除预设。已支持 Dashboard 列表、应用、复制、改名和删除。
+- ✓ 支持把某个预设设为美股默认筛选/回测参数。已支持激活预设，并在 Dashboard 加载当前市场时自动应用默认预设。
+
+## 六、API 设计
+
+- ✓ `POST /backtests/optimization/runs`：创建美股参数优化任务。
+- ✓ `GET /backtests/optimization/runs/{id}`：查看任务状态、进度和当前最优结果。
+- ✓ `GET /backtests/optimization/runs/{id}/results`：分页查看参数组合结果。
+- ✓ `POST /backtests/optimization/runs/{id}/cancel`：取消运行中的任务。
+- ✓ `POST /strategy-presets`：保存参数预设。
+- ✓ `GET /strategy-presets?market=us`：查看美股策略预设列表。
+- ✓ `GET /strategy-presets/{id}`：查看单个策略预设。
+- ✓ `PATCH /strategy-presets/{id}`：编辑策略预设。
+- ✓ `POST /strategy-presets/{id}/duplicate`：复制策略预设。
+- ✓ `POST /strategy-presets/{id}/activate`：设置为当前美股默认参数。
+- ✓ `DELETE /strategy-presets/{id}`：删除策略预设。
+
+## 七、Dashboard 设计
+
+- ✓ 在回测页面新增“美股参数优化”入口。
+- ✓ 提供参数空间编辑界面：范围输入、枚举选择、启用/禁用模块、预估组合数量。已支持第一版稳定搜索空间；杯柄形态多区间编辑后续增强。
+- ✓ 增加运行前预检：数据是否足够、预计组合数、预计耗时、是否存在过大的搜索空间。已支持数据覆盖快照、组合数预估和最大组合数限制；预计耗时后续补充。
+- ✓ 运行中显示：进度条、当前参数、已完成数量、失败数量、当前最佳参数。已支持进度、完成/失败数量和当前最佳结果；当前参数摘要和 ETA 后续补充。
+- ✓ 结果页显示：排行榜、训练/验证指标对比、收益曲线、回撤曲线、年度表现、交易样本数。
+- ✓ 支持勾选多组结果进行对比。
+- ✓ 支持“一键保存为预设”。
+- ✓ 支持“用该参数重新跑完整区间”。
+
+## 八、默认实验方案
+
+- ✓ 第一阶段使用小网格：
+  - RPS 阈值：85、90、95
+  - RPS 窗口：50+120、120+250、50+120+250
+  - 财务：关闭、3 年正利润、3 年至少 2 次增长
+  - 止损：-6%、-8%、-10%
+  - 持有期：60、100、130 个交易日
+- ✓ 第二阶段加入杯柄形态细节：
+  - 杯深：12%-35%、15%-40%
+  - 柄深：5%-15%、8%-20%
+  - 是否要求突破量能：关闭、开启 1.5 倍
+  - 是否要求前期上涨：关闭、开启 20%+
+- □ 第三阶段加入卖点增强：
+  - ✓ RPS 跌破 80/85 卖出
+  - □ 业绩止盈/止盈退出
+  - 暂不做：移动止损、分批止盈、跌破 50 日均线卖出
+
+## 九、验收标准
+
+- ✓ 可以创建一次 `market=us` 的自动参数优化任务。
+- ✓ 可以看到任务进度，任务完成后能看到所有参数组合排名。
+- ✓ 每个结果都能追溯完整参数 JSON、训练区间、验证区间、数据快照和回测指标。
+- ✓ 可以把最优参数保存为预设，并在后续筛选或回测中复用。Dashboard 已支持预设列表、应用、设为默认和从优化结果重跑。
+- ✓ 至少覆盖 30 个参数组合的自动回测，并能在失败组合存在时继续完成任务。已增加 33 组参数且包含失败组合的自动化测试。
+- ✓ 测试覆盖参数生成、参数 hash、结果排序、样本不足惩罚、任务失败隔离、预设保存。
+
+## 十、优先级
+
+- ✓ P0：参数组合模型、批量执行器、结果持久化、基础排行榜。
+- ✓ P0：美股数据预检和任务进度。
+- ✓ P1：训练/验证拆分和综合评分。
+- ✓ P1：策略预设保存和激活。
+- ✓ P1：Dashboard 参数优化页面。
+- ✓ P2：任务取消。
+- ✓ P2：结果对比图表。
+- ✓ P2：缓存加速。
+- □ P2：随机搜索、贝叶斯优化、Walk-forward 多窗口验证。已完成可设随机种子的随机搜索；贝叶斯优化建议暂缓，先用随机搜索积累足够结果后再评估是否引入更复杂优化器；Walk-forward 排名目标按平均年化收益率。

@@ -170,6 +170,7 @@ class ScreenHit:
     cup_handle_passed: bool
     cup_handle_breakout_date: str | None
     fundamental_growth_passed: bool
+    fundamental_growth_status: str
     fundamental_growth_years: int | None
     fundamental_growth_count: int | None
     fundamental_growth_latest_year: str | None
@@ -536,6 +537,7 @@ def screen_universe(
         )
 
     hits: list[ScreenHit] = []
+    fundamental_status_counts: dict[str, int] = defaultdict(int)
     for indicator_row, instrument, rps_passed, rps_pass_count in candidates:
         cup_breakout_date: date | None = None
         if use_cup_handle:
@@ -554,6 +556,7 @@ def screen_universe(
             signal_date=target_date,
             params=resolved_fundamental_params,
         )
+        fundamental_status_counts[str(fundamental_meta["status"])] += 1
         if resolved_fundamental_params.enabled and not fundamental_meta["passed"]:
             continue
 
@@ -574,6 +577,7 @@ def screen_universe(
                     cup_breakout_date.isoformat() if cup_breakout_date else None
                 ),
                 fundamental_growth_passed=bool(fundamental_meta["passed"]),
+                fundamental_growth_status=str(fundamental_meta["status"]),
                 fundamental_growth_years=fundamental_meta["available_years"],
                 fundamental_growth_count=fundamental_meta["growth_count"],
                 fundamental_growth_latest_year=fundamental_meta["latest_fiscal_year"],
@@ -593,6 +597,9 @@ def screen_universe(
             "market": resolved_market,
         },
         "total_evaluated": len(rows),
+        "diagnostics": {
+            "fundamental_growth_status_counts": dict(fundamental_status_counts),
+        },
         "hits": [hit.to_dict() for hit in hits],
     }
 
@@ -831,6 +838,7 @@ def _evaluate_fundamental_growth(
     if not params.enabled:
         return {
             "passed": True,
+            "status": "not_required",
             "available_years": None,
             "growth_count": None,
             "latest_fiscal_year": None,
@@ -854,6 +862,7 @@ def _evaluate_fundamental_growth(
     if len(rows) < params.min_years:
         return {
             "passed": False,
+            "status": "missing" if not rows else "insufficient_history",
             "available_years": len(rows),
             "growth_count": None,
             "latest_fiscal_year": rows[-1].fiscal_year_label if rows else None,
@@ -865,6 +874,7 @@ def _evaluate_fundamental_growth(
     ):
         return {
             "passed": False,
+            "status": "not_positive",
             "available_years": len(rows),
             "growth_count": 0,
             "latest_fiscal_year": rows[-1].fiscal_year_label,
@@ -884,6 +894,7 @@ def _evaluate_fundamental_growth(
 
     return {
         "passed": growth_count >= params.effective_min_growth_count,
+        "status": "passed" if growth_count >= params.effective_min_growth_count else "growth_failed",
         "available_years": len(rows),
         "growth_count": growth_count,
         "latest_fiscal_year": rows[-1].fiscal_year_label,

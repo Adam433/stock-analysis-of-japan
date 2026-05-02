@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>K 线 · stockAnalyse</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root {
+    --bg: #111315; --panel: #191c20; --panel-subtle: #14171a;
+    --panel-border: #30363d; --text: #eef2f6; --muted: #9aa4b2;
+    --accent: #14b8a6; --accent-strong: #2dd4bf;
+    --good: #22c55e; --warn: #f59e0b; --bad: #f43f5e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Microsoft YaHei", sans-serif; font-size: 14px;
+    min-height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    padding: 14px 24px; border-bottom: 1px solid var(--panel-border);
+    background: var(--panel);
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 17px; }
+  header .pattern { color: var(--muted); font-size: 12px; }
+  main {
+    flex: 1; padding: 14px 24px 24px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  #chartHost {
+    width: 100%; flex: 1;
+    min-height: 380px;
+    background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 8px;
+  }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+  .legend span::before {
+    content: ""; display: inline-block; width: 8px; height: 8px;
+    border-radius: 50%; margin-right: 6px; vertical-align: middle;
+  }
+  .legend .rps::before { background: var(--accent); }
+  .legend .cup::before { background: var(--warn); }
+  .toast {
+    position: fixed; right: 18px; bottom: 18px;
+    background: var(--bad); color: #fff; padding: 10px 14px;
+    border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none;
+  }
+  .toast.show { opacity: 0.95; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1 id="chartTitle">加载中…</h1>
+    <div class="pattern" id="chartPattern"></div>
+  </div>
+  <div class="legend">
+    <span class="rps">RPS 满足条件日</span>
+    <span class="cup">杯柄突破日</span>
+  </div>
+</header>
+<main>
+  <div id="chartHost"></div>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const instrumentId = params.get('id');
+  const symbol = params.get('symbol') || '';
+  const name = params.get('name') || '';
+
+  let criteria = {};
+  const rawCriteria = params.get('criteria');
+  if (rawCriteria) {
+    try {
+      criteria = JSON.parse(decodeURIComponent(rawCriteria));
+    } catch (err) {
+      console.warn('failed to parse criteria', err);
+    }
+  }
+
+  function showToast(text) {
+    const el = document.getElementById('toast');
+    el.textContent = text;
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 2200);
+  }
+
+  function setTitle() {
+    document.getElementById('chartTitle').textContent =
+      `${symbol || '?'}${name ? ' · ' + name : ''}`;
+    document.title = `${symbol || 'K 线'} · stockAnalyse`;
+  }
+
+  async function loadChart() {
+    if (!instrumentId) {
+      showToast('缺少 instrument_id 参数');
+      return;
+    }
+    setTitle();
+    document.getElementById('chartPattern').textContent = '加载中…';
+    try {
+      const res = await fetch(`/dashboard/api/chart/${instrumentId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(criteria),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      const host = document.getElementById('chartHost');
+      const chart = LightweightCharts.createChart(host, {
+        layout: { background: { color: 'transparent' }, textColor: '#e2e8f0' },
+        grid: {
+          vertLines: { color: 'rgba(148, 163, 184, 0.1)' },
+          horzLines: { color: 'rgba(148, 163, 184, 0.1)' },
+        },
+        rightPriceScale: { borderColor: 'rgba(148, 163, 184, 0.3)' },
+        timeScale: { borderColor: 'rgba(148, 163, 184, 0.3)' },
+        crosshair: { mode: 1 },
+        autoSize: true,
+      });
+      const candleSeries = chart.addCandlestickSeries({
+        upColor: '#22c55e', downColor: '#ef4444',
+        borderUpColor: '#22c55e', borderDownColor: '#ef4444',
+        wickUpColor: '#22c55e', wickDownColor: '#ef4444',
+      });
+      const candles = (data.candles || [])
+        .filter((c) => c.open !== null && c.close !== null)
+        .map((c) => ({
+          time: c.trade_date,
+          open: c.open, high: c.high, low: c.low, close: c.close,
+        }));
+      candleSeries.setData(candles);
+
+      const markers = [];
+      const rpsDates = data.rps_marker_dates || [];
+      for (const d of rpsDates) {
+        markers.push({
+          time: d, position: 'aboveBar', color: '#14b8a6',
+          shape: 'circle', text: 'R',
+        });
+      }
+      if (data.cup_handle_breakout_date) {
+        markers.push({
+          time: data.cup_handle_breakout_date,
+          position: 'aboveBar', color: '#f59e0b',
+          shape: 'arrowUp', text: '杯柄突破',
+        });
+      }
+      markers.sort((a, b) => (a.time < b.time ? -1 : 1));
+      candleSeries.setMarkers(markers);
+      chart.timeScale().fitContent();
+
+      if (data.cup_handle_pattern) {
+        const p = data.cup_handle_pattern;
+        const quality = [
+          p.handle_position_pct ? `把手位置 ${p.handle_position_pct}%` : null,
+          p.handle_depth_to_cup_depth_pct ? `把手/杯深 ${p.handle_depth_to_cup_depth_pct}%` : null,
+          p.prior_uptrend_pct ? `前涨 ${p.prior_uptrend_pct}%` : null,
+          p.breakout_volume_ratio ? `放量 ${p.breakout_volume_ratio}x` : null,
+        ].filter(Boolean).join(' · ');
+        document.getElementById('chartPattern').textContent =
+          `周期 ${p.total_duration}日 · 杯身 ${p.cup_duration}日 · 把手 ${p.handle_duration}日 · ` +
+          `杯深 ${p.cup_depth_pct}% · 把手回调 ${p.handle_depth_pct}% · ` +
+          (quality ? `${quality} · ` : '') +
+          `左唇 ${p.left_lip_date} → 杯底 ${p.cup_bottom_date} → 右唇 ${p.right_lip_date} → 突破 ${p.breakout_date}`;
+      } else {
+        const rpsCount = rpsDates.length;
+        document.getElementById('chartPattern').textContent =
+          rpsCount ? `RPS 满足条件日 ${rpsCount} 个` : '';
+      }
+    } catch (err) {
+      showToast('加载 K 线失败: ' + err.message);
+      document.getElementById('chartPattern').textContent = '';
+    }
+  }
+
+  loadChart();
+</script>
+</body>
+</html>
