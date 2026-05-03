@@ -4,6 +4,7 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import date, timedelta
 from decimal import Decimal
+from math import ceil
 from pathlib import Path
 
 from sqlalchemy import distinct, func, select
@@ -18,6 +19,7 @@ from stockanalyse_api.domain.market_data.models import MarketDataDaily
 from stockanalyse_api.services.market_data_adjustments import adjusted_ohlc
 from stockanalyse_api.services.market_data_adjustments import has_extreme_price_gap
 from stockanalyse_api.services.market_data_adjustments import is_complete_market_row
+from stockanalyse_api.services.cup_handle_materialization import load_materialized_cup_handle_matches
 
 APPROVED_RPS_WINDOWS = (50, 120, 250)
 DEFAULT_RPS_THRESHOLD = 90
@@ -52,6 +54,9 @@ MIN_BOTTOM_SPAN_PCT = Decimal("10")
 MIN_CUP_SIDE_DURATION_PCT = Decimal("20")
 BREAKOUT_VOLUME_AVG_DAYS = 50
 MIN_BREAKOUT_VOLUME_MULTIPLIER = Decimal("1.4")
+CUP_HANDLE_PRIOR_UPTREND_FEATURE_WINDOWS = (60, 90, 120, 180)
+CUP_HANDLE_BREAKOUT_VOLUME_FEATURE_WINDOWS = (20, 50, 60)
+CUP_HANDLE_BOTTOM_FEATURE_ZONES = (20, 35)
 
 
 @dataclass(frozen=True, slots=True)
@@ -527,25 +532,44 @@ def screen_universe(
 
         candidates.append((indicator_row, instrument, rps_passed, rps_pass_count))
 
+    cup_handle_source = "disabled"
+    materialized_cup_events = None
     candles_by_instrument: dict[int, list[_PatternCandle]] = {}
     if use_cup_handle and candidates:
-        candles_by_instrument = _load_candles_by_instrument(
+        materialized_cup_events = load_materialized_cup_handle_matches(
             session,
+            market=resolved_market,
+            signal_date=target_date,
             instrument_ids=[instrument.id for _, instrument, _, _ in candidates],
-            cutoff=target_date,
-            limit=resolved_cup_params.effective_lookback_days,
+            params=resolved_cup_params,
         )
+        if materialized_cup_events is None:
+            cup_handle_source = "runtime_scan"
+            candles_by_instrument = _load_candles_by_instrument(
+                session,
+                instrument_ids=[instrument.id for _, instrument, _, _ in candidates],
+                cutoff=target_date,
+                limit=resolved_cup_params.effective_lookback_days,
+            )
+        else:
+            cup_handle_source = "materialized"
 
     hits: list[ScreenHit] = []
     fundamental_status_counts: dict[str, int] = defaultdict(int)
     for indicator_row, instrument, rps_passed, rps_pass_count in candidates:
         cup_breakout_date: date | None = None
         if use_cup_handle:
-            candles = candles_by_instrument.get(instrument.id, [])
-            cup_pattern = _detect_cup_handle_pattern(candles, resolved_cup_params)
-            if cup_pattern is None:
-                continue
-            cup_breakout_date = cup_pattern["breakout_date"]
+            if materialized_cup_events is not None:
+                cup_event = materialized_cup_events.get(instrument.id)
+                if cup_event is None:
+                    continue
+                cup_breakout_date = cup_event.breakout_date
+            else:
+                candles = candles_by_instrument.get(instrument.id, [])
+                cup_pattern = _detect_cup_handle_pattern(candles, resolved_cup_params)
+                if cup_pattern is None:
+                    continue
+                cup_breakout_date = cup_pattern["breakout_date"]
             cup_handle_passed = True
         else:
             cup_handle_passed = False
@@ -599,6 +623,7 @@ def screen_universe(
         "total_evaluated": len(rows),
         "diagnostics": {
             "fundamental_growth_status_counts": dict(fundamental_status_counts),
+            "cup_handle_source": cup_handle_source,
         },
         "hits": [hit.to_dict() for hit in hits],
     }
@@ -911,34 +936,12 @@ def _detect_cup_handle_pattern(
     the supplied candle window. Only the most recent valid pattern is returned.
     """
     params = _normalize_cup_handle_params(params)
+    prepared = _prepare_cup_handle_series(candles)
+    usable_candles, closes, highs, lows, volumes = prepared
     min_required = max(
         params.min_cup_duration + params.min_handle_duration,
         params.min_total_duration,
     )
-    usable_candles: list[MarketDataDaily] | list[_PatternCandle] = []
-    closes: list[float] = []
-    highs: list[float] = []
-    lows: list[float] = []
-    volumes: list[int | None] = []
-    for candle in candles:
-        if not is_complete_market_row(candle):
-            continue
-        adjusted = adjusted_ohlc(candle)
-        if adjusted.close is None:
-            continue
-        if closes and has_extreme_price_gap(closes[-1], adjusted.close):
-            usable_candles = []
-            closes = []
-            highs = []
-            lows = []
-            volumes = []
-        close = float(adjusted.close)
-        usable_candles.append(candle)
-        closes.append(close)
-        highs.append(float(adjusted.high) if adjusted.high is not None else close)
-        lows.append(float(adjusted.low) if adjusted.low is not None else close)
-        volumes.append(getattr(candle, "volume", None))
-
     if len(usable_candles) < min_required + 1:
         return None
 
@@ -973,6 +976,87 @@ def _detect_cup_handle_pattern(
     return None
 
 
+def detect_cup_handle_patterns(
+    candles: list[MarketDataDaily] | list[_PatternCandle],
+    params: CupHandleParams | None = None,
+) -> list[dict[str, object]]:
+    """Detect all valid cup-with-handle breakout events in a candle series."""
+    params = _normalize_cup_handle_params(params)
+    prepared = _prepare_cup_handle_series(candles)
+    usable_candles, closes, highs, lows, volumes = prepared
+    min_required = max(
+        params.min_cup_duration + params.min_handle_duration,
+        params.min_total_duration,
+    )
+    if len(usable_candles) < min_required + 1:
+        return []
+
+    n = len(usable_candles)
+    right_lip_indices = {
+        breakout_idx - handle_len
+        for breakout_idx in range(min_required, n)
+        for handle_len in range(params.min_handle_duration, params.max_handle_duration + 1)
+        if breakout_idx - handle_len >= params.min_cup_duration
+    }
+    cup_candidates = _find_cup_candidates_by_right_lip(
+        highs,
+        lows,
+        closes,
+        right_lip_indices,
+        params,
+    )
+    events: list[dict[str, object]] = []
+    for breakout_idx in range(min_required, n):
+        result = _try_pattern_ending_at(
+            usable_candles,
+            highs,
+            lows,
+            closes,
+            volumes,
+            cup_candidates,
+            params,
+            breakout_idx,
+        )
+        if result is not None:
+            events.append(result)
+    return events
+
+
+def _prepare_cup_handle_series(
+    candles: list[MarketDataDaily] | list[_PatternCandle],
+) -> tuple[
+    list[MarketDataDaily] | list[_PatternCandle],
+    list[float],
+    list[float],
+    list[float],
+    list[int | None],
+]:
+    usable_candles: list[MarketDataDaily | _PatternCandle] = []
+    closes: list[float] = []
+    highs: list[float] = []
+    lows: list[float] = []
+    volumes: list[int | None] = []
+    for candle in candles:
+        if not is_complete_market_row(candle):
+            continue
+        adjusted = adjusted_ohlc(candle)
+        if adjusted.close is None:
+            continue
+        if closes and has_extreme_price_gap(closes[-1], adjusted.close):
+            usable_candles = []
+            closes = []
+            highs = []
+            lows = []
+            volumes = []
+        close = float(adjusted.close)
+        usable_candles.append(candle)
+        closes.append(close)
+        highs.append(float(adjusted.high) if adjusted.high is not None else close)
+        lows.append(float(adjusted.low) if adjusted.low is not None else close)
+        volumes.append(getattr(candle, "volume", None))
+    return usable_candles, closes, highs, lows, volumes
+
+
 def _has_prior_uptrend(
     closes: list[float],
     *,
@@ -982,12 +1066,14 @@ def _has_prior_uptrend(
 ) -> bool:
     if not params.require_prior_uptrend:
         return True
-    start_idx = max(0, left_lip_idx - params.prior_uptrend_lookback_days)
-    prior_closes = [value for value in closes[start_idx:left_lip_idx] if value > 0]
-    if not prior_closes or left_lip_high <= 0:
+    prior_uptrend_pct = _prior_uptrend_pct_for_window(
+        closes,
+        left_lip_idx=left_lip_idx,
+        left_lip_high=left_lip_high,
+        lookback_days=params.prior_uptrend_lookback_days,
+    )
+    if prior_uptrend_pct is None:
         return False
-    prior_low = min(prior_closes)
-    prior_uptrend_pct = ((left_lip_high / prior_low) - 1) * 100
     return prior_uptrend_pct >= float(params.min_prior_uptrend_pct)
 
 
@@ -998,11 +1084,54 @@ def _prior_uptrend_pct(
     left_lip_high: float,
     params: CupHandleParams,
 ) -> float | None:
-    start_idx = max(0, left_lip_idx - params.prior_uptrend_lookback_days)
+    return _prior_uptrend_pct_for_window(
+        closes,
+        left_lip_idx=left_lip_idx,
+        left_lip_high=left_lip_high,
+        lookback_days=params.prior_uptrend_lookback_days,
+    )
+
+
+def _prior_uptrend_pct_for_window(
+    closes: list[float],
+    *,
+    left_lip_idx: int,
+    left_lip_high: float,
+    lookback_days: int,
+) -> float | None:
+    start_idx = max(0, left_lip_idx - lookback_days)
     prior_closes = [value for value in closes[start_idx:left_lip_idx] if value > 0]
     if not prior_closes or left_lip_high <= 0:
         return None
     return ((left_lip_high / min(prior_closes)) - 1) * 100
+
+
+def _bottom_zone_stats(
+    lows: list[float],
+    *,
+    left_lip_idx: int,
+    right_lip_idx: int,
+    cup_bottom_low: float,
+    cup_depth_abs: float,
+    bottom_zone_pct: float,
+) -> tuple[int, float]:
+    if cup_depth_abs <= 0:
+        return 0, 0.0
+    cup_len = max(right_lip_idx - left_lip_idx, 1)
+    bottom_threshold = cup_bottom_low + (cup_depth_abs * bottom_zone_pct / 100)
+    first_idx: int | None = None
+    last_idx: int | None = None
+    dwell_days = 0
+    for idx in range(left_lip_idx, right_lip_idx + 1):
+        if lows[idx] <= bottom_threshold:
+            dwell_days += 1
+            if first_idx is None:
+                first_idx = idx
+            last_idx = idx
+    if first_idx is None or last_idx is None:
+        return 0, 0.0
+    bottom_span = last_idx - first_idx + 1
+    return dwell_days, (bottom_span / cup_len) * 100
 
 
 def _has_rounded_bottom(
@@ -1016,17 +1145,20 @@ def _has_rounded_bottom(
 ) -> bool:
     if cup_depth_abs <= 0:
         return False
-    cup_len = right_lip_idx - left_lip_idx
+    cup_len = max(right_lip_idx - left_lip_idx, 1)
     bottom_threshold = cup_bottom_low + (cup_depth_abs * float(params.bottom_zone_pct) / 100)
-    bottom_zone_indices = [
-        idx
-        for idx in range(left_lip_idx, right_lip_idx + 1)
-        if lows[idx] <= bottom_threshold
-    ]
-    if len(bottom_zone_indices) < params.min_bottom_dwell_days:
-        return False
-    bottom_span = bottom_zone_indices[-1] - bottom_zone_indices[0] + 1
-    return bottom_span >= max(1, int(cup_len * float(params.min_bottom_span_pct) / 100))
+    min_span_days = max(1, ceil(cup_len * float(params.min_bottom_span_pct) / 100))
+    first_idx: int | None = None
+    dwell_days = 0
+    for idx in range(left_lip_idx, right_lip_idx + 1):
+        if lows[idx] > bottom_threshold:
+            continue
+        dwell_days += 1
+        if first_idx is None:
+            first_idx = idx
+        if dwell_days >= params.min_bottom_dwell_days and idx - first_idx + 1 >= min_span_days:
+            return True
+    return False
 
 
 def _find_cup_candidates_by_right_lip(
@@ -1060,7 +1192,9 @@ def _find_cup_candidates_by_right_lip(
                 min_low_idx = left_lip_idx
 
             if left_lip_idx + 1 <= right_lip_idx - 1:
-                interior_high = max(interior_high, highs[left_lip_idx + 1])
+                next_interior_high = highs[left_lip_idx + 1]
+                if next_interior_high > interior_high:
+                    interior_high = next_interior_high
 
             cup_len = right_lip_idx - left_lip_idx
             if cup_len < params.min_cup_duration:
@@ -1082,6 +1216,14 @@ def _find_cup_candidates_by_right_lip(
             if cup_depth_pct < min_depth_pct or cup_depth_pct > max_depth_pct:
                 continue
 
+            lip_delta_pct = abs((left_lip_high - right_lip_high) / left_lip_high) * 100
+            if lip_delta_pct > max_lip_delta_pct:
+                continue
+
+            lip_baseline = left_lip_high if left_lip_high >= right_lip_high else right_lip_high
+            if interior_high > lip_baseline * 1.02:
+                continue
+
             if not _has_prior_uptrend(
                 closes,
                 left_lip_idx=left_lip_idx,
@@ -1097,14 +1239,6 @@ def _find_cup_candidates_by_right_lip(
                 cup_depth_abs=left_lip_high - min_low,
                 params=params,
             ):
-                continue
-
-            lip_delta_pct = abs((left_lip_high - right_lip_high) / left_lip_high) * 100
-            if lip_delta_pct > max_lip_delta_pct:
-                continue
-
-            lip_baseline = max(left_lip_high, right_lip_high)
-            if interior_high > lip_baseline * 1.02:
                 continue
 
             candidates[right_lip_idx].append(
@@ -1205,6 +1339,50 @@ def _try_pattern_ending_at(
                 left_lip_high=highs[cup_candidate.left_lip_idx],
                 params=params,
             )
+            left_lip_high = highs[cup_candidate.left_lip_idx]
+            lip_delta_pct = abs((left_lip_high - right_lip_high) / left_lip_high) * 100
+            handle_high_above_lip_pct = max(
+                ((handle_high / right_lip_high) - 1) * 100,
+                0,
+            )
+            left_side_duration_pct = (
+                (cup_candidate.cup_bottom_idx - cup_candidate.left_lip_idx)
+                / max(cup_duration, 1)
+            ) * 100
+            right_side_duration_pct = (
+                (right_lip_idx - cup_candidate.cup_bottom_idx) / max(cup_duration, 1)
+            ) * 100
+            bottom_feature_stats = {
+                zone: _bottom_zone_stats(
+                    lows,
+                    left_lip_idx=cup_candidate.left_lip_idx,
+                    right_lip_idx=right_lip_idx,
+                    cup_bottom_low=cup_bottom_low,
+                    cup_depth_abs=cup_depth_abs,
+                    bottom_zone_pct=float(zone),
+                )
+                for zone in CUP_HANDLE_BOTTOM_FEATURE_ZONES
+            }
+            prior_uptrend_by_window = {
+                window: _prior_uptrend_pct_for_window(
+                    closes,
+                    left_lip_idx=cup_candidate.left_lip_idx,
+                    left_lip_high=left_lip_high,
+                    lookback_days=window,
+                )
+                for window in CUP_HANDLE_PRIOR_UPTREND_FEATURE_WINDOWS
+            }
+            breakout_volume_by_window = {
+                window: _breakout_volume_ratio(
+                    volumes,
+                    breakout_idx=breakout_idx,
+                    avg_days=window,
+                )
+                for window in CUP_HANDLE_BREAKOUT_VOLUME_FEATURE_WINDOWS
+            }
+            breakout_close_over_resistance_pct = (
+                (closes[breakout_idx] / breakout_resistance) - 1
+            ) * 100
 
             return {
                 "left_lip_date": candles[cup_candidate.left_lip_idx].trade_date,
@@ -1212,6 +1390,11 @@ def _try_pattern_ending_at(
                 "right_lip_date": candles[right_lip_idx].trade_date,
                 "handle_low_date": candles[right_lip_idx + 1 + handle_low_offset].trade_date,
                 "breakout_date": candles[breakout_idx].trade_date,
+                "_left_lip_idx": cup_candidate.left_lip_idx,
+                "_cup_bottom_idx": cup_candidate.cup_bottom_idx,
+                "_right_lip_idx": right_lip_idx,
+                "_handle_low_idx": right_lip_idx + 1 + handle_low_offset,
+                "_breakout_idx": breakout_idx,
                 "cup_depth_pct": Decimal(str(cup_candidate.cup_depth_pct)).quantize(
                     Decimal("0.01")
                 ),
@@ -1227,16 +1410,54 @@ def _try_pattern_ending_at(
                 "handle_depth_to_cup_depth_pct": Decimal(
                     str(handle_depth_to_cup_depth_pct)
                 ).quantize(Decimal("0.01")),
+                "right_lip_delta_pct": Decimal(str(lip_delta_pct)).quantize(
+                    Decimal("0.01")
+                ),
+                "handle_high_above_lip_pct": Decimal(str(handle_high_above_lip_pct)).quantize(
+                    Decimal("0.01")
+                ),
+                "left_side_duration_pct": Decimal(str(left_side_duration_pct)).quantize(
+                    Decimal("0.01")
+                ),
+                "right_side_duration_pct": Decimal(str(right_side_duration_pct)).quantize(
+                    Decimal("0.01")
+                ),
+                "bottom_dwell_days_by_zone": {
+                    zone: dwell_days for zone, (dwell_days, _) in bottom_feature_stats.items()
+                },
+                "bottom_span_pct_by_zone": {
+                    zone: Decimal(str(span_pct)).quantize(Decimal("0.01"))
+                    for zone, (_, span_pct) in bottom_feature_stats.items()
+                },
                 "prior_uptrend_pct": (
                     Decimal(str(prior_uptrend_pct)).quantize(Decimal("0.01"))
                     if prior_uptrend_pct is not None
                     else None
                 ),
+                "prior_uptrend_pct_by_window": {
+                    window: (
+                        Decimal(str(value)).quantize(Decimal("0.01"))
+                        if value is not None
+                        else None
+                    )
+                    for window, value in prior_uptrend_by_window.items()
+                },
                 "breakout_volume_ratio": (
                     Decimal(str(breakout_volume_ratio)).quantize(Decimal("0.01"))
                     if breakout_volume_ratio is not None
                     else None
                 ),
+                "breakout_volume_ratio_by_window": {
+                    window: (
+                        Decimal(str(value)).quantize(Decimal("0.01"))
+                        if value is not None
+                        else None
+                    )
+                    for window, value in breakout_volume_by_window.items()
+                },
+                "breakout_close_over_resistance_pct": Decimal(
+                    str(breakout_close_over_resistance_pct)
+                ).quantize(Decimal("0.01")),
             }
     return None
 

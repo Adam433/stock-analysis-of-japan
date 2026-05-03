@@ -4,6 +4,7 @@ import json
 import math
 import random
 import threading
+import time
 from dataclasses import fields
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
@@ -23,7 +24,10 @@ from stockanalyse_api.services.dashboard import (
     get_overview,
     normalize_market,
 )
-from stockanalyse_api.services.dashboard_strategy_backtest import run_cup_handle_rps_backtest
+from stockanalyse_api.services.dashboard_strategy_backtest import (
+    BacktestCancelledError,
+    run_cup_handle_rps_backtest,
+)
 
 DEFAULT_OPTIMIZATION_OBJECTIVE = "score"
 DEFAULT_MAX_PARAMETER_SETS = 1000
@@ -315,6 +319,14 @@ def _data_snapshot(session, *, market: str, require_data_ready: bool) -> dict[st
     }
 
 
+def _isoformat_utc(value):
+    if value is None:
+        return None
+    if getattr(value, "tzinfo", None) is None:
+        value = value.replace(tzinfo=UTC)
+    return value.isoformat()
+
+
 def serialize_optimization_run(run: OptimizationRun) -> dict[str, object]:
     parameter_space, metadata = _split_parameter_space_metadata(
         load_json(run.parameter_space_json, default={})
@@ -336,12 +348,13 @@ def serialize_optimization_run(run: OptimizationRun) -> dict[str, object]:
         "completed_parameter_sets": run.completed_parameter_sets,
         "failed_parameter_sets": run.failed_parameter_sets,
         "best_result_id": run.best_result_id,
-        "started_at": run.started_at.isoformat(),
-        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        "started_at": _isoformat_utc(run.started_at),
+        "completed_at": _isoformat_utc(run.completed_at),
         "error_message": run.error_message,
         "search_mode": metadata.get("search_mode", "grid"),
         "random_seed": metadata.get("random_seed"),
         "parameter_space": parameter_space,
+        "parameter_sets": load_json(run.parameter_sets_json, default=[]),
         "data_snapshot": load_json(run.data_snapshot_json, default={}),
     }
 
@@ -722,6 +735,7 @@ def _run_backtest_once(
     parameters: dict[str, object],
     max_trades_returned: int = 0,
     screen_cache: dict[str, dict[str, object]] | None = None,
+    should_cancel=None,
 ) -> dict[str, object]:
     result = run_cup_handle_rps_backtest(
         session,
@@ -757,6 +771,7 @@ def _run_backtest_once(
         entry_deferral_window_days=int(parameters.get("entry_deferral_window_days", 5)),
         max_trades_returned=max_trades_returned,
         screen_cache=screen_cache,
+        should_cancel=should_cancel,
     )
     return result.to_dict()
 
@@ -979,16 +994,34 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
 
     parameter_sets = load_json(run.parameter_sets_json, default=[])
     screen_cache: dict[str, dict[str, object]] = {}
+
+    cancel_state = {"checked_at": 0.0, "cached": False}
+
+    def should_cancel() -> bool:
+        now = time.monotonic()
+        if now - cancel_state["checked_at"] < 0.5:
+            return cancel_state["cached"]
+        cancel_state["checked_at"] = now
+        try:
+            session.refresh(run)
+        except Exception:
+            return cancel_state["cached"]
+        cancel_state["cached"] = run.status == "cancel_requested"
+        return cancel_state["cached"]
+
+    def finalize_cancel() -> OptimizationRun:
+        _rank_results(session, run)
+        run.status = "cancelled"
+        run.completed_at = datetime.now(UTC)
+        session.commit()
+        session.refresh(run)
+        return run
+
     try:
         for parameters in parameter_sets:
             session.refresh(run)
             if run.status == "cancel_requested":
-                _rank_results(session, run)
-                run.status = "cancelled"
-                run.completed_at = datetime.now(UTC)
-                session.commit()
-                session.refresh(run)
-                return run
+                return finalize_cancel()
             try:
                 train_result = _run_backtest_once(
                     session,
@@ -997,6 +1030,7 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
                     market=run.market,
                     parameters=parameters,
                     screen_cache=screen_cache,
+                    should_cancel=should_cancel,
                 )
                 train_metrics = _extract_metrics(train_result)
                 validation_metrics = None
@@ -1009,6 +1043,7 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
                         market=run.market,
                         parameters=parameters,
                         screen_cache=screen_cache,
+                        should_cancel=should_cancel,
                     )
                     validation_metrics = _extract_metrics(validation_result)
                     score_source = validation_metrics
@@ -1024,6 +1059,9 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
                     status="completed",
                 )
                 run.completed_parameter_sets += 1
+            except BacktestCancelledError:
+                session.rollback()
+                return finalize_cancel()
             except Exception as exc:
                 _persist_result(
                     session,
@@ -1046,6 +1084,9 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
         session.commit()
         session.refresh(run)
         return run
+    except BacktestCancelledError:
+        session.rollback()
+        return finalize_cancel()
     except Exception as exc:
         run.status = "failed"
         run.error_message = f"{type(exc).__name__}: {exc}"

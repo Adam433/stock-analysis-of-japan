@@ -5,6 +5,11 @@ from dataclasses import asdict, dataclass
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from statistics import median
+from typing import Callable
+
+
+class BacktestCancelledError(Exception):
+    """Raised when a should_cancel callback signals to abort an in-progress backtest."""
 
 from sqlalchemy import distinct, select
 
@@ -454,6 +459,7 @@ def run_cup_handle_rps_backtest(
     entry_deferral_window_days: int = 5,
     max_trades_returned: int = 300,
     screen_cache: dict[str, dict[str, object]] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> CupHandleRpsBacktestResult:
     if start_date > end_date:
         raise ValueError("start_date must be on or before end_date.")
@@ -491,7 +497,9 @@ def run_cup_handle_rps_backtest(
     selected_trade_count = 0
     open_positions: list[tuple[str, date]] = []
 
-    for signal_date in trade_dates:
+    for index, signal_date in enumerate(trade_dates):
+        if should_cancel is not None and index % 5 == 0 and should_cancel():
+            raise BacktestCancelledError()
         open_positions = [
             (symbol, exit_date) for symbol, exit_date in open_positions if exit_date > signal_date
         ]

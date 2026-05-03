@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 from decimal import Decimal
 
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from stockanalyse_api.db.base import Base, TimestampMixin
@@ -25,6 +25,7 @@ OPTIMIZATION_RUN_STATUS_VALUES = (
     "cancelled",
 )
 OPTIMIZATION_RESULT_STATUS_VALUES = ("completed", "failed")
+CUP_HANDLE_MATERIALIZATION_STATUS_VALUES = ("running", "completed", "failed")
 PORTFOLIO_RETURN_PROVENANCE_CONSTRAINT = (
     "(backtest_lifecycle = 'legacy_condition_hit') OR "
     "(backtest_lifecycle = 'portfolio_return' AND source_screen_run_id IS NOT NULL AND rps_definition_version IS NULL)"
@@ -174,3 +175,85 @@ class StrategyPreset(TimestampMixin, Base):
         nullable=True,
         index=True,
     )
+
+
+class CupHandleMaterializationRun(TimestampMixin, Base):
+    __tablename__ = "cup_handle_materialization_runs"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN {CUP_HANDLE_MATERIALIZATION_STATUS_VALUES}",
+            name="cup_handle_materialization_runs_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    market: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="running", server_default="running")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_start_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    source_end_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    latest_market_data_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    generation_bounds_json: Mapped[str] = mapped_column(Text, nullable=False)
+    feature_windows_json: Mapped[str] = mapped_column(Text, nullable=False)
+    detector_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    events_created: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    symbols_processed: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CupHandlePatternEvent(TimestampMixin, Base):
+    __tablename__ = "cup_handle_pattern_events"
+    __table_args__ = (
+        Index(
+            "ix_cup_handle_pattern_events_market_breakout_date_instrument",
+            "market",
+            "breakout_date",
+            "instrument_id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    market: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    materialization_run_id: Mapped[int] = mapped_column(
+        ForeignKey("cup_handle_materialization_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    instrument_id: Mapped[int] = mapped_column(
+        ForeignKey("instruments.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    symbol_snapshot: Mapped[str] = mapped_column(String(32), nullable=False)
+    breakout_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    left_lip_date: Mapped[date] = mapped_column(Date, nullable=False)
+    cup_bottom_date: Mapped[date] = mapped_column(Date, nullable=False)
+    right_lip_date: Mapped[date] = mapped_column(Date, nullable=False)
+    handle_low_date: Mapped[date] = mapped_column(Date, nullable=False)
+    cup_duration: Mapped[int] = mapped_column(Integer, nullable=False)
+    handle_duration: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_duration: Mapped[int] = mapped_column(Integer, nullable=False)
+    cup_depth_pct: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    handle_depth_pct: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    right_lip_delta_pct: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    handle_low_position_pct: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    handle_depth_to_cup_depth_pct: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    handle_high_above_lip_pct: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    bottom_dwell_days_zone_20: Mapped[int] = mapped_column(Integer, nullable=False)
+    bottom_dwell_days_zone_35: Mapped[int] = mapped_column(Integer, nullable=False)
+    bottom_span_pct_zone_20: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    bottom_span_pct_zone_35: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    left_side_duration_pct: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    right_side_duration_pct: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    prior_uptrend_pct_60: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
+    prior_uptrend_pct_90: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
+    prior_uptrend_pct_120: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
+    prior_uptrend_pct_180: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
+    breakout_volume_ratio_20: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
+    breakout_volume_ratio_50: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
+    breakout_volume_ratio_60: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
+    breakout_close_over_resistance_pct: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    data_start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    data_end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    detector_version: Mapped[str] = mapped_column(String(64), nullable=False)

@@ -99,6 +99,10 @@
     display: flex; align-items: center; gap: 8px;
     margin-bottom: 8px; cursor: pointer; user-select: none;
   }
+  .row-hint-wrap {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  }
+  .row-hint-wrap label.row { margin-bottom: 0; flex: 0 1 auto; }
   label.row input[type="checkbox"] { accent-color: var(--accent); }
   .field { margin-bottom: 10px; }
   .field label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
@@ -545,19 +549,31 @@
       </div>
       <div class="field-grid">
         <div class="field">
-          <label>训练开始</label>
+          <label class="label-with-hint">
+            <span>训练开始</span>
+            <span class="hint" tabindex="0" data-tip="参数训练区间的起始交易日。&#10;在该窗口内对每组参数执行回测，依据指标评分排名。">?</span>
+          </label>
           <input type="date" id="optimizationTrainStartDate" />
         </div>
         <div class="field">
-          <label>训练结束</label>
+          <label class="label-with-hint">
+            <span>训练结束</span>
+            <span class="hint" tabindex="0" data-tip="训练区间的结束交易日（含）。建议覆盖至少 6 个月以避免过拟合。">?</span>
+          </label>
           <input type="date" id="optimizationTrainEndDate" />
         </div>
         <div class="field">
-          <label>验证开始</label>
+          <label class="label-with-hint">
+            <span>验证开始</span>
+            <span class="hint" tabindex="0" data-tip="可选；用训练后未见过的样本再跑一次以做样本外验证。&#10;留空表示只用训练区间评分。">?</span>
+          </label>
           <input type="date" id="optimizationValidationStartDate" />
         </div>
         <div class="field">
-          <label>验证结束</label>
+          <label class="label-with-hint">
+            <span>验证结束</span>
+            <span class="hint" tabindex="0" data-tip="验证区间结束交易日（含）；与"验证开始"必须同时填写或同时留空。">?</span>
+          </label>
           <input type="date" id="optimizationValidationEndDate" />
         </div>
         <div class="field">
@@ -596,15 +612,24 @@
           <input type="text" id="optimizationRpsExits" value="80,85" title="多值用逗号分隔，留空不启用 RPS 退出" />
         </div>
         <div class="field">
-          <label>持仓上限</label>
+          <label class="label-with-hint">
+            <span>持仓上限</span>
+            <span class="hint" tabindex="0" data-tip="同一时刻最多持有的股票数。&#10;命中信号超过该上限会按打分顺序进入候补，等已有持仓退出再补位。">?</span>
+          </label>
           <input type="number" id="optimizationPortfolioCap" min="1" max="200" value="10" />
         </div>
         <div class="field">
-          <label>单票权重</label>
+          <label class="label-with-hint">
+            <span>单票权重</span>
+            <span class="hint" tabindex="0" data-tip="每支股票占组合资金的比例（0–1）。&#10;例：0.10 = 每只 10%（满仓需 10 只股票）。">?</span>
+          </label>
           <input type="number" id="optimizationPositionWeight" min="0.01" max="1" step="0.01" value="0.10" />
         </div>
         <div class="field">
-          <label>进场等待窗口</label>
+          <label class="label-with-hint">
+            <span>进场等待窗口</span>
+            <span class="hint" tabindex="0" data-tip="信号出现后允许多少个交易日内补单。&#10;例：5 表示信号后 5 个交易日内若仍有空位即买入，过期作废。">?</span>
+          </label>
           <input type="number" id="optimizationEntryWindow" min="1" max="60" value="5" />
         </div>
         <div class="field">
@@ -615,22 +640,34 @@
           <input type="text" id="optimizationEntryDelays" value="0" title="多值用逗号分隔，例：0,1,2" />
         </div>
         <div class="field">
-          <label>最大组合数</label>
+          <label class="label-with-hint">
+            <span>最大组合数</span>
+            <span class="hint" tabindex="0" data-tip="本次任务允许评估的参数组合上限。&#10;网格搜索超过即报错；随机搜索会从全空间抽样到该上限。">?</span>
+          </label>
           <input type="number" id="optimizationMaxSets" min="1" max="5000" value="1000" />
         </div>
         <div class="field">
-          <label>搜索方式</label>
+          <label class="label-with-hint">
+            <span>搜索方式</span>
+            <span class="hint" tabindex="0" data-tip="网格搜索：穷举所有参数组合（适合小空间）。&#10;随机搜索：从空间中均匀抽样到上限，适合大空间快速探索。">?</span>
+          </label>
           <select id="optimizationSearchMode">
             <option value="grid">网格搜索</option>
             <option value="random">随机搜索</option>
           </select>
         </div>
         <div class="field">
-          <label>随机种子</label>
+          <label class="label-with-hint">
+            <span>随机种子</span>
+            <span class="hint" tabindex="0" data-tip="随机搜索的种子，固定后可复现同一抽样。&#10;只在搜索方式为"随机搜索"时生效。">?</span>
+          </label>
           <input type="number" id="optimizationRandomSeed" min="0" max="999999" value="42" />
         </div>
         <div class="field">
-          <label>排序目标</label>
+          <label class="label-with-hint">
+            <span>排序目标</span>
+            <span class="hint" tabindex="0" data-tip="结果按该指标排序选最优。&#10;综合得分综合考虑收益、回撤、胜率；其余为单一指标排序。">?</span>
+          </label>
           <select id="optimizationObjective">
             <option value="score">综合得分</option>
             <option value="average_annualized_return">平均年化收益</option>
@@ -642,22 +679,34 @@
           </select>
         </div>
         <div class="field">
-          <label>预计组合数</label>
+          <label class="label-with-hint">
+            <span>预计组合数</span>
+            <span class="hint" tabindex="0" data-tip="实时计算的当前参数空间总组合数（去重后）。&#10;随机模式下显示"抽样数 / 全空间"。">?</span>
+          </label>
           <input type="text" id="optimizationComboCount" value="—" readonly />
         </div>
       </div>
-      <label class="row" style="margin-top: 10px;">
-        <input type="checkbox" id="optimizationFundamentalOff" checked />
-        <span>包含财务条件关闭</span>
-      </label>
-      <label class="row">
-        <input type="checkbox" id="optimizationFundamentalGrowth" checked />
-        <span>包含 3 年正利润且至少 2 次增长</span>
-      </label>
-      <label class="row">
-        <input type="checkbox" id="optimizationCupShapeVariants" />
-        <span>加入杯柄形态组合</span>
-      </label>
+      <div class="row-hint-wrap" style="margin-top: 10px;">
+        <label class="row">
+          <input type="checkbox" id="optimizationFundamentalOff" checked />
+          <span>包含财务条件关闭</span>
+        </label>
+        <span class="hint" tabindex="0" data-tip="勾选后会向参数空间加入一档"不启用财务过滤"的对照组。">?</span>
+      </div>
+      <div class="row-hint-wrap">
+        <label class="row">
+          <input type="checkbox" id="optimizationFundamentalGrowth" checked />
+          <span>包含 3 年正利润且至少 2 次增长</span>
+        </label>
+        <span class="hint" tabindex="0" data-tip="勾选后会向参数空间加入"3 年正利润 + 至少 2 次同比增长 + 报告滞后 120 日"的财务条件。">?</span>
+      </div>
+      <div class="row-hint-wrap">
+        <label class="row">
+          <input type="checkbox" id="optimizationCupShapeVariants" />
+          <span>加入杯柄形态组合</span>
+        </label>
+        <span class="hint" tabindex="0" data-tip="勾选后会用 4 套不同的杯柄形态参数（基础 / 放宽 / 放量确认 / 放量+前涨）一起跑，组合数会乘以 4。">?</span>
+      </div>
       <div class="button-row">
         <button class="primary" id="runOptimization">创建并运行</button>
         <button class="secondary" id="cancelOptimization">取消任务</button>
@@ -741,6 +790,7 @@
     currentOptimizationRun: null,
     optimizationPollTimer: null,
     optimizationTicker: null,
+    optimizationCancelRequestedAt: null,
     optimizationResults: [],
     selectedOptimizationResultIds: new Set(),
     strategyPresets: [],
@@ -1471,17 +1521,31 @@
     return `${s}秒`;
   }
 
+  function parseUtcTimestamp(value) {
+    if (!value) return null;
+    const hasTz = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value);
+    const ms = Date.parse(hasTz ? value : value + 'Z');
+    return Number.isFinite(ms) ? ms : null;
+  }
+
   function computeRunTiming(run) {
     if (!run || !run.started_at) return { elapsedSec: null, etaSec: null, totalSec: null };
-    const start = Date.parse(run.started_at);
-    if (!Number.isFinite(start)) return { elapsedSec: null, etaSec: null, totalSec: null };
-    const end = run.completed_at ? Date.parse(run.completed_at) : Date.now();
-    const elapsedSec = Math.max(0, (end - start) / 1000);
+    const start = parseUtcTimestamp(run.started_at);
+    if (start === null) return { elapsedSec: null, etaSec: null, totalSec: null };
+    let endMs;
+    if (run.completed_at) {
+      endMs = parseUtcTimestamp(run.completed_at) || Date.now();
+    } else if (run.status === 'cancel_requested') {
+      endMs = state.optimizationCancelRequestedAt || Date.now();
+    } else {
+      endMs = Date.now();
+    }
+    const elapsedSec = Math.max(0, (endMs - start) / 1000);
     const total = Number(run.total_parameter_sets || 0);
     const done = Number(run.completed_parameter_sets || 0) + Number(run.failed_parameter_sets || 0);
     let etaSec = null;
     let totalSec = null;
-    if (total > 0 && done > 0 && !run.completed_at) {
+    if (total > 0 && done > 0 && !run.completed_at && run.status === 'running') {
       totalSec = (elapsedSec / done) * total;
       etaSec = Math.max(0, totalSec - elapsedSec);
     }
@@ -1492,7 +1556,7 @@
     if (state.optimizationTicker) return;
     state.optimizationTicker = window.setInterval(() => {
       const run = state.currentOptimizationRun;
-      if (!run || (run.status !== 'running' && run.status !== 'cancel_requested')) {
+      if (!run || run.status !== 'running') {
         window.clearInterval(state.optimizationTicker);
         state.optimizationTicker = null;
         return;
@@ -1501,12 +1565,37 @@
     }, 1000);
   }
 
+  function summarizeParameters(params) {
+    if (!params) return '';
+    const parts = [];
+    if (params.rps_threshold !== undefined) parts.push(`RPS ${params.rps_threshold}`);
+    const windows = Array.isArray(params.selected_rps_windows)
+      ? params.selected_rps_windows.join('+')
+      : null;
+    if (windows) parts.push(windows);
+    if (params.holding_days !== undefined && params.holding_days !== null) {
+      parts.push(`持有 ${params.holding_days}`);
+    }
+    if (params.stop_loss_pct !== undefined) parts.push(`止损 ${params.stop_loss_pct}`);
+    if (params.rps_exit_threshold !== undefined && params.rps_exit_threshold !== null) {
+      parts.push(`RPS退 ${params.rps_exit_threshold}`);
+    }
+    if (params.entry_delay_days) parts.push(`延迟 ${params.entry_delay_days}`);
+    const cup = params.cup_handle_params || {};
+    if (cup.require_breakout_volume) parts.push('放量确认');
+    if (cup.require_prior_uptrend) parts.push('需前涨');
+    return parts.join(' · ');
+  }
+
   function renderOptimizationRun(run) {
     state.optimizationRunId = run.id;
     state.currentOptimizationRun = run;
     updateOptimizationPhase(run.status);
-    if (run.status === 'running' || run.status === 'cancel_requested') {
+    if (run.status === 'running') {
       startOptimizationTicker();
+    } else if (state.optimizationTicker) {
+      window.clearInterval(state.optimizationTicker);
+      state.optimizationTicker = null;
     }
     const total = Number(run.total_parameter_sets || 0);
     const completed = Number(run.completed_parameter_sets || 0);
@@ -1520,19 +1609,39 @@
     const timing = computeRunTiming(run);
     const timingParts = [];
     if (timing.elapsedSec !== null) {
-      timingParts.push(`已运行 ${formatDuration(timing.elapsedSec)}`);
+      const elapsedLabel = run.status === 'cancel_requested' ? '取消时已运行' : '已运行';
+      timingParts.push(`${elapsedLabel} ${formatDuration(timing.elapsedSec)}`);
     }
     if (timing.etaSec !== null) {
       timingParts.push(`预计剩余 ${formatDuration(timing.etaSec)}`);
     }
     const timingText = timingParts.length ? ` · ${timingParts.join(' · ')}` : '';
+    const statusLabelMap = {
+      running: '运行中',
+      cancel_requested: '取消中',
+      cancelled: '已取消',
+      completed: '完成',
+      failed: '失败',
+    };
+    const statusLabel = statusLabelMap[run.status] || run.status;
+    let currentSetLine = '';
+    if (run.status === 'running' && total > 0) {
+      const idx = Math.min(done + 1, total);
+      const sets = Array.isArray(run.parameter_sets) ? run.parameter_sets : [];
+      const currentParams = sets[done] || null;
+      const summary = summarizeParameters(currentParams);
+      currentSetLine = ` · 第 ${fmt(idx)}/${fmt(total)} 组进行中${summary ? ' · ' + summary : ''}`;
+    }
     document.getElementById('optimizationStatus').textContent =
-      `${run.status} · ${modeText} · ${OPTIMIZATION_OBJECTIVE_LABELS[run.objective] || run.objective} · ` +
-      `进度 ${fmt(done)}/${fmt(total)} (${pct}%) · 失败 ${fmt(failed)}${timingText}${best}${error}`;
+      `${statusLabel} · ${modeText} · ${OPTIMIZATION_OBJECTIVE_LABELS[run.objective] || run.objective} · ` +
+      `进度 ${fmt(done)}/${fmt(total)} (${pct}%) · 失败 ${fmt(failed)}${currentSetLine}${timingText}${best}${error}`;
     const running = run.status === 'running' || run.status === 'cancel_requested';
-    document.getElementById('runOptimization').disabled = running;
-    document.getElementById('runOptimization').textContent = running ? '运行中…' : '创建并运行';
-    document.getElementById('cancelOptimization').disabled = !running;
+    const runBtn = document.getElementById('runOptimization');
+    runBtn.disabled = running;
+    runBtn.textContent = run.status === 'cancel_requested'
+      ? '取消中…'
+      : (running ? '运行中…' : '创建并运行');
+    document.getElementById('cancelOptimization').disabled = run.status !== 'running';
   }
 
   function renderOptimizationResults(results) {
@@ -1853,6 +1962,7 @@
     const btn = document.getElementById('runOptimization');
     btn.disabled = true;
     btn.textContent = '启动中…';
+    state.optimizationCancelRequestedAt = null;
     document.getElementById('optimizationStatus').textContent = '正在创建优化任务并执行数据预检…';
     renderOptimizationResults([]);
     try {
@@ -1884,6 +1994,7 @@
 
   async function cancelOptimization() {
     if (!state.optimizationRunId) return;
+    state.optimizationCancelRequestedAt = Date.now();
     document.getElementById('cancelOptimization').disabled = true;
     try {
       const data = await api('POST', `/backtests/optimization/runs/${state.optimizationRunId}/cancel`);

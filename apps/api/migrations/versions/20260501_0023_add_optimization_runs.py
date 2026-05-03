@@ -24,6 +24,24 @@ OPTIMIZATION_RESULT_STATUS_CONSTRAINT = "status IN ('completed', 'failed')"
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    is_sqlite = bind.dialect.name == "sqlite"
+    optimization_run_constraints = [
+        sa.CheckConstraint(
+            OPTIMIZATION_RUN_STATUS_CONSTRAINT,
+            name="optimization_runs_status",
+        ),
+    ]
+    if is_sqlite:
+        optimization_run_constraints.append(
+            sa.ForeignKeyConstraint(
+                ["best_result_id"],
+                ["optimization_results.id"],
+                name="fk_optimization_runs_best_result_id_optimization_results",
+                ondelete="SET NULL",
+            )
+        )
+
     op.create_table(
         "optimization_runs",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -46,10 +64,7 @@ def upgrade() -> None:
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.CheckConstraint(
-            OPTIMIZATION_RUN_STATUS_CONSTRAINT,
-            name="optimization_runs_status",
-        ),
+        *optimization_run_constraints,
     )
     op.create_index("ix_optimization_runs_market", "optimization_runs", ["market"], unique=False)
     op.create_index(
@@ -133,14 +148,15 @@ def upgrade() -> None:
         ["rank"],
         unique=False,
     )
-    op.create_foreign_key(
-        "fk_optimization_runs_best_result_id_optimization_results",
-        "optimization_runs",
-        "optimization_results",
-        ["best_result_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
+    if not is_sqlite:
+        op.create_foreign_key(
+            "fk_optimization_runs_best_result_id_optimization_results",
+            "optimization_runs",
+            "optimization_results",
+            ["best_result_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
 
     op.create_table(
         "strategy_presets",
@@ -190,16 +206,19 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    is_sqlite = bind.dialect.name == "sqlite"
     op.drop_index("ix_strategy_presets_source_optimization_result_id", table_name="strategy_presets")
     op.drop_index("ix_strategy_presets_source_optimization_run_id", table_name="strategy_presets")
     op.drop_index("ix_strategy_presets_parameters_hash", table_name="strategy_presets")
     op.drop_index("ix_strategy_presets_market", table_name="strategy_presets")
     op.drop_table("strategy_presets")
-    op.drop_constraint(
-        "fk_optimization_runs_best_result_id_optimization_results",
-        "optimization_runs",
-        type_="foreignkey",
-    )
+    if not is_sqlite:
+        op.drop_constraint(
+            "fk_optimization_runs_best_result_id_optimization_results",
+            "optimization_runs",
+            type_="foreignkey",
+        )
     op.drop_index("ix_optimization_results_rank", table_name="optimization_results")
     op.drop_index("ix_optimization_results_score", table_name="optimization_results")
     op.drop_index("ix_optimization_results_parameter_hash", table_name="optimization_results")
