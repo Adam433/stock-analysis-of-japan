@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date
+from concurrent.futures import Future
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -15,7 +16,11 @@ import stockanalyse_api.domain.instruments.models  # noqa: F401
 import stockanalyse_api.domain.market_data.models  # noqa: F401
 import stockanalyse_api.domain.screens.models  # noqa: F401
 from stockanalyse_api.db.base import Base
-from stockanalyse_api.domain.backtests.models import OptimizationResult, StrategyPreset
+from stockanalyse_api.domain.backtests.models import (
+    OptimizationResult,
+    OptimizationResultDetailCache,
+    StrategyPreset,
+)
 from stockanalyse_api.services.dashboard import DEFAULT_CUP_HANDLE_PARAMS
 from stockanalyse_api.services.dashboard_strategy_backtest import (
     _simulate_trade,
@@ -208,6 +213,21 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(payload["random_seed"], 11)
         self.assertNotIn("_optimization", payload["parameter_space"])
 
+    def test_create_optimization_run_persists_worker_metadata(self) -> None:
+        with self.session_factory() as session:
+            run = create_optimization_run(
+                session,
+                market="us",
+                train_start_date=date(2025, 1, 1),
+                train_end_date=date(2025, 12, 31),
+                parameter_space={"rps_threshold": [90]},
+                max_workers=4,
+                require_data_ready=False,
+            )
+            payload = serialize_optimization_run(run)
+
+        self.assertEqual(payload["max_workers"], 4)
+
     def test_execute_optimization_run_persists_ranked_results(self) -> None:
         def fake_backtest(*args, **kwargs):
             if kwargs["rps_threshold"] == 90:
@@ -245,6 +265,97 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(results[0].rank, 1)
         self.assertEqual(serialize_optimization_result(results[0])["parameters"]["rps_threshold"], 90)
         self.assertEqual(completed.best_result_id, results[0].id)
+
+    def test_execute_optimization_run_parallel_persists_worker_results(self) -> None:
+        class FakeProcessPoolExecutor:
+            instances: list["FakeProcessPoolExecutor"] = []
+
+            def __init__(self, *, max_workers: int) -> None:
+                self.max_workers = max_workers
+                self.submitted = 0
+                FakeProcessPoolExecutor.instances.append(self)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> None:
+                return None
+
+            def submit(self, fn, payload):
+                self.submitted += 1
+                future: Future = Future()
+                future.set_result(fn(payload))
+                return future
+
+        def fake_group_worker(payload):
+            evaluations = []
+            for parameters in payload["parameter_sets"]:
+                threshold = int(parameters["rps_threshold"])
+                if threshold == 85:
+                    evaluations.append(
+                        {
+                            "parameters": parameters,
+                            "train_metrics": None,
+                            "validation_metrics": None,
+                            "score": None,
+                            "status": "failed",
+                            "failure_reason": "RuntimeError: bad parameter",
+                        }
+                    )
+                    continue
+                score = Decimal(threshold) / Decimal("1000")
+                evaluations.append(
+                    {
+                        "parameters": parameters,
+                        "train_metrics": {
+                            "completed_trades": 60,
+                            "average_trade_return": f"{score:.6f}",
+                            "win_rate": "0.550000",
+                            "worst_trade_return": "-0.070000",
+                            "sample_penalty": "0.000000",
+                        },
+                        "validation_metrics": None,
+                        "score": score,
+                        "status": "completed",
+                        "failure_reason": None,
+                    }
+                )
+            return evaluations
+
+        with self.session_factory() as session:
+            run = create_optimization_run(
+                session,
+                market="us",
+                train_start_date=date(2025, 1, 1),
+                train_end_date=date(2025, 12, 31),
+                parameter_space={"rps_threshold": [85, 90, 95]},
+                max_workers=2,
+                require_data_ready=False,
+            )
+            with (
+                patch(
+                    "stockanalyse_api.services.optimization_backtest._session_uses_in_memory_database",
+                    return_value=False,
+                ),
+                patch(
+                    "stockanalyse_api.services.optimization_backtest.ProcessPoolExecutor",
+                    FakeProcessPoolExecutor,
+                ),
+                patch(
+                    "stockanalyse_api.services.optimization_backtest._evaluate_parameter_set_group_worker",
+                    side_effect=fake_group_worker,
+                ),
+            ):
+                completed = execute_optimization_run(session, run.id)
+            results = list_optimization_results(session, run_id=run.id)
+
+        self.assertEqual(FakeProcessPoolExecutor.instances[-1].max_workers, 2)
+        self.assertGreaterEqual(FakeProcessPoolExecutor.instances[-1].submitted, 2)
+        self.assertEqual(completed.status, "completed")
+        self.assertEqual(completed.completed_parameter_sets, 2)
+        self.assertEqual(completed.failed_parameter_sets, 1)
+        self.assertEqual(results[0].rank, 1)
+        self.assertEqual(serialize_optimization_result(results[0])["parameters"]["rps_threshold"], 95)
 
     def test_execute_optimization_run_isolates_failed_parameter_sets(self) -> None:
         def fake_backtest(*args, **kwargs):
@@ -866,6 +977,115 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(validation_trade["exit_reason_label"], "RPS 跌破退出阈值")
         self.assertEqual(validation_trade["entry_price"], "100.000000")
         self.assertEqual(validation_trade["exit_price"], "92.000000")
+
+    def test_optimization_result_detail_uses_metrics_without_rerun_when_no_trades(self) -> None:
+        with self.session_factory() as session:
+            run = create_optimization_run(
+                session,
+                market="us",
+                train_start_date=date(2026, 3, 2),
+                train_end_date=date(2026, 3, 13),
+                validation_start_date=date(2026, 3, 16),
+                validation_end_date=date(2026, 3, 31),
+                parameter_space={"rps_threshold": [80], "use_cup_handle": [False]},
+                require_data_ready=False,
+            )
+            parameters = build_parameter_sets(
+                {"rps_threshold": [80], "use_cup_handle": [False]}
+            )[0]
+            result = OptimizationResult(
+                optimization_run_id=run.id,
+                parameter_hash=stable_parameter_hash(parameters),
+                parameters_json=dump_json(parameters),
+                train_metrics_json=dump_json(
+                    {"completed_trades": 0, "annualized_return": "0.000000"}
+                ),
+                validation_metrics_json=dump_json(
+                    {"completed_trades": 0, "annualized_return": "0.000000"}
+                ),
+                score=Decimal("-0.2"),
+                rank=1,
+                status="completed",
+            )
+            session.add(result)
+            session.commit()
+            result_id = result.id
+
+            with patch(
+                "stockanalyse_api.services.optimization_backtest.run_cup_handle_rps_backtest"
+            ) as mocked_backtest:
+                detail = build_optimization_result_detail(session, result_id=result_id)
+
+            cache = session.execute(
+                select(OptimizationResultDetailCache).where(
+                    OptimizationResultDetailCache.optimization_result_id == result_id
+                )
+            ).scalar_one()
+
+        mocked_backtest.assert_not_called()
+        self.assertEqual(detail["train"]["trades"], [])
+        self.assertEqual(detail["validation"]["trades"], [])
+        self.assertEqual(detail["train"]["summary"]["start_date"], "2026-03-02")
+        self.assertEqual(cache.max_trades_returned, 1000)
+
+    def test_optimization_result_detail_reuses_cached_trade_rows(self) -> None:
+        with self.session_factory() as session:
+            run = create_optimization_run(
+                session,
+                market="us",
+                train_start_date=date(2026, 3, 2),
+                train_end_date=date(2026, 3, 13),
+                validation_start_date=None,
+                validation_end_date=None,
+                parameter_space={"rps_threshold": [80], "use_cup_handle": [False]},
+                require_data_ready=False,
+            )
+            parameters = build_parameter_sets(
+                {"rps_threshold": [80], "use_cup_handle": [False]}
+            )[0]
+            result = OptimizationResult(
+                optimization_run_id=run.id,
+                parameter_hash=stable_parameter_hash(parameters),
+                parameters_json=dump_json(parameters),
+                train_metrics_json=dump_json({"completed_trades": 1}),
+                validation_metrics_json=None,
+                score=Decimal("0.1"),
+                rank=1,
+                status="completed",
+            )
+            session.add(result)
+            session.commit()
+            result_id = result.id
+            session.add(
+                OptimizationResultDetailCache(
+                    optimization_result_id=result_id,
+                    max_trades_returned=1000,
+                    train_result_json=dump_json(
+                        {
+                            "completed_trades": 1,
+                            "trades": [
+                                {
+                                    "signal_date": "2026-03-02",
+                                    "symbol": "AAPL",
+                                    "exit_reason": "stop_loss",
+                                }
+                            ],
+                        }
+                    ),
+                    validation_result_json=None,
+                    generated_at=datetime.now(UTC),
+                )
+            )
+            session.commit()
+
+            with patch(
+                "stockanalyse_api.services.optimization_backtest.run_cup_handle_rps_backtest"
+            ) as mocked_backtest:
+                detail = build_optimization_result_detail(session, result_id=result_id)
+
+        mocked_backtest.assert_not_called()
+        self.assertEqual(detail["train"]["trades"][0]["symbol"], "AAPL")
+        self.assertEqual(detail["train"]["trades"][0]["exit_reason_label"], "固定止损触发")
 
     def test_strategy_presets_can_be_saved_listed_and_activated(self) -> None:
         first_params = {"rps_threshold": 85}

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 import json
 import math
 import random
 import threading
 import time
+from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from dataclasses import fields
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
@@ -12,10 +14,14 @@ from hashlib import sha256
 from itertools import product
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from stockanalyse_api.db.session import SessionLocal
-from stockanalyse_api.domain.backtests.models import OptimizationResult, OptimizationRun
+from stockanalyse_api.domain.backtests.models import (
+    OptimizationResult,
+    OptimizationResultDetailCache,
+    OptimizationRun,
+)
 from stockanalyse_api.services.dashboard import (
     DEFAULT_CUP_HANDLE_PARAMS,
     DEFAULT_FUNDAMENTAL_GROWTH_PARAMS,
@@ -31,6 +37,9 @@ from stockanalyse_api.services.dashboard_strategy_backtest import (
 
 DEFAULT_OPTIMIZATION_OBJECTIVE = "score"
 DEFAULT_MAX_PARAMETER_SETS = 1000
+DEFAULT_OPTIMIZATION_PARALLEL_GROUP_SIZE = 8
+DEFAULT_OPTIMIZATION_DETAIL_CACHE_TRADES = 300
+MAX_AUTO_OPTIMIZATION_WORKERS = 6
 RATIO_PATTERN = Decimal("0.000001")
 SUPPORTED_OPTIMIZATION_OBJECTIVES = {
     "score",
@@ -76,10 +85,12 @@ def _optimization_metadata(
     *,
     search_mode: str,
     random_seed: int | None,
+    max_workers: int | str | None = None,
 ) -> dict[str, object]:
     metadata: dict[str, object] = {"search_mode": search_mode}
     if random_seed is not None:
         metadata["random_seed"] = random_seed
+    metadata["max_workers"] = max_workers if max_workers is not None else "auto"
     return metadata
 
 
@@ -91,6 +102,21 @@ def _split_parameter_space_metadata(
     if not isinstance(metadata, dict):
         metadata = {}
     return raw_space, metadata
+
+
+def _coerce_configured_max_workers(value: object) -> int | str | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, str) and value.strip().lower() == "auto":
+        return "auto"
+    workers = int(value)
+    if workers < 1:
+        raise ValueError("max_workers must be at least 1 or auto.")
+    return workers
+
+
+def _configured_max_workers_from_metadata(metadata: dict[str, object]) -> int | str | None:
+    return _coerce_configured_max_workers(metadata.get("max_workers", "auto"))
 
 
 def _parameter_axes(parameter_space: dict[str, object]) -> list[tuple[str, list[object]]]:
@@ -353,6 +379,7 @@ def serialize_optimization_run(run: OptimizationRun) -> dict[str, object]:
         "error_message": run.error_message,
         "search_mode": metadata.get("search_mode", "grid"),
         "random_seed": metadata.get("random_seed"),
+        "max_workers": metadata.get("max_workers", "auto"),
         "parameter_space": parameter_space,
         "parameter_sets": load_json(run.parameter_sets_json, default=[]),
         "data_snapshot": load_json(run.data_snapshot_json, default={}),
@@ -388,6 +415,7 @@ def create_optimization_run(
     max_parameter_sets: int = DEFAULT_MAX_PARAMETER_SETS,
     search_mode: str = "grid",
     random_seed: int | None = None,
+    max_workers: int | str | None = None,
     require_data_ready: bool = True,
 ) -> OptimizationRun:
     resolved_market = normalize_market(market)
@@ -409,6 +437,7 @@ def create_optimization_run(
             + ", ".join(sorted(SUPPORTED_SEARCH_MODES))
             + "."
         )
+    configured_max_workers = _coerce_configured_max_workers(max_workers)
 
     raw_parameter_space, _ = _split_parameter_space_metadata(parameter_space)
     stored_parameter_space = {
@@ -416,6 +445,7 @@ def create_optimization_run(
         "_optimization": _optimization_metadata(
             search_mode=search_mode,
             random_seed=random_seed,
+            max_workers=configured_max_workers,
         ),
     }
     parameter_sets = build_parameter_sets(
@@ -487,12 +517,30 @@ def list_optimization_results(
     )
 
 
+def count_optimization_results(session, *, run_id: int) -> int:
+    return int(
+        session.execute(
+            select(func.count(OptimizationResult.id)).where(
+                OptimizationResult.optimization_run_id == run_id
+            )
+        ).scalar_one()
+    )
+
+
 def delete_optimization_run(session, run_id: int) -> None:
     run = session.get(OptimizationRun, run_id)
     if run is None:
         raise LookupError("Optimization run not found.")
     if run.status in {"running", "cancel_requested"}:
         raise ValueError("Cannot delete a running optimization run; cancel it first.")
+    result_ids = select(OptimizationResult.id).where(
+        OptimizationResult.optimization_run_id == run_id
+    )
+    session.execute(
+        OptimizationResultDetailCache.__table__.delete().where(
+            OptimizationResultDetailCache.optimization_result_id.in_(result_ids)
+        )
+    )
     session.execute(
         OptimizationResult.__table__.delete().where(
             OptimizationResult.optimization_run_id == run_id
@@ -507,6 +555,11 @@ def delete_optimization_result(session, result_id: int) -> None:
     if result is None:
         raise LookupError("Optimization result not found.")
     run = session.get(OptimizationRun, result.optimization_run_id)
+    session.execute(
+        OptimizationResultDetailCache.__table__.delete().where(
+            OptimizationResultDetailCache.optimization_result_id == result_id
+        )
+    )
     session.delete(result)
     if run is not None and run.best_result_id == result_id:
         run.best_result_id = None
@@ -776,6 +829,224 @@ def _run_backtest_once(
     return result.to_dict()
 
 
+def _evaluate_parameter_set(
+    session,
+    *,
+    start_date: date,
+    end_date: date,
+    validation_start_date: date | None,
+    validation_end_date: date | None,
+    market: str,
+    objective: str,
+    parameters: dict[str, object],
+    screen_cache: dict[str, dict[str, object]] | None = None,
+    should_cancel=None,
+) -> dict[str, object]:
+    try:
+        train_result = _run_backtest_once(
+            session,
+            start_date=start_date,
+            end_date=end_date,
+            market=market,
+            parameters=parameters,
+            max_trades_returned=DEFAULT_OPTIMIZATION_DETAIL_CACHE_TRADES,
+            screen_cache=screen_cache,
+            should_cancel=should_cancel,
+        )
+        train_metrics = _extract_metrics(train_result)
+        validation_result = None
+        validation_metrics = None
+        score_source = train_metrics
+        if validation_start_date is not None and validation_end_date is not None:
+            validation_result = _run_backtest_once(
+                session,
+                start_date=validation_start_date,
+                end_date=validation_end_date,
+                market=market,
+                parameters=parameters,
+                max_trades_returned=DEFAULT_OPTIMIZATION_DETAIL_CACHE_TRADES,
+                screen_cache=screen_cache,
+                should_cancel=should_cancel,
+            )
+            validation_metrics = _extract_metrics(validation_result)
+            score_source = validation_metrics
+        _attach_average_annualized_return(train_metrics, validation_metrics)
+        score = _score_metrics(score_source, objective=objective)
+        return {
+            "parameters": parameters,
+            "train_metrics": train_metrics,
+            "validation_metrics": validation_metrics,
+            "train_result": train_result,
+            "validation_result": validation_result,
+            "score": score,
+            "status": "completed",
+            "failure_reason": None,
+        }
+    except BacktestCancelledError:
+        raise
+    except Exception as exc:
+        return {
+            "parameters": parameters,
+            "train_metrics": None,
+            "validation_metrics": None,
+            "score": None,
+            "status": "failed",
+            "failure_reason": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def _register_worker_domain_models() -> None:
+    import stockanalyse_api.domain.backtests.models  # noqa: F401
+    import stockanalyse_api.domain.fundamentals.models  # noqa: F401
+    import stockanalyse_api.domain.indicators.models  # noqa: F401
+    import stockanalyse_api.domain.instruments.models  # noqa: F401
+    import stockanalyse_api.domain.market_data.models  # noqa: F401
+    import stockanalyse_api.domain.screens.models  # noqa: F401
+
+
+def _evaluate_parameter_set_group_worker(payload: dict[str, object]) -> list[dict[str, object]]:
+    _register_worker_domain_models()
+    parameter_sets = payload["parameter_sets"]
+    if not isinstance(parameter_sets, list):
+        raise ValueError("Worker payload parameter_sets must be a list.")
+    results: list[dict[str, object]] = []
+    screen_cache: dict[str, dict[str, object]] = {}
+    with SessionLocal() as session:
+        for parameters in parameter_sets:
+            if not isinstance(parameters, dict):
+                raise ValueError("Worker payload parameters must be dictionaries.")
+            results.append(
+                _evaluate_parameter_set(
+                    session,
+                    start_date=payload["start_date"],  # type: ignore[arg-type]
+                    end_date=payload["end_date"],  # type: ignore[arg-type]
+                    validation_start_date=payload.get("validation_start_date"),  # type: ignore[arg-type]
+                    validation_end_date=payload.get("validation_end_date"),  # type: ignore[arg-type]
+                    market=str(payload["market"]),
+                    objective=str(payload["objective"]),
+                    parameters=parameters,
+                    screen_cache=screen_cache,
+                    should_cancel=None,
+                )
+            )
+    return results
+
+
+def _parameter_screen_signature(parameters: dict[str, object]) -> str:
+    return dump_json(
+        {
+            "rps_threshold": parameters.get("rps_threshold"),
+            "selected_rps_windows": parameters.get("selected_rps_windows"),
+            "min_rps_windows_passing": parameters.get("min_rps_windows_passing"),
+            "use_cup_handle": parameters.get("use_cup_handle"),
+            "cup_handle_params": parameters.get("cup_handle_params"),
+            "fundamental_growth_params": parameters.get("fundamental_growth_params"),
+        }
+    )
+
+
+def _parallel_parameter_groups(
+    parameter_sets: list[dict[str, object]],
+    *,
+    group_size: int = DEFAULT_OPTIMIZATION_PARALLEL_GROUP_SIZE,
+) -> list[list[dict[str, object]]]:
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for parameters in parameter_sets:
+        grouped.setdefault(_parameter_screen_signature(parameters), []).append(parameters)
+    groups: list[list[dict[str, object]]] = []
+    chunk_size = max(int(group_size), 1)
+    for group in grouped.values():
+        for index in range(0, len(group), chunk_size):
+            groups.append(group[index : index + chunk_size])
+    return groups
+
+
+def _session_uses_in_memory_database(session) -> bool:
+    bind = session.get_bind()
+    url = getattr(bind, "url", None)
+    if url is None:
+        return False
+    return url.get_backend_name() == "sqlite" and (url.database in {None, "", ":memory:"})
+
+
+def _auto_optimization_worker_count() -> int:
+    configured = os.environ.get("STOCKANALYSE_OPTIMIZATION_MAX_WORKERS")
+    if configured:
+        coerced = _coerce_configured_max_workers(configured)
+        if isinstance(coerced, int):
+            return coerced
+    cpu_count = os.cpu_count() or 1
+    return max(1, min(MAX_AUTO_OPTIMIZATION_WORKERS, max(cpu_count - 2, 1)))
+
+
+def _resolve_optimization_max_workers(
+    session,
+    *,
+    configured_max_workers: int | str | None,
+    total_parameter_sets: int,
+) -> int:
+    if total_parameter_sets <= 1 or _session_uses_in_memory_database(session):
+        return 1
+    if configured_max_workers in {None, "auto"}:
+        workers = _auto_optimization_worker_count()
+    else:
+        workers = int(configured_max_workers)
+    return max(1, min(workers, total_parameter_sets))
+
+
+def _evaluation_failure(parameters: dict[str, object], exc: BaseException) -> dict[str, object]:
+    return {
+        "parameters": parameters,
+        "train_metrics": None,
+        "validation_metrics": None,
+        "score": None,
+        "status": "failed",
+        "failure_reason": f"{type(exc).__name__}: {exc}",
+    }
+
+
+def _persist_evaluation_result(
+    session,
+    *,
+    run: OptimizationRun,
+    evaluation: dict[str, object],
+) -> None:
+    parameters = evaluation["parameters"]
+    if not isinstance(parameters, dict):
+        raise ValueError("Optimization evaluation parameters are invalid.")
+    status = str(evaluation["status"])
+    persisted = _persist_result(
+        session,
+        run=run,
+        parameters=parameters,
+        train_metrics=evaluation.get("train_metrics"),  # type: ignore[arg-type]
+        validation_metrics=evaluation.get("validation_metrics"),  # type: ignore[arg-type]
+        score=evaluation.get("score"),  # type: ignore[arg-type]
+        status=status,
+        failure_reason=(
+            str(evaluation["failure_reason"])
+            if evaluation.get("failure_reason") is not None
+            else None
+        ),
+    )
+    if status == "completed":
+        train_result = evaluation.get("train_result")
+        validation_result = evaluation.get("validation_result")
+        if isinstance(train_result, dict):
+            _store_detail_cache(
+                session,
+                result_id=persisted.id,
+                max_trades_returned=DEFAULT_OPTIMIZATION_DETAIL_CACHE_TRADES,
+                train_result=train_result,
+                validation_result=(
+                    validation_result if isinstance(validation_result, dict) else None
+                ),
+            )
+        run.completed_parameter_sets += 1
+    else:
+        run.failed_parameter_sets += 1
+
+
 def _entry_reason(parameters: dict[str, object]) -> str:
     parts = [
         f"RPS 达到 {parameters.get('rps_threshold', '—')}",
@@ -817,6 +1088,74 @@ def _annotate_trades(
     ]
 
 
+def _result_from_metrics(
+    metrics: dict[str, object] | None,
+    *,
+    start_date: date,
+    end_date: date,
+    parameters: dict[str, object],
+) -> dict[str, object]:
+    result = dict(metrics or {})
+    result.setdefault("start_date", start_date.isoformat())
+    result.setdefault("end_date", end_date.isoformat())
+    result.setdefault("parameters", parameters)
+    result["trades"] = []
+    return result
+
+
+def _load_detail_cache(
+    session,
+    *,
+    result_id: int,
+    max_trades_returned: int,
+) -> tuple[dict[str, object], dict[str, object] | None] | None:
+    cache = session.execute(
+        select(OptimizationResultDetailCache).where(
+            OptimizationResultDetailCache.optimization_result_id == result_id
+        )
+    ).scalar_one_or_none()
+    if cache is None or cache.max_trades_returned < max_trades_returned:
+        return None
+    return (
+        load_json(cache.train_result_json, default={}),
+        load_json(cache.validation_result_json, default=None),
+    )
+
+
+def _store_detail_cache(
+    session,
+    *,
+    result_id: int,
+    max_trades_returned: int,
+    train_result: dict[str, object],
+    validation_result: dict[str, object] | None,
+) -> None:
+    cache = session.execute(
+        select(OptimizationResultDetailCache).where(
+            OptimizationResultDetailCache.optimization_result_id == result_id
+        )
+    ).scalar_one_or_none()
+    if cache is None:
+        cache = OptimizationResultDetailCache(
+            optimization_result_id=result_id,
+            max_trades_returned=max_trades_returned,
+            train_result_json=dump_json(train_result),
+            validation_result_json=(
+                dump_json(validation_result) if validation_result is not None else None
+            ),
+            generated_at=datetime.now(UTC),
+        )
+        session.add(cache)
+        return
+    if cache.max_trades_returned <= max_trades_returned:
+        cache.max_trades_returned = max_trades_returned
+        cache.train_result_json = dump_json(train_result)
+        cache.validation_result_json = (
+            dump_json(validation_result) if validation_result is not None else None
+        )
+        cache.generated_at = datetime.now(UTC)
+
+
 def build_optimization_result_detail(
     session,
     *,
@@ -834,27 +1173,73 @@ def build_optimization_result_detail(
     if not isinstance(parameters, dict):
         raise ValueError("Optimization result parameters are invalid.")
 
-    screen_cache: dict[str, dict[str, object]] = {}
-    train_result = _run_backtest_once(
+    cached = _load_detail_cache(
         session,
-        start_date=run.train_start_date,
-        end_date=run.train_end_date,
-        market=run.market,
-        parameters=parameters,
+        result_id=result.id,
         max_trades_returned=max_trades_returned,
-        screen_cache=screen_cache,
     )
-    validation_result = None
-    if run.validation_start_date is not None and run.validation_end_date is not None:
-        validation_result = _run_backtest_once(
-            session,
-            start_date=run.validation_start_date,
-            end_date=run.validation_end_date,
-            market=run.market,
-            parameters=parameters,
-            max_trades_returned=max_trades_returned,
-            screen_cache=screen_cache,
+    if cached is not None:
+        train_result, validation_result = cached
+    else:
+        train_metrics = load_json(result.train_metrics_json, default=None)
+        validation_metrics = load_json(result.validation_metrics_json, default=None)
+        train_completed = (
+            int(train_metrics.get("completed_trades", 0) or 0)
+            if isinstance(train_metrics, dict)
+            else 0
         )
+        validation_completed = (
+            int(validation_metrics.get("completed_trades", 0) or 0)
+            if isinstance(validation_metrics, dict)
+            else 0
+        )
+        if train_completed == 0 and validation_completed == 0:
+            train_result = _result_from_metrics(
+                train_metrics if isinstance(train_metrics, dict) else None,
+                start_date=run.train_start_date,
+                end_date=run.train_end_date,
+                parameters=parameters,
+            )
+            validation_result = (
+                _result_from_metrics(
+                    validation_metrics if isinstance(validation_metrics, dict) else None,
+                    start_date=run.validation_start_date,
+                    end_date=run.validation_end_date,
+                    parameters=parameters,
+                )
+                if run.validation_start_date is not None and run.validation_end_date is not None
+                else None
+            )
+        else:
+            screen_cache: dict[str, dict[str, object]] = {}
+            train_result = _run_backtest_once(
+                session,
+                start_date=run.train_start_date,
+                end_date=run.train_end_date,
+                market=run.market,
+                parameters=parameters,
+                max_trades_returned=max_trades_returned,
+                screen_cache=screen_cache,
+            )
+            validation_result = None
+            if run.validation_start_date is not None and run.validation_end_date is not None:
+                validation_result = _run_backtest_once(
+                    session,
+                    start_date=run.validation_start_date,
+                    end_date=run.validation_end_date,
+                    market=run.market,
+                    parameters=parameters,
+                    max_trades_returned=max_trades_returned,
+                    screen_cache=screen_cache,
+                )
+        _store_detail_cache(
+            session,
+            result_id=result.id,
+            max_trades_returned=max_trades_returned,
+            train_result=train_result,
+            validation_result=validation_result,
+        )
+        session.commit()
 
     train_trades = _annotate_trades(
         train_result.get("trades", []),  # type: ignore[arg-type]
@@ -902,22 +1287,23 @@ def _persist_result(
     score: Decimal | None,
     status: str,
     failure_reason: str | None = None,
-) -> None:
-    session.add(
-        OptimizationResult(
-            optimization_run_id=run.id,
-            parameter_hash=stable_parameter_hash(parameters),
-            parameters_json=dump_json(parameters),
-            train_metrics_json=dump_json(train_metrics) if train_metrics is not None else None,
-            validation_metrics_json=(
-                dump_json(validation_metrics) if validation_metrics is not None else None
-            ),
-            score=score,
-            status=status,
-            failure_reason=failure_reason,
-            completed_at=datetime.now(UTC),
-        )
+) -> OptimizationResult:
+    result = OptimizationResult(
+        optimization_run_id=run.id,
+        parameter_hash=stable_parameter_hash(parameters),
+        parameters_json=dump_json(parameters),
+        train_metrics_json=dump_json(train_metrics) if train_metrics is not None else None,
+        validation_metrics_json=(
+            dump_json(validation_metrics) if validation_metrics is not None else None
+        ),
+        score=score,
+        status=status,
+        failure_reason=failure_reason,
+        completed_at=datetime.now(UTC),
     )
+    session.add(result)
+    session.flush()
+    return result
 
 
 def _rank_results(session, run: OptimizationRun) -> None:
@@ -993,6 +1379,16 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
         return run
 
     parameter_sets = load_json(run.parameter_sets_json, default=[])
+    if not isinstance(parameter_sets, list):
+        parameter_sets = []
+    parameter_sets = [parameters for parameters in parameter_sets if isinstance(parameters, dict)]
+    _, metadata = _split_parameter_space_metadata(load_json(run.parameter_space_json, default={}))
+    configured_max_workers = _configured_max_workers_from_metadata(metadata)
+    max_workers = _resolve_optimization_max_workers(
+        session,
+        configured_max_workers=configured_max_workers,
+        total_parameter_sets=len(parameter_sets),
+    )
     screen_cache: dict[str, dict[str, object]] = {}
 
     cancel_state = {"checked_at": 0.0, "cached": False}
@@ -1017,64 +1413,91 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
         session.refresh(run)
         return run
 
-    try:
+    def execute_serial() -> OptimizationRun | None:
         for parameters in parameter_sets:
             session.refresh(run)
             if run.status == "cancel_requested":
                 return finalize_cancel()
             try:
-                train_result = _run_backtest_once(
+                evaluation = _evaluate_parameter_set(
                     session,
                     start_date=run.train_start_date,
                     end_date=run.train_end_date,
+                    validation_start_date=run.validation_start_date,
+                    validation_end_date=run.validation_end_date,
                     market=run.market,
+                    objective=run.objective,
                     parameters=parameters,
                     screen_cache=screen_cache,
                     should_cancel=should_cancel,
                 )
-                train_metrics = _extract_metrics(train_result)
-                validation_metrics = None
-                score_source = train_metrics
-                if run.validation_start_date is not None and run.validation_end_date is not None:
-                    validation_result = _run_backtest_once(
-                        session,
-                        start_date=run.validation_start_date,
-                        end_date=run.validation_end_date,
-                        market=run.market,
-                        parameters=parameters,
-                        screen_cache=screen_cache,
-                        should_cancel=should_cancel,
-                    )
-                    validation_metrics = _extract_metrics(validation_result)
-                    score_source = validation_metrics
-                _attach_average_annualized_return(train_metrics, validation_metrics)
-                score = _score_metrics(score_source, objective=run.objective)
-                _persist_result(
-                    session,
-                    run=run,
-                    parameters=parameters,
-                    train_metrics=train_metrics,
-                    validation_metrics=validation_metrics,
-                    score=score,
-                    status="completed",
-                )
-                run.completed_parameter_sets += 1
+                _persist_evaluation_result(session, run=run, evaluation=evaluation)
             except BacktestCancelledError:
                 session.rollback()
                 return finalize_cancel()
-            except Exception as exc:
-                _persist_result(
-                    session,
-                    run=run,
-                    parameters=parameters,
-                    train_metrics=None,
-                    validation_metrics=None,
-                    score=None,
-                    status="failed",
-                    failure_reason=f"{type(exc).__name__}: {exc}",
-                )
-                run.failed_parameter_sets += 1
             session.commit()
+        return None
+
+    def worker_payload(group: list[dict[str, object]]) -> dict[str, object]:
+        return {
+            "start_date": run.train_start_date,
+            "end_date": run.train_end_date,
+            "validation_start_date": run.validation_start_date,
+            "validation_end_date": run.validation_end_date,
+            "market": run.market,
+            "objective": run.objective,
+            "parameter_sets": group,
+        }
+
+    def execute_parallel() -> OptimizationRun | None:
+        groups = _parallel_parameter_groups(parameter_sets)
+        if not groups:
+            return None
+        pending: dict[Future[list[dict[str, object]]], list[dict[str, object]]] = {}
+        group_index = 0
+
+        def submit_next(executor: ProcessPoolExecutor) -> None:
+            nonlocal group_index
+            if group_index >= len(groups):
+                return
+            group = groups[group_index]
+            group_index += 1
+            pending[executor.submit(_evaluate_parameter_set_group_worker, worker_payload(group))] = group
+
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            for _ in range(min(max_workers, len(groups))):
+                submit_next(executor)
+            while pending:
+                done, _ = wait(pending.keys(), timeout=0.5, return_when=FIRST_COMPLETED)
+                if not done:
+                    session.refresh(run)
+                    if run.status == "cancel_requested":
+                        for future in pending:
+                            future.cancel()
+                        return finalize_cancel()
+                    continue
+
+                for future in done:
+                    group = pending.pop(future)
+                    try:
+                        evaluations = future.result()
+                    except Exception as exc:
+                        evaluations = [_evaluation_failure(parameters, exc) for parameters in group]
+                    for evaluation in evaluations:
+                        _persist_evaluation_result(session, run=run, evaluation=evaluation)
+                    session.commit()
+                    session.refresh(run)
+                    if run.status == "cancel_requested":
+                        for pending_future in pending:
+                            pending_future.cancel()
+                        return finalize_cancel()
+                    submit_next(executor)
+        return None
+
+    try:
+        cancelled_run = execute_serial() if max_workers == 1 else execute_parallel()
+        if cancelled_run is not None:
+            return cancelled_run
 
         _rank_results(session, run)
         run.status = "completed" if run.completed_parameter_sets else "failed"

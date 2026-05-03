@@ -100,6 +100,7 @@ POST /backtests/optimization/runs
 - `search_mode`: `grid` 或 `random`；随机搜索会从完整参数空间中抽样，避免大网格一次性全跑
 - `random_seed`: 随机搜索种子，用于复现实验
 - `max_parameter_sets`
+- `max_workers`: 可选；留空或 `null` 表示按机器 CPU 自动选择，多进程并行评估参数集
 - `execute_immediately`
 
 查询任务：

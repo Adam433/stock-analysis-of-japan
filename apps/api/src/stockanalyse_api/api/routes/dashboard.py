@@ -436,7 +436,7 @@ def dashboard_optimization_result_detail(result_id: int) -> HTMLResponse:
     });
   });
 
-  api(`/backtests/optimization/results/${resultId}/detail?max_trades_returned=1000`)
+  api(`/backtests/optimization/results/${resultId}/detail?max_trades_returned=300`)
     .then((payload) => {
       detail = payload.detail;
       renderSummary();

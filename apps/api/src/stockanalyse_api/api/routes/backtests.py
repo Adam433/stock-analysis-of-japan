@@ -31,6 +31,7 @@ from stockanalyse_api.services.portfolio_backtest_traceability import (
 from stockanalyse_api.services.optimization_backtest import (
     build_optimization_result_detail,
     cancel_optimization_run,
+    count_optimization_results,
     create_optimization_run,
     delete_optimization_result,
     delete_optimization_run,
@@ -73,6 +74,7 @@ class OptimizationRunCreateRequest(BaseModel):
     max_parameter_sets: int = 1000
     search_mode: str = "grid"
     random_seed: int | None = None
+    max_workers: int | None = None
     execute_immediately: bool = True
 
 
@@ -178,6 +180,7 @@ def create_parameter_optimization_run(payload: OptimizationRunCreateRequest) -> 
                 max_parameter_sets=payload.max_parameter_sets,
                 search_mode=payload.search_mode,
                 random_seed=payload.random_seed,
+                max_workers=payload.max_workers,
                 require_data_ready=True,
             )
             run_payload = serialize_optimization_run(run)
@@ -221,7 +224,12 @@ def read_parameter_optimization_results(
         if run is None:
             raise HTTPException(status_code=404, detail="Optimization run not found.")
         results = list_optimization_results(session, run_id=run_id, limit=limit, offset=offset)
-        return {"results": [serialize_optimization_result(result) for result in results]}
+        return {
+            "results": [serialize_optimization_result(result) for result in results],
+            "total": count_optimization_results(session, run_id=run_id),
+            "limit": limit,
+            "offset": offset,
+        }
 
 
 @router.get("/optimization/results/{result_id}/detail")

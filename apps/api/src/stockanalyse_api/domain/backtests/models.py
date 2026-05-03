@@ -155,6 +155,22 @@ class OptimizationResult(TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class OptimizationResultDetailCache(TimestampMixin, Base):
+    __tablename__ = "optimization_result_detail_cache"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    optimization_result_id: Mapped[int] = mapped_column(
+        ForeignKey("optimization_results.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    max_trades_returned: Mapped[int] = mapped_column(Integer, nullable=False)
+    train_result_json: Mapped[str] = mapped_column(Text, nullable=False)
+    validation_result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class StrategyPreset(TimestampMixin, Base):
     __tablename__ = "strategy_presets"
 

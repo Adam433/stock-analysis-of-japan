@@ -235,6 +235,29 @@
   .comparison-chart svg {
     width: 100%; height: 100%; display: block;
   }
+  .tool-card.collapsed .tool-card-body { display: none; }
+  .pager {
+    display: flex; align-items: center; justify-content: flex-end;
+    gap: 8px; margin-top: 8px; color: var(--muted); font-size: 12px;
+  }
+  .pager button { min-width: 66px; }
+  .result-action-panel {
+    margin-top: 10px; padding: 10px; border-radius: 8px;
+    background: var(--panel-subtle); border: 1px solid var(--panel-border);
+  }
+  .result-summary-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 8px; margin-bottom: 10px;
+  }
+  .result-summary-item {
+    min-width: 0; padding: 8px; border-radius: 6px;
+    background: rgba(154, 164, 178, 0.08);
+  }
+  .result-summary-label { color: var(--muted); font-size: 11px; margin-bottom: 2px; }
+  .result-summary-value { color: var(--text); font-weight: 650; word-break: break-word; }
+  .result-action-grid {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  }
   .table-wrap { overflow-x: auto; }
   table {
     width: 100%; border-collapse: collapse; font-size: 13px;
@@ -316,8 +339,12 @@
       <div id="updateLog" class="status-log"></div>
     </div>
 
-    <div class="card">
-      <h2>筛选条件 (AND 关系)</h2>
+    <div class="card tool-card collapsed" id="screenToolCard">
+      <div class="card-title-row">
+        <h2>筛选条件 (AND 关系)</h2>
+        <button class="inline-action" type="button" data-toggle-tool="screenToolCard">展开</button>
+      </div>
+      <div class="tool-card-body">
       <label class="row">
         <input type="checkbox" id="useRps" checked />
         <span>启用 RPS 筛选</span>
@@ -479,10 +506,15 @@
         <input type="date" id="cutoffDate" />
       </div>
       <button class="primary" id="runScreen">运行筛选</button>
+      </div>
     </div>
 
-    <div class="card">
-      <h2>历史回测</h2>
+    <div class="card tool-card collapsed" id="backtestToolCard">
+      <div class="card-title-row">
+        <h2>历史回测</h2>
+        <button class="inline-action" type="button" data-toggle-tool="backtestToolCard">展开</button>
+      </div>
+      <div class="tool-card-body">
       <div class="field-grid">
         <div class="field">
           <label>开始日期</label>
@@ -539,6 +571,7 @@
           </thead>
           <tbody id="backtestTradesBody"></tbody>
         </table>
+      </div>
       </div>
     </div>
 
@@ -648,6 +681,13 @@
         </div>
         <div class="field">
           <label class="label-with-hint">
+            <span>并行 worker</span>
+            <span class="hint" tabindex="0" data-tip="留空表示自动按机器 CPU 选择，当前上限为 6。&#10;SQLite 下不建议拉满全部核心，通常 4–6 比较稳。">?</span>
+          </label>
+          <input type="number" id="optimizationMaxWorkers" min="1" max="16" placeholder="自动" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
             <span>搜索方式</span>
             <span class="hint" tabindex="0" data-tip="网格搜索：穷举所有参数组合（适合小空间）。&#10;随机搜索：从空间中均匀抽样到上限，适合大空间快速探索。">?</span>
           </label>
@@ -727,6 +767,27 @@
         </table>
       </div>
       <div class="empty" id="optimizationResultsEmpty">尚无优化结果</div>
+      <div class="pager" id="optimizationResultsPager" style="display:none;">
+        <button class="inline-action" type="button" id="optimizationPrevPage">上一页</button>
+        <span id="optimizationPageInfo">—</span>
+        <button class="inline-action" type="button" id="optimizationNextPage">下一页</button>
+      </div>
+      <div class="result-action-panel" id="optimizationResultPanel" style="display:none;">
+        <div class="card-title-row">
+          <h2 id="optimizationResultPanelTitle">已选优化结果</h2>
+          <span class="mini-badge" id="optimizationResultPanelBadge">—</span>
+        </div>
+        <div class="result-summary-grid" id="optimizationResultPanelSummary"></div>
+        <div class="result-action-grid">
+          <button class="inline-action" type="button" id="optimizationResultDetail">详情</button>
+          <button class="inline-action" type="button" id="optimizationResultApplyScreen">套用到筛选</button>
+          <button class="inline-action" type="button" id="optimizationResultApplyBacktest">套用到回测</button>
+          <button class="inline-action" type="button" id="optimizationResultRunBacktest">立即回测</button>
+          <button class="inline-action" type="button" id="optimizationResultSavePreset" title="保存到策略预设，后续可一键应用；不会改变本次优化结果。">保存为预设</button>
+          <button class="inline-action" type="button" id="optimizationResultDelete">删除结果</button>
+        </div>
+        <div class="metric-muted" style="margin-top: 8px;">“保存为预设”表示把这组参数复制到策略预设列表，优化结果本身仍然保留。</div>
+      </div>
       <div class="comparison-box" id="optimizationComparison" style="display:none;">
         <div class="comparison-chart" id="optimizationComparisonChart"></div>
         <div class="table-wrap">
@@ -792,6 +853,10 @@
     optimizationTicker: null,
     optimizationCancelRequestedAt: null,
     optimizationResults: [],
+    optimizationResultsOffset: 0,
+    optimizationResultsLimit: 30,
+    optimizationResultsTotal: 0,
+    selectedOptimizationResult: null,
     selectedOptimizationResultIds: new Set(),
     strategyPresets: [],
   };
@@ -1017,6 +1082,20 @@
   function formatRatioPct(value) {
     if (value === null || value === undefined || value === '') return '—';
     return (Number(value) * 100).toFixed(1) + '%';
+  }
+
+  function setToolCardCollapsed(cardId, collapsed) {
+    const card = document.getElementById(cardId);
+    if (!card) return;
+    card.classList.toggle('collapsed', collapsed);
+    const button = document.querySelector(`[data-toggle-tool="${cardId}"]`);
+    if (button) button.textContent = collapsed ? '展开' : '收起';
+  }
+
+  function openToolCard(cardId) {
+    setToolCardCollapsed(cardId, false);
+    const card = document.getElementById(cardId);
+    if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   function setMaintenanceButtons(disabled, activeAction) {
@@ -1588,6 +1667,12 @@
   }
 
   function renderOptimizationRun(run) {
+    if (state.optimizationRunId !== run.id) {
+      state.optimizationResultsOffset = 0;
+      state.optimizationResultsTotal = 0;
+      state.selectedOptimizationResult = null;
+      state.selectedOptimizationResultIds.clear();
+    }
     state.optimizationRunId = run.id;
     state.currentOptimizationRun = run;
     updateOptimizationPhase(run.status);
@@ -1606,6 +1691,7 @@
     const best = run.best_result_id ? ` · 当前最佳 #${run.best_result_id}` : '';
     const error = run.error_message ? ` · ${run.error_message}` : '';
     const modeText = run.search_mode === 'random' ? '随机抽样' : '网格搜索';
+    const workerText = run.max_workers ? ` · worker ${run.max_workers}` : '';
     const timing = computeRunTiming(run);
     const timingParts = [];
     if (timing.elapsedSec !== null) {
@@ -1634,7 +1720,7 @@
     }
     document.getElementById('optimizationStatus').textContent =
       `${statusLabel} · ${modeText} · ${OPTIMIZATION_OBJECTIVE_LABELS[run.objective] || run.objective} · ` +
-      `进度 ${fmt(done)}/${fmt(total)} (${pct}%) · 失败 ${fmt(failed)}${currentSetLine}${timingText}${best}${error}`;
+      `进度 ${fmt(done)}/${fmt(total)} (${pct}%) · 失败 ${fmt(failed)}${workerText}${currentSetLine}${timingText}${best}${error}`;
     const running = run.status === 'running' || run.status === 'cancel_requested';
     const runBtn = document.getElementById('runOptimization');
     runBtn.disabled = running;
@@ -1650,6 +1736,12 @@
     state.selectedOptimizationResultIds.forEach((id) => {
       if (!liveIds.has(id)) state.selectedOptimizationResultIds.delete(id);
     });
+    if (state.selectedOptimizationResult && !liveIds.has(state.selectedOptimizationResult.id)) {
+      state.selectedOptimizationResult = null;
+    } else if (state.selectedOptimizationResult) {
+      const latest = results.find((result) => result.id === state.selectedOptimizationResult.id);
+      if (latest) state.selectedOptimizationResult = latest;
+    }
     const body = document.getElementById('optimizationResultsBody');
     body.innerHTML = '';
     document.getElementById('optimizationResultsEmpty').style.display = results.length ? 'none' : 'block';
@@ -1663,9 +1755,11 @@
         ? `<span class="badge">完成</span>`
         : `<span class="badge warn">失败</span>`;
       const tr = document.createElement('tr');
-      if (result.status === 'completed') {
-        tr.dataset.detailResult = result.id;
-      }
+      tr.dataset.selectResult = result.id;
+      tr.classList.toggle(
+        'selected',
+        Boolean(state.selectedOptimizationResult && state.selectedOptimizationResult.id === result.id)
+      );
       tr.innerHTML = `
         <td>
           ${result.status === 'completed' ? `<input type="checkbox" data-compare-result="${result.id}" ${state.selectedOptimizationResultIds.has(result.id) ? 'checked' : ''} />` : '—'}
@@ -1688,17 +1782,17 @@
         <td>
           ${result.status === 'completed' ? `
             <button class="inline-action" data-detail-result="${result.id}">详情</button>
-            <button class="inline-action" data-save-preset="${result.id}">保存</button>
-            <button class="inline-action" data-rerun-result="${result.id}">重跑</button>
+            <button class="inline-action" data-save-preset="${result.id}" title="保存到策略预设，后续可一键应用；不会改变本次优化结果。">保存为预设</button>
+            <button class="inline-action" data-rerun-result="${result.id}">回测</button>
           ` : ''}
           <button class="inline-action" data-delete-result="${result.id}">删除</button>
         </td>
       `;
       body.appendChild(tr);
     }
-    body.querySelectorAll('tr[data-detail-result]').forEach((row) => {
+    body.querySelectorAll('tr[data-select-result]').forEach((row) => {
       row.addEventListener('click', () => {
-        window.open(`/dashboard/optimization-results/${row.dataset.detailResult}`, '_blank');
+        selectOptimizationResult(parseInt(row.dataset.selectResult, 10));
       });
     });
     body.querySelectorAll('[data-compare-result]').forEach((input) => {
@@ -1738,7 +1832,125 @@
         deleteOptimizationResult(parseInt(button.dataset.deleteResult, 10));
       });
     });
+    renderOptimizationResultsPager();
+    renderSelectedOptimizationResult(state.selectedOptimizationResult);
     renderOptimizationComparison();
+  }
+
+  function getOptimizationResultById(resultId) {
+    if (state.selectedOptimizationResult && state.selectedOptimizationResult.id === resultId) {
+      return state.selectedOptimizationResult;
+    }
+    return state.optimizationResults.find((item) => item.id === resultId) || null;
+  }
+
+  function renderOptimizationResultsPager() {
+    const total = Number(state.optimizationResultsTotal || state.optimizationResults.length || 0);
+    const limit = Number(state.optimizationResultsLimit || 30);
+    const offset = Number(state.optimizationResultsOffset || 0);
+    const pager = document.getElementById('optimizationResultsPager');
+    if (!total) {
+      pager.style.display = 'none';
+      return;
+    }
+    const start = offset + 1;
+    const end = Math.min(offset + state.optimizationResults.length, total);
+    document.getElementById('optimizationPageInfo').textContent =
+      `${fmt(start)}-${fmt(end)} / ${fmt(total)}`;
+    document.getElementById('optimizationPrevPage').disabled = offset <= 0;
+    document.getElementById('optimizationNextPage').disabled = offset + limit >= total;
+    pager.style.display = 'flex';
+  }
+
+  function selectOptimizationResult(resultId) {
+    const result = getOptimizationResultById(resultId);
+    state.selectedOptimizationResult = result;
+    document.querySelectorAll('#optimizationResultsBody tr[data-select-result]').forEach((row) => {
+      row.classList.toggle('selected', parseInt(row.dataset.selectResult, 10) === resultId);
+    });
+    renderSelectedOptimizationResult(result);
+  }
+
+  function optimizationFilterSummary(parameters) {
+    const cup = parameters.cup_handle_params || {};
+    const fundamentals = parameters.fundamental_growth_params || {};
+    const parts = [];
+    if (cup.min_cup_depth_pct !== undefined || cup.max_cup_depth_pct !== undefined) {
+      parts.push(`杯深 ${cup.min_cup_depth_pct ?? '—'}-${cup.max_cup_depth_pct ?? '—'}%`);
+    }
+    if (cup.min_handle_pullback_pct !== undefined || cup.max_handle_pullback_pct !== undefined) {
+      parts.push(`把手 ${cup.min_handle_pullback_pct ?? '—'}-${cup.max_handle_pullback_pct ?? '—'}%`);
+    }
+    parts.push(cup.require_breakout_volume ? '要求放量' : '不要求放量');
+    parts.push(cup.require_prior_uptrend ? '要求前涨' : '不要求前涨');
+    parts.push(fundamentals.enabled ? '启用财务' : '不启用财务');
+    return parts.join(' · ');
+  }
+
+  function summaryItem(label, value) {
+    return `
+      <div class="result-summary-item">
+        <div class="result-summary-label">${escapeHtml(label)}</div>
+        <div class="result-summary-value">${escapeHtml(value)}</div>
+      </div>
+    `;
+  }
+
+  function renderSelectedOptimizationResult(result) {
+    const panel = document.getElementById('optimizationResultPanel');
+    if (!result) {
+      panel.style.display = 'none';
+      return;
+    }
+    const params = result.parameters || {};
+    const metrics = optimizationMetricSource(result);
+    document.getElementById('optimizationResultPanelTitle').textContent =
+      `优化结果 #${result.rank || result.id}`;
+    document.getElementById('optimizationResultPanelBadge').textContent =
+      result.status === 'completed' ? '完成' : '失败';
+    document.getElementById('optimizationResultPanelSummary').innerHTML = [
+      summaryItem('参数', optimizationParamSummary(params)),
+      summaryItem('筛选', optimizationFilterSummary(params)),
+      summaryItem('收益', `年化 ${formatRatioPct(metrics.annualized_return)} · 总 ${formatRatioPct(metrics.total_return)}`),
+      summaryItem('风险', `回撤 ${formatRatioPct(metrics.max_drawdown)} · 止损 ${formatRatioPct(metrics.stop_loss_trigger_ratio)}`),
+      summaryItem('交易', `${fmt(metrics.completed_trades)} 笔 · 胜率 ${formatRatioPct(metrics.win_rate)}`),
+      summaryItem('排名', optimizationRankSummary(result)),
+    ].join('');
+    const completed = result.status === 'completed';
+    [
+      'optimizationResultDetail',
+      'optimizationResultApplyScreen',
+      'optimizationResultApplyBacktest',
+      'optimizationResultRunBacktest',
+      'optimizationResultSavePreset',
+    ].forEach((id) => {
+      document.getElementById(id).disabled = !completed;
+    });
+    document.getElementById('optimizationResultDelete').disabled = false;
+    panel.style.display = 'block';
+  }
+
+  function applyOptimizationResultToScreen(resultId) {
+    const result = getOptimizationResultById(resultId);
+    if (!result || result.status !== 'completed') return false;
+    applyStrategyParameters(result.parameters);
+    openToolCard('screenToolCard');
+    showToast(`已套用优化结果 #${result.rank || result.id} 到筛选条件`);
+    return true;
+  }
+
+  function applyOptimizationResultToBacktest(resultId) {
+    const result = getOptimizationResultById(resultId);
+    if (!result || result.status !== 'completed') return false;
+    applyStrategyParameters(result.parameters);
+    if (state.currentOptimizationRun) {
+      document.getElementById('backtestStartDate').value = state.currentOptimizationRun.train_start_date;
+      document.getElementById('backtestEndDate').value =
+        state.currentOptimizationRun.validation_end_date || state.currentOptimizationRun.train_end_date;
+    }
+    openToolCard('backtestToolCard');
+    showToast(`已套用优化结果 #${result.rank || result.id} 到回测`);
+    return true;
   }
 
   async function deleteOptimizationResult(resultId) {
@@ -1747,8 +1959,15 @@
       await api('DELETE', `/backtests/optimization/results/${resultId}`);
       showToast('已删除');
       state.selectedOptimizationResultIds.delete(resultId);
+      if (state.selectedOptimizationResult && state.selectedOptimizationResult.id === resultId) {
+        state.selectedOptimizationResult = null;
+      }
       if (state.optimizationRunId) {
-        await loadOptimizationResults(state.optimizationRunId);
+        const nextTotal = Math.max(0, Number(state.optimizationResultsTotal || 0) - 1);
+        const nextOffset = state.optimizationResultsOffset >= nextTotal
+          ? Math.max(0, state.optimizationResultsOffset - state.optimizationResultsLimit)
+          : state.optimizationResultsOffset;
+        await loadOptimizationResults(state.optimizationRunId, { offset: nextOffset });
       } else {
         renderOptimizationResults(state.optimizationResults.filter((r) => r.id !== resultId));
       }
@@ -1777,6 +1996,9 @@
       state.optimizationRunId = null;
       state.currentOptimizationRun = null;
       state.optimizationResults = [];
+      state.optimizationResultsOffset = 0;
+      state.optimizationResultsTotal = 0;
+      state.selectedOptimizationResult = null;
       state.selectedOptimizationResultIds.clear();
       updateOptimizationPhase(null);
       renderOptimizationResults([]);
@@ -1895,9 +2117,21 @@
     }
   }
 
-  async function loadOptimizationResults(runId) {
+  async function loadOptimizationResults(runId, options = {}) {
     try {
-      const data = await api('GET', `/backtests/optimization/runs/${runId}/results?limit=30&offset=0`);
+      const limit = Number(state.optimizationResultsLimit || 30);
+      const offset = Math.max(0, Number(options.offset ?? state.optimizationResultsOffset ?? 0));
+      const data = await api('GET', `/backtests/optimization/runs/${runId}/results?limit=${limit}&offset=${offset}`);
+      const total = Number(data.total || 0);
+      const results = data.results || [];
+      if (!results.length && total > 0 && offset > 0) {
+        return loadOptimizationResults(runId, {
+          offset: Math.max(0, total - limit),
+        });
+      }
+      state.optimizationResultsTotal = total;
+      state.optimizationResultsLimit = Number(data.limit || limit);
+      state.optimizationResultsOffset = Number(data.offset || offset);
       renderOptimizationResults(data.results || []);
     } catch (err) {
       showToast('加载优化结果失败: ' + err.message);
@@ -1953,6 +2187,8 @@
     const parameterSpace = getOptimizationParameterSpace();
     const count = countOptimizationCombinations(parameterSpace);
     const maxSets = readInt('optimizationMaxSets', 200);
+    const maxWorkersRaw = document.getElementById('optimizationMaxWorkers').value;
+    const maxWorkers = maxWorkersRaw ? parseInt(maxWorkersRaw, 10) : null;
     const searchMode = document.getElementById('optimizationSearchMode').value;
     if (searchMode === 'grid' && count > maxSets) {
       showToast(`参数组合 ${fmt(count)} 超过上限 ${fmt(maxSets)}，请提高最大组合数或切换为随机搜索`);
@@ -1963,6 +2199,10 @@
     btn.disabled = true;
     btn.textContent = '启动中…';
     state.optimizationCancelRequestedAt = null;
+    state.optimizationResultsOffset = 0;
+    state.optimizationResultsTotal = 0;
+    state.selectedOptimizationResult = null;
+    state.selectedOptimizationResultIds.clear();
     document.getElementById('optimizationStatus').textContent = '正在创建优化任务并执行数据预检…';
     renderOptimizationResults([]);
     try {
@@ -1979,6 +2219,9 @@
         random_seed: searchMode === 'random' && Number.isFinite(randomSeed) ? randomSeed : null,
         execute_immediately: true,
       };
+      if (Number.isFinite(maxWorkers)) {
+        payload.max_workers = maxWorkers;
+      }
       const data = await api('POST', '/backtests/optimization/runs', payload);
       const run = data.optimization_run;
       renderOptimizationRun(run);
@@ -2006,7 +2249,7 @@
   }
 
   async function saveOptimizationPreset(resultId) {
-    const result = state.optimizationResults.find((item) => item.id === resultId);
+    const result = getOptimizationResultById(resultId);
     if (!result) return;
     const name = window.prompt('预设名称', `US 参数优化 #${result.rank || result.id}`);
     if (!name) return;
@@ -2114,12 +2357,7 @@
   }
 
   async function rerunOptimizationResult(resultId) {
-    const result = state.optimizationResults.find((item) => item.id === resultId);
-    if (!result || !state.currentOptimizationRun) return;
-    applyStrategyParameters(result.parameters);
-    document.getElementById('backtestStartDate').value = state.currentOptimizationRun.train_start_date;
-    document.getElementById('backtestEndDate').value =
-      state.currentOptimizationRun.validation_end_date || state.currentOptimizationRun.train_end_date;
+    if (!applyOptimizationResultToBacktest(resultId)) return;
     await runStrategyBacktest();
   }
 
@@ -2249,6 +2487,9 @@
     document.getElementById('backtestTradesBody').innerHTML = '';
     state.optimizationRunId = null;
     state.currentOptimizationRun = null;
+    state.optimizationResultsOffset = 0;
+    state.optimizationResultsTotal = 0;
+    state.selectedOptimizationResult = null;
     state.selectedOptimizationResultIds.clear();
     window.clearTimeout(state.optimizationPollTimer);
     updateOptimizationPhase(null);
@@ -2299,6 +2540,48 @@
   document.getElementById('deleteOptimizationRun').addEventListener('click', deleteOptimizationRun);
   document.getElementById('refreshStrategyPresets').addEventListener('click', loadStrategyPresets);
   document.getElementById('cancelOptimization').disabled = true;
+  document.querySelectorAll('[data-toggle-tool]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const card = document.getElementById(button.dataset.toggleTool);
+      setToolCardCollapsed(button.dataset.toggleTool, !card.classList.contains('collapsed'));
+    });
+  });
+  document.getElementById('optimizationPrevPage').addEventListener('click', () => {
+    if (!state.optimizationRunId) return;
+    loadOptimizationResults(state.optimizationRunId, {
+      offset: Math.max(0, state.optimizationResultsOffset - state.optimizationResultsLimit),
+    });
+  });
+  document.getElementById('optimizationNextPage').addEventListener('click', () => {
+    if (!state.optimizationRunId) return;
+    loadOptimizationResults(state.optimizationRunId, {
+      offset: state.optimizationResultsOffset + state.optimizationResultsLimit,
+    });
+  });
+  document.getElementById('optimizationResultDetail').addEventListener('click', () => {
+    const result = state.selectedOptimizationResult;
+    if (result) window.open(`/dashboard/optimization-results/${result.id}`, '_blank');
+  });
+  document.getElementById('optimizationResultApplyScreen').addEventListener('click', () => {
+    const result = state.selectedOptimizationResult;
+    if (result) applyOptimizationResultToScreen(result.id);
+  });
+  document.getElementById('optimizationResultApplyBacktest').addEventListener('click', () => {
+    const result = state.selectedOptimizationResult;
+    if (result) applyOptimizationResultToBacktest(result.id);
+  });
+  document.getElementById('optimizationResultRunBacktest').addEventListener('click', () => {
+    const result = state.selectedOptimizationResult;
+    if (result) rerunOptimizationResult(result.id);
+  });
+  document.getElementById('optimizationResultSavePreset').addEventListener('click', () => {
+    const result = state.selectedOptimizationResult;
+    if (result) saveOptimizationPreset(result.id);
+  });
+  document.getElementById('optimizationResultDelete').addEventListener('click', () => {
+    const result = state.selectedOptimizationResult;
+    if (result) deleteOptimizationResult(result.id);
+  });
   document.querySelectorAll('#marketSwitch button').forEach((button) => {
     button.addEventListener('click', () => setMarket(button.dataset.market));
     button.setAttribute('aria-pressed', button.classList.contains('active') ? 'true' : 'false');
@@ -2322,6 +2605,7 @@
     'optimizationEntryDelays',
     'optimizationEntryWindow',
     'optimizationMaxSets',
+    'optimizationMaxWorkers',
     'optimizationSearchMode',
     'optimizationRandomSeed',
     'optimizationObjective',
