@@ -459,6 +459,9 @@ def run_cup_handle_rps_backtest(
     entry_deferral_window_days: int = 5,
     max_trades_returned: int = 300,
     screen_cache: dict[str, dict[str, object]] | None = None,
+    screen_candidate_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
+    fundamental_growth_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
+    cup_event_cache: dict[tuple[object, ...], dict[int, list[object]] | None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
 ) -> CupHandleRpsBacktestResult:
     if start_date > end_date:
@@ -526,6 +529,11 @@ def run_cup_handle_rps_backtest(
                 fundamental_growth_params=fundamental_growth_params,
                 trade_date=signal_date,
                 market=resolved_market,
+                candidate_cache=screen_candidate_cache,
+                fundamental_growth_cache=fundamental_growth_cache,
+                cup_event_cache=cup_event_cache,
+                cup_event_cache_start_date=start_date,
+                cup_event_cache_end_date=end_date,
             )
             if screen_cache is not None:
                 screen_cache[cache_key] = screen_result

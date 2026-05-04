@@ -19,7 +19,11 @@ from stockanalyse_api.domain.market_data.models import MarketDataDaily
 from stockanalyse_api.services.market_data_adjustments import adjusted_ohlc
 from stockanalyse_api.services.market_data_adjustments import has_extreme_price_gap
 from stockanalyse_api.services.market_data_adjustments import is_complete_market_row
-from stockanalyse_api.services.cup_handle_materialization import load_materialized_cup_handle_matches
+from stockanalyse_api.services.cup_handle_materialization import (
+    load_materialized_cup_handle_event_pool,
+    load_materialized_cup_handle_matches,
+    select_latest_materialized_cup_handle_matches,
+)
 
 APPROVED_RPS_WINDOWS = (50, 120, 250)
 DEFAULT_RPS_THRESHOLD = 90
@@ -446,6 +450,11 @@ def screen_universe(
     fundamental_growth_params: FundamentalGrowthParams | None = None,
     trade_date: date | None = None,
     market: str | None = None,
+    candidate_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
+    fundamental_growth_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
+    cup_event_cache: dict[tuple[object, ...], dict[int, list[object]] | None] | None = None,
+    cup_event_cache_start_date: date | None = None,
+    cup_event_cache_end_date: date | None = None,
 ) -> dict[str, object]:
     resolved_market = normalize_market(market)
     exchanges = _market_exchanges(resolved_market)
@@ -496,58 +505,128 @@ def screen_universe(
             "hits": [],
         }
 
-    rows = session.execute(
-        select(DerivedIndicatorDaily, Instrument)
-        .join(Instrument, Instrument.id == DerivedIndicatorDaily.instrument_id)
-        .where(
-            DerivedIndicatorDaily.trade_date == target_date,
-            Instrument.exchange.in_(exchanges),
-        )
-        .order_by(Instrument.symbol.asc())
-    ).all()
+    candidate_cache_key = (
+        "screen_candidates",
+        resolved_market,
+        target_date.isoformat(),
+        bool(use_rps),
+        int(rps_threshold),
+        tuple(selected_windows),
+        int(resolved_min_rps_passing),
+    )
+    cached_candidates = (
+        candidate_cache.get(candidate_cache_key) if candidate_cache is not None else None
+    )
+    if cached_candidates is None:
+        rows = session.execute(
+            select(DerivedIndicatorDaily, Instrument)
+            .join(Instrument, Instrument.id == DerivedIndicatorDaily.instrument_id)
+            .where(
+                DerivedIndicatorDaily.trade_date == target_date,
+                Instrument.exchange.in_(exchanges),
+            )
+            .order_by(Instrument.symbol.asc())
+        ).all()
 
-    threshold_decimal = Decimal(rps_threshold)
-    candidates: list[tuple[DerivedIndicatorDaily, Instrument, bool, int]] = []
+        threshold_decimal = Decimal(rps_threshold)
+        candidates: list[dict[str, object]] = []
 
-    for indicator_row, instrument in rows:
-        rps_value_by_window = {
-            50: indicator_row.rps_50,
-            120: indicator_row.rps_120,
-            250: indicator_row.rps_250,
+        for indicator_row, instrument in rows:
+            rps_value_by_window = {
+                50: indicator_row.rps_50,
+                120: indicator_row.rps_120,
+                250: indicator_row.rps_250,
+            }
+
+            rps_pass_count = sum(
+                1
+                for window in selected_windows
+                if rps_value_by_window[window] is not None
+                and rps_value_by_window[window] >= threshold_decimal
+            )
+            if use_rps:
+                rps_passed = rps_pass_count >= resolved_min_rps_passing
+            else:
+                rps_passed = True
+
+            if use_rps and not rps_passed:
+                continue
+
+            candidates.append(
+                {
+                    "instrument_id": instrument.id,
+                    "symbol": instrument.symbol,
+                    "exchange": instrument.exchange,
+                    "name": instrument.name,
+                    "rps_50": indicator_row.rps_50,
+                    "rps_120": indicator_row.rps_120,
+                    "rps_250": indicator_row.rps_250,
+                    "rps_passed": rps_passed,
+                    "rps_pass_count": rps_pass_count,
+                }
+            )
+        cached_candidates = {
+            "total_evaluated": len(rows),
+            "candidates": candidates,
         }
+        if candidate_cache is not None:
+            candidate_cache[candidate_cache_key] = cached_candidates
 
-        rps_pass_count = sum(
-            1
-            for window in selected_windows
-            if rps_value_by_window[window] is not None
-            and rps_value_by_window[window] >= threshold_decimal
-        )
-        if use_rps:
-            rps_passed = rps_pass_count >= resolved_min_rps_passing
-        else:
-            rps_passed = True
-
-        if use_rps and not rps_passed:
-            continue
-
-        candidates.append((indicator_row, instrument, rps_passed, rps_pass_count))
+    total_evaluated = int(cached_candidates["total_evaluated"])
+    candidates = list(cached_candidates["candidates"])  # type: ignore[arg-type]
 
     cup_handle_source = "disabled"
     materialized_cup_events = None
     candles_by_instrument: dict[int, list[_PatternCandle]] = {}
     if use_cup_handle and candidates:
-        materialized_cup_events = load_materialized_cup_handle_matches(
-            session,
-            market=resolved_market,
-            signal_date=target_date,
-            instrument_ids=[instrument.id for _, instrument, _, _ in candidates],
-            params=resolved_cup_params,
-        )
+        candidate_instrument_ids = [
+            int(candidate["instrument_id"]) for candidate in candidates
+        ]
+        if (
+            cup_event_cache is not None
+            and cup_event_cache_start_date is not None
+            and cup_event_cache_end_date is not None
+        ):
+            cup_event_cache_key = (
+                "materialized_cup_event_pool",
+                resolved_market,
+                cup_event_cache_start_date.isoformat(),
+                cup_event_cache_end_date.isoformat(),
+                int(resolved_cup_params.breakout_lookback_days),
+            )
+            cached_event_pool = cup_event_cache.get(cup_event_cache_key, ...)
+            if cached_event_pool is ...:
+                cached_event_pool = load_materialized_cup_handle_event_pool(
+                    session,
+                    market=resolved_market,
+                    start_date=cup_event_cache_start_date,
+                    end_date=cup_event_cache_end_date,
+                    params=resolved_cup_params,
+                )
+                cup_event_cache[cup_event_cache_key] = cached_event_pool
+            materialized_cup_events = (
+                select_latest_materialized_cup_handle_matches(
+                    cached_event_pool,  # type: ignore[arg-type]
+                    signal_date=target_date,
+                    instrument_ids=candidate_instrument_ids,
+                    params=resolved_cup_params,
+                )
+                if cached_event_pool is not None
+                else None
+            )
+        else:
+            materialized_cup_events = load_materialized_cup_handle_matches(
+                session,
+                market=resolved_market,
+                signal_date=target_date,
+                instrument_ids=candidate_instrument_ids,
+                params=resolved_cup_params,
+            )
         if materialized_cup_events is None:
             cup_handle_source = "runtime_scan"
             candles_by_instrument = _load_candles_by_instrument(
                 session,
-                instrument_ids=[instrument.id for _, instrument, _, _ in candidates],
+                instrument_ids=candidate_instrument_ids,
                 cutoff=target_date,
                 limit=resolved_cup_params.effective_lookback_days,
             )
@@ -556,16 +635,17 @@ def screen_universe(
 
     hits: list[ScreenHit] = []
     fundamental_status_counts: dict[str, int] = defaultdict(int)
-    for indicator_row, instrument, rps_passed, rps_pass_count in candidates:
+    for candidate in candidates:
+        instrument_id = int(candidate["instrument_id"])
         cup_breakout_date: date | None = None
         if use_cup_handle:
             if materialized_cup_events is not None:
-                cup_event = materialized_cup_events.get(instrument.id)
+                cup_event = materialized_cup_events.get(instrument_id)
                 if cup_event is None:
                     continue
                 cup_breakout_date = cup_event.breakout_date
             else:
-                candles = candles_by_instrument.get(instrument.id, [])
+                candles = candles_by_instrument.get(instrument_id, [])
                 cup_pattern = _detect_cup_handle_pattern(candles, resolved_cup_params)
                 if cup_pattern is None:
                     continue
@@ -574,28 +654,47 @@ def screen_universe(
         else:
             cup_handle_passed = False
 
-        fundamental_meta = _evaluate_fundamental_growth(
-            session,
-            instrument_id=instrument.id,
-            signal_date=target_date,
-            params=resolved_fundamental_params,
+        fundamental_cache_key = (
+            "fundamental_growth",
+            instrument_id,
+            target_date.isoformat(),
+            bool(resolved_fundamental_params.enabled),
+            int(resolved_fundamental_params.min_years),
+            int(resolved_fundamental_params.effective_min_growth_count),
+            str(resolved_fundamental_params.min_yoy_growth_pct),
+            bool(resolved_fundamental_params.require_positive_net_income),
+            int(resolved_fundamental_params.reporting_lag_days),
         )
+        fundamental_meta = (
+            fundamental_growth_cache.get(fundamental_cache_key)
+            if fundamental_growth_cache is not None
+            else None
+        )
+        if fundamental_meta is None:
+            fundamental_meta = _evaluate_fundamental_growth(
+                session,
+                instrument_id=instrument_id,
+                signal_date=target_date,
+                params=resolved_fundamental_params,
+            )
+            if fundamental_growth_cache is not None:
+                fundamental_growth_cache[fundamental_cache_key] = fundamental_meta
         fundamental_status_counts[str(fundamental_meta["status"])] += 1
         if resolved_fundamental_params.enabled and not fundamental_meta["passed"]:
             continue
 
         hits.append(
             ScreenHit(
-                instrument_id=instrument.id,
-                symbol=instrument.symbol,
-                exchange=instrument.exchange,
-                name=instrument.name,
+                instrument_id=instrument_id,
+                symbol=str(candidate["symbol"]),
+                exchange=str(candidate["exchange"]),
+                name=candidate["name"],  # type: ignore[arg-type]
                 trade_date=target_date.isoformat(),
-                rps_50=_format_decimal(indicator_row.rps_50, "0.01"),
-                rps_120=_format_decimal(indicator_row.rps_120, "0.01"),
-                rps_250=_format_decimal(indicator_row.rps_250, "0.01"),
-                rps_passed=rps_passed,
-                rps_pass_count=rps_pass_count,
+                rps_50=_format_decimal(candidate["rps_50"], "0.01"),
+                rps_120=_format_decimal(candidate["rps_120"], "0.01"),
+                rps_250=_format_decimal(candidate["rps_250"], "0.01"),
+                rps_passed=bool(candidate["rps_passed"]),
+                rps_pass_count=int(candidate["rps_pass_count"]),
                 cup_handle_passed=cup_handle_passed,
                 cup_handle_breakout_date=(
                     cup_breakout_date.isoformat() if cup_breakout_date else None
@@ -620,7 +719,7 @@ def screen_universe(
             "fundamental_growth_params": resolved_fundamental_params.to_dict(),
             "market": resolved_market,
         },
-        "total_evaluated": len(rows),
+        "total_evaluated": total_evaluated,
         "diagnostics": {
             "fundamental_growth_status_counts": dict(fundamental_status_counts),
             "cup_handle_source": cup_handle_source,

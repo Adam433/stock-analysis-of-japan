@@ -614,35 +614,35 @@
             <span>RPS 阈值</span>
             <span class="hint" tabindex="0" data-tip="可输入多个 RPS 阈值并以逗号或空格分隔。&#10;例：85,90,95 表示同时尝试 85 / 90 / 95 三档。">?</span>
           </label>
-          <input type="text" id="optimizationRpsThresholds" value="85,90,95" title="多值用逗号或空格分隔，例：85,90,95" />
+          <input type="text" id="optimizationRpsThresholds" value="80,85" title="多值用逗号或空格分隔，例：80,85,90" />
         </div>
         <div class="field">
           <label class="label-with-hint">
             <span>RPS 窗口组合</span>
             <span class="hint" tabindex="0" data-tip="多组窗口用分号 ; 分隔；同一组内的窗口用 + 连接。&#10;例：50+120;120+250;50+120+250 共三组。">?</span>
           </label>
-          <input type="text" id="optimizationWindowSets" value="50+120;120+250;50+120+250" title="组间用 ; 组内用 + ，例：50+120;120+250;50+120+250" />
+          <input type="text" id="optimizationWindowSets" value="50+120;50+120+250" title="组间用 ; 组内用 + ，例：50+120;120+250;50+120+250" />
         </div>
         <div class="field">
           <label class="label-with-hint">
             <span>持有交易日（留空不限）</span>
             <span class="hint" tabindex="0" data-tip="可输入多个持有日，用逗号分隔。&#10;留空表示不设上限（持有到退出条件触发）。&#10;例：60,100,130">?</span>
           </label>
-          <input type="text" id="optimizationHoldingDays" value="60,100,130" title="多值用逗号分隔，留空表示不限定" />
+          <input type="text" id="optimizationHoldingDays" value="" title="多值用逗号分隔，留空表示不限定" />
         </div>
         <div class="field">
           <label class="label-with-hint">
             <span>止损比例</span>
             <span class="hint" tabindex="0" data-tip="负数表示亏损阈值；可输入多个用逗号分隔。&#10;例：-0.06,-0.08,-0.10 即 -6% / -8% / -10%。">?</span>
           </label>
-          <input type="text" id="optimizationStopLosses" value="-0.06,-0.08,-0.10" title="多值用逗号分隔，负数。例：-0.06,-0.08,-0.10" />
+          <input type="text" id="optimizationStopLosses" value="-0.08" title="多值用逗号分隔，负数。例：-0.06,-0.08,-0.10" />
         </div>
         <div class="field">
           <label class="label-with-hint">
             <span>RPS 退出阈值</span>
             <span class="hint" tabindex="0" data-tip="持仓中 RPS 跌破该阈值即退出；多个值用逗号分隔。&#10;留空表示不基于 RPS 退出。&#10;例：80,85">?</span>
           </label>
-          <input type="text" id="optimizationRpsExits" value="80,85" title="多值用逗号分隔，留空不启用 RPS 退出" />
+          <input type="text" id="optimizationRpsExits" value="80" title="多值用逗号分隔，留空不启用 RPS 退出" />
         </div>
         <div class="field">
           <label class="label-with-hint">
@@ -677,7 +677,7 @@
             <span>最大组合数</span>
             <span class="hint" tabindex="0" data-tip="本次任务允许评估的参数组合上限。&#10;网格搜索超过即报错；随机搜索会从全空间抽样到该上限。">?</span>
           </label>
-          <input type="number" id="optimizationMaxSets" min="1" max="5000" value="1000" />
+          <input type="number" id="optimizationMaxSets" min="1" max="5000" value="600" />
         </div>
         <div class="field">
           <label class="label-with-hint">
@@ -693,7 +693,7 @@
           </label>
           <select id="optimizationSearchMode">
             <option value="grid">网格搜索</option>
-            <option value="random">随机搜索</option>
+            <option value="random" selected>随机搜索</option>
           </select>
         </div>
         <div class="field">
@@ -726,26 +726,168 @@
           <input type="text" id="optimizationComboCount" value="—" readonly />
         </div>
       </div>
-      <div class="row-hint-wrap" style="margin-top: 10px;">
-        <label class="row">
-          <input type="checkbox" id="optimizationFundamentalOff" checked />
-          <span>包含财务条件关闭</span>
-        </label>
-        <span class="hint" tabindex="0" data-tip="勾选后会向参数空间加入一档"不启用财务过滤"的对照组。">?</span>
+      <div class="card-title-row" style="margin-top: 14px;">
+        <h2>财务质量参数网格</h2>
+        <span class="mini-badge">必选</span>
       </div>
-      <div class="row-hint-wrap">
-        <label class="row">
-          <input type="checkbox" id="optimizationFundamentalGrowth" checked />
-          <span>包含 3 年正利润且至少 2 次增长</span>
-        </label>
-        <span class="hint" tabindex="0" data-tip="勾选后会向参数空间加入"3 年正利润 + 至少 2 次同比增长 + 报告滞后 120 日"的财务条件。">?</span>
+      <div class="field-grid">
+        <div class="field">
+          <label class="label-with-hint">
+            <span>财务年份数</span>
+            <span class="hint" tabindex="0" data-tip="至少需要多少个可用年度净利润数据；多个值用逗号分隔。">?</span>
+          </label>
+          <input type="text" id="optimizationFundamentalYears" value="3" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>最低增长次数</span>
+            <span class="hint" tabindex="0" data-tip="在所需年度之间，净利润同比达到门槛的最少次数；不能超过年份数 - 1。">?</span>
+          </label>
+          <input type="text" id="optimizationFundamentalGrowthCounts" value="1,2" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>最低同比增长 %</span>
+            <span class="hint" tabindex="0" data-tip="每次增长需要达到的同比幅度；0 表示只要求不下降，10 表示至少增长 10%。">?</span>
+          </label>
+          <input type="text" id="optimizationFundamentalMinYoyPcts" value="0,5,10" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>要求正利润</span>
+            <span class="hint" tabindex="0" data-tip="默认要求所有纳入判断的年度净利润为正；可填 true,false 做强弱对照，但不会关闭财务数据要求。">?</span>
+          </label>
+          <input type="text" id="optimizationFundamentalPositiveModes" value="true" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>报告滞后天数</span>
+            <span class="hint" tabindex="0" data-tip="信号日向前推多少天作为财报可见性边界，避免使用当时尚未公布的数据。">?</span>
+          </label>
+          <input type="text" id="optimizationFundamentalLagDays" value="120" />
+        </div>
       </div>
-      <div class="row-hint-wrap">
-        <label class="row">
-          <input type="checkbox" id="optimizationCupShapeVariants" />
-          <span>加入杯柄形态组合</span>
-        </label>
-        <span class="hint" tabindex="0" data-tip="勾选后会用 4 套不同的杯柄形态参数（基础 / 放宽 / 放量确认 / 放量+前涨）一起跑，组合数会乘以 4。">?</span>
+      <div class="card-title-row" style="margin-top: 14px;">
+        <h2>欧奈尔杯柄参数网格</h2>
+        <span class="mini-badge">宽松候选池</span>
+      </div>
+      <div class="field-grid">
+        <div class="field">
+          <label class="label-with-hint">
+            <span>杯深最小 %</span>
+            <span class="hint" tabindex="0" data-tip="上次有成交的组合为 12-33；默认围绕 12 做轻微放宽/收紧。">?</span>
+          </label>
+          <input type="text" id="optimizationCupMinDepths" value="5,8,10,12" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>杯深最大 %</span>
+            <span class="hint" tabindex="0" data-tip="上次有成交的组合为 12-33；默认测试 30 / 33 / 40。">?</span>
+          </label>
+          <input type="text" id="optimizationCupMaxDepths" value="33,45,55" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>把手回调最小 %</span>
+            <span class="hint" tabindex="0" data-tip="上次 8-20 没有成交；默认围绕 3 测试更浅把手。">?</span>
+          </label>
+          <input type="text" id="optimizationHandleMinPullbacks" value="1,2" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>把手回调最大 %</span>
+            <span class="hint" tabindex="0" data-tip="上次有成交的组合为 3-12；默认测试 10 / 12 / 15。">?</span>
+          </label>
+          <input type="text" id="optimizationHandleMaxPullbacks" value="12,20,25" />
+        </div>
+        <div class="field">
+          <label>前置上涨最小 %</label>
+          <input type="text" id="optimizationPriorUptrendMins" value="10,20" />
+        </div>
+        <div class="field">
+          <label>要求前置上涨</label>
+          <input type="text" id="optimizationRequirePriorUptrendModes" value="false,true" />
+        </div>
+        <div class="field">
+          <label>要求突破放量</label>
+          <input type="text" id="optimizationRequireBreakoutVolumeModes" value="false" />
+        </div>
+        <div class="field">
+          <label>突破量倍数</label>
+          <input type="text" id="optimizationBreakoutVolumeMultipliers" value="1.4" />
+        </div>
+        <div class="field">
+          <label>整体最短周期</label>
+          <input type="text" id="optimizationCupMinTotals" value="80" />
+        </div>
+        <div class="field">
+          <label>整体最长周期</label>
+          <input type="text" id="optimizationCupMaxTotals" value="420" />
+        </div>
+        <div class="field">
+          <label>杯身最短</label>
+          <input type="text" id="optimizationCupMinDurations" value="35" />
+        </div>
+        <div class="field">
+          <label>杯身最长</label>
+          <input type="text" id="optimizationCupMaxDurations" value="330" />
+        </div>
+        <div class="field">
+          <label>把手最短</label>
+          <input type="text" id="optimizationHandleMinDurations" value="3" />
+        </div>
+        <div class="field">
+          <label>把手最长</label>
+          <input type="text" id="optimizationHandleMaxDurations" value="60" />
+        </div>
+        <div class="field">
+          <label>右唇容差 %</label>
+          <input type="text" id="optimizationRightLipMaxDeltas" value="5,10,15" />
+        </div>
+        <div class="field">
+          <label>前置上涨回看</label>
+          <input type="text" id="optimizationPriorUptrendLookbacks" value="120" />
+        </div>
+        <div class="field">
+          <label>把手最低位置 %</label>
+          <input type="text" id="optimizationHandleLowPositions" value="40,55,66" />
+        </div>
+        <div class="field">
+          <label>把手/杯深最大 %</label>
+          <input type="text" id="optimizationHandleDepthToCupDepths" value="35,60,80" />
+        </div>
+        <div class="field">
+          <label>把手高出右唇 %</label>
+          <input type="text" id="optimizationHandleHighAboveLips" value="2,5,8" />
+        </div>
+        <div class="field">
+          <label>杯底停留天数</label>
+          <input type="text" id="optimizationBottomDwellDays" value="2" />
+        </div>
+        <div class="field">
+          <label>杯底区域 %</label>
+          <input type="text" id="optimizationBottomZones" value="35" />
+        </div>
+        <div class="field">
+          <label>杯底跨度 %</label>
+          <input type="text" id="optimizationBottomSpans" value="5" />
+        </div>
+        <div class="field">
+          <label>杯底两侧最小 %</label>
+          <input type="text" id="optimizationCupSideDurations" value="20" />
+        </div>
+        <div class="field">
+          <label>突破回看</label>
+          <input type="text" id="optimizationBreakoutLookbacks" value="60" />
+        </div>
+        <div class="field">
+          <label>突破量均线天数</label>
+          <input type="text" id="optimizationBreakoutVolumeAvgDays" value="50" />
+        </div>
+        <div class="field">
+          <label>形态回看窗口</label>
+          <input type="text" id="optimizationCupLookbacks" value="750" />
+        </div>
       </div>
       <div class="button-row">
         <button class="primary" id="runOptimization">创建并运行</button>
@@ -1048,25 +1190,13 @@
     return shifted;
   }
 
-  function shiftDays(value, days) {
-    const shifted = new Date(value);
-    shifted.setDate(shifted.getDate() + days);
-    return shifted;
-  }
-
   function seedOptimizationDates(latestTradeDate) {
     if (!latestTradeDate) return;
     const trainStart = document.getElementById('optimizationTrainStartDate');
     const trainEnd = document.getElementById('optimizationTrainEndDate');
-    const validationStart = document.getElementById('optimizationValidationStartDate');
-    const validationEnd = document.getElementById('optimizationValidationEndDate');
     const latest = new Date(latestTradeDate + 'T00:00:00');
-    const defaultValidationStart = shiftYears(latest, -1);
-    const defaultTrainEnd = shiftDays(defaultValidationStart, -1);
-    const defaultTrainStart = shiftYears(defaultTrainEnd, -2);
-    if (!validationEnd.value) validationEnd.value = toIsoDate(latest);
-    if (!validationStart.value) validationStart.value = toIsoDate(defaultValidationStart);
-    if (!trainEnd.value) trainEnd.value = toIsoDate(defaultTrainEnd);
+    const defaultTrainStart = shiftYears(latest, -5);
+    if (!trainEnd.value) trainEnd.value = toIsoDate(latest);
     if (!trainStart.value) trainStart.value = toIsoDate(defaultTrainStart);
   }
 
@@ -1384,7 +1514,7 @@
         min_rps_windows_passing: criteria.min_rps_windows_passing,
         cup_handle_params: criteria.cup_handle_params,
         fundamental_growth_params: criteria.fundamental_growth_params,
-        holding_days: readInt('backtestHoldingDays', 130),
+        holding_days: readOptionalInt('backtestHoldingDays'),
         stop_loss_pct: readFloat('backtestStopLoss', -0.08),
         rps_exit_threshold: readOptionalInt('backtestRpsExit'),
         portfolio_cap: readInt('backtestPortfolioCap', 10),
@@ -1442,48 +1572,150 @@
     return parsed.length ? parsed : [[50, 120, 250]];
   }
 
+  function parseBooleanList(id, fallback) {
+    const raw = document.getElementById(id).value.trim();
+    const source = raw ? raw.split(/[,，\s]+/) : fallback;
+    const values = source
+      .map((item) => {
+        const normalized = String(item).trim().toLowerCase();
+        if (['true', '1', 'yes', 'y', '是', '开'].includes(normalized)) return true;
+        if (['false', '0', 'no', 'n', '否', '关'].includes(normalized)) return false;
+        return null;
+      })
+      .filter((value) => value !== null);
+    return values.length ? Array.from(new Set(values)) : fallback.map(Boolean);
+  }
+
+  function isValidOptimizationFundamentalParams(params) {
+    return (
+      Number(params.min_years) >= 2 &&
+      Number(params.min_growth_count) >= 1 &&
+      Number(params.min_growth_count) <= Number(params.min_years) - 1 &&
+      Number(params.reporting_lag_days) >= 0
+    );
+  }
+
   function getOptimizationFundamentalModes() {
-    const modes = [];
-    if (document.getElementById('optimizationFundamentalOff').checked) {
-      modes.push({ enabled: false });
-    }
-    if (document.getElementById('optimizationFundamentalGrowth').checked) {
-      modes.push({
+    const axes = {
+      enabled: [true],
+      min_years: parseNumberList('optimizationFundamentalYears', ['3'], true),
+      min_growth_count: parseNumberList('optimizationFundamentalGrowthCounts', ['2'], true),
+      min_yoy_growth_pct: parseNumberList('optimizationFundamentalMinYoyPcts', ['0'], false),
+      require_positive_net_income: parseBooleanList('optimizationFundamentalPositiveModes', [true]),
+      reporting_lag_days: parseNumberList('optimizationFundamentalLagDays', ['120'], true),
+    };
+    const modes = dedupeParameterObjects(buildObjectCombinations(axes)
+      .filter(isValidOptimizationFundamentalParams)
+      .map((params) => Object.assign({}, params, {
+        min_yoy_growth_pct: Number(params.min_yoy_growth_pct).toFixed(2),
+      })));
+    return modes.length
+      ? modes
+      : [{
         enabled: true,
         min_years: 3,
         min_growth_count: 2,
-        min_yoy_growth_pct: '0',
+        min_yoy_growth_pct: '0.00',
         require_positive_net_income: true,
         reporting_lag_days: 120,
-      });
+      }];
+  }
+
+  function buildObjectCombinations(axes) {
+    const entries = Object.entries(axes).map(([key, values]) => [
+      key,
+      Array.isArray(values) && values.length ? values : [null],
+    ]);
+    const rows = [];
+    const current = {};
+    function recurse(index) {
+      if (index === entries.length) {
+        rows.push(Object.assign({}, current));
+        return;
+      }
+      const [key, values] = entries[index];
+      for (const value of values) {
+        current[key] = value;
+        recurse(index + 1);
+      }
     }
-    return modes.length ? modes : [{ enabled: false }];
+    recurse(0);
+    return rows;
+  }
+
+  function dedupeParameterObjects(rows) {
+    const seen = new Set();
+    return rows.filter((row) => {
+      const key = stableStringify(row);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function isValidOptimizationCupParams(params) {
+    return (
+      Number(params.min_total_duration) <= Number(params.max_total_duration) &&
+      Number(params.min_cup_duration) <= Number(params.max_cup_duration) &&
+      Number(params.min_handle_duration) <= Number(params.max_handle_duration) &&
+      Number(params.min_cup_depth_pct) <= Number(params.max_cup_depth_pct) &&
+      Number(params.min_handle_pullback_pct) <= Number(params.max_handle_pullback_pct)
+    );
   }
 
   function getOptimizationCupHandleParamSets() {
-    const base = getCupHandleParams();
-    if (!document.getElementById('optimizationCupShapeVariants').checked) {
-      return [base];
-    }
-    return [
-      Object.assign({}, base),
-      Object.assign({}, base, {
-        min_cup_depth_pct: 15,
-        max_cup_depth_pct: 40,
-        min_handle_pullback_pct: 8,
-        max_handle_pullback_pct: 20,
-      }),
-      Object.assign({}, base, {
-        require_breakout_volume: true,
-        min_breakout_volume_multiplier: 1.5,
-      }),
-      Object.assign({}, base, {
-        require_prior_uptrend: true,
-        min_prior_uptrend_pct: 20,
-        require_breakout_volume: true,
-        min_breakout_volume_multiplier: 1.5,
-      }),
-    ];
+    const volumeAvgDays = parseNumberList('optimizationBreakoutVolumeAvgDays', ['50'], true);
+    const volumeMultipliers = parseNumberList('optimizationBreakoutVolumeMultipliers', ['1.4'], false);
+    const priorLookbacks = parseNumberList('optimizationPriorUptrendLookbacks', ['120'], true);
+    const priorMins = parseNumberList('optimizationPriorUptrendMins', ['20'], false);
+    const baseVolumeAvgDays = volumeAvgDays[0];
+    const baseVolumeMultiplier = volumeMultipliers[0];
+    const basePriorLookback = priorLookbacks[0];
+    const basePriorMin = priorMins[0];
+    const axes = {
+      min_cup_duration: parseNumberList('optimizationCupMinDurations', ['60'], true),
+      max_cup_duration: parseNumberList('optimizationCupMaxDurations', ['220'], true),
+      min_handle_duration: parseNumberList('optimizationHandleMinDurations', ['5'], true),
+      max_handle_duration: parseNumberList('optimizationHandleMaxDurations', ['40'], true),
+      min_total_duration: parseNumberList('optimizationCupMinTotals', ['120'], true),
+      max_total_duration: parseNumberList('optimizationCupMaxTotals', ['260'], true),
+      min_cup_depth_pct: parseNumberList('optimizationCupMinDepths', ['12'], false),
+      max_cup_depth_pct: parseNumberList('optimizationCupMaxDepths', ['33'], false),
+      min_handle_pullback_pct: parseNumberList('optimizationHandleMinPullbacks', ['3'], false),
+      max_handle_pullback_pct: parseNumberList('optimizationHandleMaxPullbacks', ['12'], false),
+      max_right_lip_delta_pct: parseNumberList('optimizationRightLipMaxDeltas', ['5'], false),
+      require_prior_uptrend: parseBooleanList('optimizationRequirePriorUptrendModes', [true]),
+      prior_uptrend_lookback_days: priorLookbacks,
+      min_prior_uptrend_pct: priorMins,
+      min_handle_low_position_pct: parseNumberList('optimizationHandleLowPositions', ['66'], false),
+      max_handle_depth_to_cup_depth_pct: parseNumberList('optimizationHandleDepthToCupDepths', ['35'], false),
+      max_handle_high_above_lip_pct: parseNumberList('optimizationHandleHighAboveLips', ['2'], false),
+      min_bottom_dwell_days: parseNumberList('optimizationBottomDwellDays', ['5'], true),
+      bottom_zone_pct: parseNumberList('optimizationBottomZones', ['20'], false),
+      min_bottom_span_pct: parseNumberList('optimizationBottomSpans', ['10'], false),
+      min_cup_side_duration_pct: parseNumberList('optimizationCupSideDurations', ['20'], false),
+      require_breakout_volume: parseBooleanList('optimizationRequireBreakoutVolumeModes', [false]),
+      breakout_volume_avg_days: volumeAvgDays,
+      min_breakout_volume_multiplier: volumeMultipliers,
+      breakout_lookback_days: parseNumberList('optimizationBreakoutLookbacks', ['30'], true),
+      lookback_days: parseNumberList('optimizationCupLookbacks', ['520'], true),
+    };
+    return dedupeParameterObjects(
+      buildObjectCombinations(axes)
+        .filter(isValidOptimizationCupParams)
+        .map((params) => {
+          const normalized = Object.assign({}, params);
+          if (!normalized.require_breakout_volume) {
+            normalized.breakout_volume_avg_days = baseVolumeAvgDays;
+            normalized.min_breakout_volume_multiplier = baseVolumeMultiplier;
+          }
+          if (!normalized.require_prior_uptrend) {
+            normalized.prior_uptrend_lookback_days = basePriorLookback;
+            normalized.min_prior_uptrend_pct = basePriorMin;
+          }
+          return normalized;
+        })
+    );
   }
 
   function getOptimizationParameterSpace() {
@@ -1883,7 +2115,10 @@
     }
     parts.push(cup.require_breakout_volume ? '要求放量' : '不要求放量');
     parts.push(cup.require_prior_uptrend ? '要求前涨' : '不要求前涨');
-    parts.push(fundamentals.enabled ? '启用财务' : '不启用财务');
+    parts.push(
+      `财务 ${fundamentals.min_years ?? 3}年/${fundamentals.min_growth_count ?? fundamentals.effective_min_growth_count ?? 2}次增长`
+    );
+    parts.push(fundamentals.require_positive_net_income === false ? '可非正利润' : '正利润');
     return parts.join(' · ');
   }
 
@@ -2323,6 +2558,35 @@
     Object.entries(cupMappings).forEach(([key, id]) => setInputValue(id, cup[key]));
     setCheckboxValue('requirePriorUptrend', cup.require_prior_uptrend);
     setCheckboxValue('requireBreakoutVolume', cup.require_breakout_volume);
+    const optimizationCupMappings = {
+      min_cup_duration: 'optimizationCupMinDurations',
+      max_cup_duration: 'optimizationCupMaxDurations',
+      min_handle_duration: 'optimizationHandleMinDurations',
+      max_handle_duration: 'optimizationHandleMaxDurations',
+      min_total_duration: 'optimizationCupMinTotals',
+      max_total_duration: 'optimizationCupMaxTotals',
+      min_cup_depth_pct: 'optimizationCupMinDepths',
+      max_cup_depth_pct: 'optimizationCupMaxDepths',
+      min_handle_pullback_pct: 'optimizationHandleMinPullbacks',
+      max_handle_pullback_pct: 'optimizationHandleMaxPullbacks',
+      max_right_lip_delta_pct: 'optimizationRightLipMaxDeltas',
+      prior_uptrend_lookback_days: 'optimizationPriorUptrendLookbacks',
+      min_prior_uptrend_pct: 'optimizationPriorUptrendMins',
+      min_handle_low_position_pct: 'optimizationHandleLowPositions',
+      max_handle_depth_to_cup_depth_pct: 'optimizationHandleDepthToCupDepths',
+      max_handle_high_above_lip_pct: 'optimizationHandleHighAboveLips',
+      min_bottom_dwell_days: 'optimizationBottomDwellDays',
+      bottom_zone_pct: 'optimizationBottomZones',
+      min_bottom_span_pct: 'optimizationBottomSpans',
+      min_cup_side_duration_pct: 'optimizationCupSideDurations',
+      breakout_volume_avg_days: 'optimizationBreakoutVolumeAvgDays',
+      min_breakout_volume_multiplier: 'optimizationBreakoutVolumeMultipliers',
+      breakout_lookback_days: 'optimizationBreakoutLookbacks',
+      lookback_days: 'optimizationCupLookbacks',
+    };
+    Object.entries(optimizationCupMappings).forEach(([key, id]) => setInputValue(id, cup[key]));
+    setInputValue('optimizationRequirePriorUptrendModes', String(Boolean(cup.require_prior_uptrend)));
+    setInputValue('optimizationRequireBreakoutVolumeModes', String(Boolean(cup.require_breakout_volume)));
 
     const fundamentals = parameters.fundamental_growth_params || {};
     setCheckboxValue('useFundamentalGrowth', fundamentals.enabled);
@@ -2332,7 +2596,7 @@
     setInputValue('fundamentalLagDays', fundamentals.reporting_lag_days);
     setCheckboxValue('fundamentalPositiveOnly', fundamentals.require_positive_net_income);
 
-    setInputValue('backtestHoldingDays', parameters.holding_days);
+    document.getElementById('backtestHoldingDays').value = parameters.holding_days ?? '';
     setInputValue('backtestStopLoss', parameters.stop_loss_pct);
     setInputValue('backtestRpsExit', parameters.rps_exit_threshold);
     setInputValue('backtestPortfolioCap', parameters.portfolio_cap);
@@ -2344,15 +2608,18 @@
     if (Array.isArray(parameters.selected_rps_windows)) {
       setInputValue('optimizationWindowSets', parameters.selected_rps_windows.join('+'));
     }
-    setInputValue('optimizationHoldingDays', parameters.holding_days);
+    document.getElementById('optimizationHoldingDays').value = parameters.holding_days ?? '';
     setInputValue('optimizationStopLosses', parameters.stop_loss_pct);
     setInputValue('optimizationRpsExits', parameters.rps_exit_threshold);
     setInputValue('optimizationPortfolioCap', parameters.portfolio_cap);
     setInputValue('optimizationPositionWeight', parameters.position_weight_pct);
     setInputValue('optimizationEntryDelays', parameters.entry_delay_days);
     setInputValue('optimizationEntryWindow', parameters.entry_deferral_window_days);
-    document.getElementById('optimizationFundamentalOff').checked = !Boolean(fundamentals.enabled);
-    document.getElementById('optimizationFundamentalGrowth').checked = Boolean(fundamentals.enabled);
+    setInputValue('optimizationFundamentalYears', fundamentals.min_years);
+    setInputValue('optimizationFundamentalGrowthCounts', fundamentals.min_growth_count || fundamentals.effective_min_growth_count);
+    setInputValue('optimizationFundamentalMinYoyPcts', fundamentals.min_yoy_growth_pct);
+    setInputValue('optimizationFundamentalPositiveModes', String(fundamentals.require_positive_net_income !== false));
+    setInputValue('optimizationFundamentalLagDays', fundamentals.reporting_lag_days);
     updateOptimizationPreview();
   }
 
@@ -2609,9 +2876,37 @@
     'optimizationSearchMode',
     'optimizationRandomSeed',
     'optimizationObjective',
-    'optimizationFundamentalOff',
-    'optimizationFundamentalGrowth',
-    'optimizationCupShapeVariants',
+    'optimizationFundamentalYears',
+    'optimizationFundamentalGrowthCounts',
+    'optimizationFundamentalMinYoyPcts',
+    'optimizationFundamentalPositiveModes',
+    'optimizationFundamentalLagDays',
+    'optimizationCupMinDepths',
+    'optimizationCupMaxDepths',
+    'optimizationHandleMinPullbacks',
+    'optimizationHandleMaxPullbacks',
+    'optimizationPriorUptrendMins',
+    'optimizationRequirePriorUptrendModes',
+    'optimizationRequireBreakoutVolumeModes',
+    'optimizationBreakoutVolumeMultipliers',
+    'optimizationCupMinTotals',
+    'optimizationCupMaxTotals',
+    'optimizationCupMinDurations',
+    'optimizationCupMaxDurations',
+    'optimizationHandleMinDurations',
+    'optimizationHandleMaxDurations',
+    'optimizationRightLipMaxDeltas',
+    'optimizationPriorUptrendLookbacks',
+    'optimizationHandleLowPositions',
+    'optimizationHandleDepthToCupDepths',
+    'optimizationHandleHighAboveLips',
+    'optimizationBottomDwellDays',
+    'optimizationBottomZones',
+    'optimizationBottomSpans',
+    'optimizationCupSideDurations',
+    'optimizationBreakoutLookbacks',
+    'optimizationBreakoutVolumeAvgDays',
+    'optimizationCupLookbacks',
   ].forEach((id) => {
     document.getElementById(id).addEventListener('input', updateOptimizationPreview);
     document.getElementById(id).addEventListener('change', updateOptimizationPreview);

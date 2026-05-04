@@ -40,6 +40,14 @@ DEFAULT_MAX_PARAMETER_SETS = 1000
 DEFAULT_OPTIMIZATION_PARALLEL_GROUP_SIZE = 8
 DEFAULT_OPTIMIZATION_DETAIL_CACHE_TRADES = 300
 MAX_AUTO_OPTIMIZATION_WORKERS = 6
+DEFAULT_OPTIMIZATION_FUNDAMENTAL_GROWTH_PARAMS = FundamentalGrowthParams(
+    enabled=True,
+    min_years=3,
+    min_growth_count=2,
+    min_yoy_growth_pct=Decimal("0"),
+    require_positive_net_income=True,
+    reporting_lag_days=120,
+)
 RATIO_PATTERN = Decimal("0.000001")
 SUPPORTED_OPTIMIZATION_OBJECTIVES = {
     "score",
@@ -134,7 +142,10 @@ def _parameter_axes(parameter_space: dict[str, object]) -> list[tuple[str, list[
         ("cup_handle_params", _as_list(parameter_space.get("cup_handle_params"), default=[{}])),
         (
             "fundamental_growth_params",
-            _as_list(parameter_space.get("fundamental_growth_params"), default=[{}]),
+            _as_list(
+                parameter_space.get("fundamental_growth_params"),
+                default=[DEFAULT_OPTIMIZATION_FUNDAMENTAL_GROWTH_PARAMS.to_dict()],
+            ),
         ),
         ("holding_days", _as_list(parameter_space.get("holding_days"), default=[130])),
         ("stop_loss_pct", _as_list(parameter_space.get("stop_loss_pct"), default=["-0.08"])),
@@ -204,8 +215,15 @@ def _cup_handle_params_from_payload(payload: dict[str, object] | None) -> CupHan
     )
 
 
-def _fundamental_params_from_payload(payload: dict[str, object] | None) -> FundamentalGrowthParams:
-    merged = _dataclass_payload(DEFAULT_FUNDAMENTAL_GROWTH_PARAMS, payload)
+def _fundamental_params_from_payload(
+    payload: dict[str, object] | None,
+    *,
+    default_params: FundamentalGrowthParams = DEFAULT_FUNDAMENTAL_GROWTH_PARAMS,
+    force_enabled: bool = False,
+) -> FundamentalGrowthParams:
+    merged = _dataclass_payload(default_params, payload)
+    if force_enabled:
+        merged["enabled"] = True
     return FundamentalGrowthParams(
         enabled=bool(merged["enabled"]),
         min_years=int(merged["min_years"]),
@@ -226,7 +244,9 @@ def _normalize_parameter_set(parameters: dict[str, object]) -> dict[str, object]
     fundamental_params = _fundamental_params_from_payload(
         parameters.get("fundamental_growth_params")
         if isinstance(parameters.get("fundamental_growth_params"), dict)
-        else {}
+        else {},
+        default_params=DEFAULT_OPTIMIZATION_FUNDAMENTAL_GROWTH_PARAMS,
+        force_enabled=True,
     )
     selected_windows = [int(window) for window in parameters.get("selected_rps_windows", [50, 120, 250])]  # type: ignore[arg-type]
     selected_windows = sorted(set(selected_windows), key=selected_windows.index)
@@ -788,6 +808,9 @@ def _run_backtest_once(
     parameters: dict[str, object],
     max_trades_returned: int = 0,
     screen_cache: dict[str, dict[str, object]] | None = None,
+    screen_candidate_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
+    fundamental_growth_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
+    cup_event_cache: dict[tuple[object, ...], dict[int, list[object]] | None] | None = None,
     should_cancel=None,
 ) -> dict[str, object]:
     result = run_cup_handle_rps_backtest(
@@ -824,6 +847,9 @@ def _run_backtest_once(
         entry_deferral_window_days=int(parameters.get("entry_deferral_window_days", 5)),
         max_trades_returned=max_trades_returned,
         screen_cache=screen_cache,
+        screen_candidate_cache=screen_candidate_cache,
+        fundamental_growth_cache=fundamental_growth_cache,
+        cup_event_cache=cup_event_cache,
         should_cancel=should_cancel,
     )
     return result.to_dict()
@@ -840,6 +866,9 @@ def _evaluate_parameter_set(
     objective: str,
     parameters: dict[str, object],
     screen_cache: dict[str, dict[str, object]] | None = None,
+    screen_candidate_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
+    fundamental_growth_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
+    cup_event_cache: dict[tuple[object, ...], dict[int, list[object]] | None] | None = None,
     should_cancel=None,
 ) -> dict[str, object]:
     try:
@@ -851,6 +880,9 @@ def _evaluate_parameter_set(
             parameters=parameters,
             max_trades_returned=DEFAULT_OPTIMIZATION_DETAIL_CACHE_TRADES,
             screen_cache=screen_cache,
+            screen_candidate_cache=screen_candidate_cache,
+            fundamental_growth_cache=fundamental_growth_cache,
+            cup_event_cache=cup_event_cache,
             should_cancel=should_cancel,
         )
         train_metrics = _extract_metrics(train_result)
@@ -866,6 +898,9 @@ def _evaluate_parameter_set(
                 parameters=parameters,
                 max_trades_returned=DEFAULT_OPTIMIZATION_DETAIL_CACHE_TRADES,
                 screen_cache=screen_cache,
+                screen_candidate_cache=screen_candidate_cache,
+                fundamental_growth_cache=fundamental_growth_cache,
+                cup_event_cache=cup_event_cache,
                 should_cancel=should_cancel,
             )
             validation_metrics = _extract_metrics(validation_result)
@@ -911,6 +946,9 @@ def _evaluate_parameter_set_group_worker(payload: dict[str, object]) -> list[dic
         raise ValueError("Worker payload parameter_sets must be a list.")
     results: list[dict[str, object]] = []
     screen_cache: dict[str, dict[str, object]] = {}
+    screen_candidate_cache: dict[tuple[object, ...], dict[str, object]] = {}
+    fundamental_growth_cache: dict[tuple[object, ...], dict[str, object]] = {}
+    cup_event_cache: dict[tuple[object, ...], dict[int, list[object]] | None] = {}
     with SessionLocal() as session:
         for parameters in parameter_sets:
             if not isinstance(parameters, dict):
@@ -926,6 +964,9 @@ def _evaluate_parameter_set_group_worker(payload: dict[str, object]) -> list[dic
                     objective=str(payload["objective"]),
                     parameters=parameters,
                     screen_cache=screen_cache,
+                    screen_candidate_cache=screen_candidate_cache,
+                    fundamental_growth_cache=fundamental_growth_cache,
+                    cup_event_cache=cup_event_cache,
                     should_cancel=None,
                 )
             )
@@ -939,8 +980,6 @@ def _parameter_screen_signature(parameters: dict[str, object]) -> str:
             "selected_rps_windows": parameters.get("selected_rps_windows"),
             "min_rps_windows_passing": parameters.get("min_rps_windows_passing"),
             "use_cup_handle": parameters.get("use_cup_handle"),
-            "cup_handle_params": parameters.get("cup_handle_params"),
-            "fundamental_growth_params": parameters.get("fundamental_growth_params"),
         }
     )
 
@@ -1212,6 +1251,9 @@ def build_optimization_result_detail(
             )
         else:
             screen_cache: dict[str, dict[str, object]] = {}
+            screen_candidate_cache: dict[tuple[object, ...], dict[str, object]] = {}
+            fundamental_growth_cache: dict[tuple[object, ...], dict[str, object]] = {}
+            cup_event_cache: dict[tuple[object, ...], dict[int, list[object]] | None] = {}
             train_result = _run_backtest_once(
                 session,
                 start_date=run.train_start_date,
@@ -1220,6 +1262,9 @@ def build_optimization_result_detail(
                 parameters=parameters,
                 max_trades_returned=max_trades_returned,
                 screen_cache=screen_cache,
+                screen_candidate_cache=screen_candidate_cache,
+                fundamental_growth_cache=fundamental_growth_cache,
+                cup_event_cache=cup_event_cache,
             )
             validation_result = None
             if run.validation_start_date is not None and run.validation_end_date is not None:
@@ -1231,6 +1276,9 @@ def build_optimization_result_detail(
                     parameters=parameters,
                     max_trades_returned=max_trades_returned,
                     screen_cache=screen_cache,
+                    screen_candidate_cache=screen_candidate_cache,
+                    fundamental_growth_cache=fundamental_growth_cache,
+                    cup_event_cache=cup_event_cache,
                 )
         _store_detail_cache(
             session,
@@ -1390,6 +1438,9 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
         total_parameter_sets=len(parameter_sets),
     )
     screen_cache: dict[str, dict[str, object]] = {}
+    screen_candidate_cache: dict[tuple[object, ...], dict[str, object]] = {}
+    fundamental_growth_cache: dict[tuple[object, ...], dict[str, object]] = {}
+    cup_event_cache: dict[tuple[object, ...], dict[int, list[object]] | None] = {}
 
     cancel_state = {"checked_at": 0.0, "cached": False}
 
@@ -1429,6 +1480,9 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
                     objective=run.objective,
                     parameters=parameters,
                     screen_cache=screen_cache,
+                    screen_candidate_cache=screen_candidate_cache,
+                    fundamental_growth_cache=fundamental_growth_cache,
+                    cup_event_cache=cup_event_cache,
                     should_cancel=should_cancel,
                 )
                 _persist_evaluation_result(session, run=run, evaluation=evaluation)

@@ -224,7 +224,7 @@ class CupHandleRpsBacktestRequest(BaseModel):
     fundamental_growth_params: FundamentalGrowthParamsRequest = Field(
         default_factory=FundamentalGrowthParamsRequest
     )
-    holding_days: int = Field(default=130, ge=1, le=500)
+    holding_days: int | None = Field(default=130, ge=1, le=500)
     stop_loss_pct: float = Field(default=-0.08, gt=-1, lt=0)
     take_profit_pct: float | None = Field(default=None, gt=0, le=10)
     rps_exit_threshold: int | None = Field(default=None, ge=0, le=100)

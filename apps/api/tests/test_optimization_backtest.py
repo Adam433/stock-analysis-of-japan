@@ -29,6 +29,7 @@ from stockanalyse_api.services.dashboard_strategy_backtest import (
 from stockanalyse_api.services.optimization_backtest import (
     _attach_average_annualized_return,
     _extract_metrics,
+    _parallel_parameter_groups,
     _score_metrics,
     build_optimization_result_detail,
     build_parameter_sets,
@@ -146,6 +147,42 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(len(parameter_sets), 2)
         self.assertEqual({item["rps_threshold"] for item in parameter_sets}, {85, 90})
         self.assertEqual(parameter_sets[0]["selected_rps_windows"], [50, 120])
+
+    def test_build_parameter_sets_requires_fundamentals_by_default(self) -> None:
+        parameter_sets = build_parameter_sets({"rps_threshold": [90]})
+
+        fundamentals = parameter_sets[0]["fundamental_growth_params"]
+
+        self.assertTrue(fundamentals["enabled"])
+        self.assertEqual(fundamentals["min_years"], 3)
+        self.assertEqual(fundamentals["min_growth_count"], 2)
+        self.assertTrue(fundamentals["require_positive_net_income"])
+
+    def test_build_parameter_sets_forces_fundamentals_when_disabled_payload(self) -> None:
+        parameter_sets = build_parameter_sets(
+            {
+                "rps_threshold": [90],
+                "fundamental_growth_params": [
+                    {
+                        "enabled": False,
+                        "min_years": 4,
+                        "min_growth_count": 1,
+                        "min_yoy_growth_pct": "5",
+                        "require_positive_net_income": False,
+                        "reporting_lag_days": 90,
+                    }
+                ],
+            }
+        )
+
+        fundamentals = parameter_sets[0]["fundamental_growth_params"]
+
+        self.assertTrue(fundamentals["enabled"])
+        self.assertEqual(fundamentals["min_years"], 4)
+        self.assertEqual(fundamentals["min_growth_count"], 1)
+        self.assertEqual(fundamentals["min_yoy_growth_pct"], "5")
+        self.assertFalse(fundamentals["require_positive_net_income"])
+        self.assertEqual(fundamentals["reporting_lag_days"], 90)
 
     def test_build_parameter_sets_supports_seeded_random_sampling(self) -> None:
         parameter_space = {
@@ -356,6 +393,44 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(completed.failed_parameter_sets, 1)
         self.assertEqual(results[0].rank, 1)
         self.assertEqual(serialize_optimization_result(results[0])["parameters"]["rps_threshold"], 95)
+
+    def test_parallel_parameter_groups_batch_different_cup_params(self) -> None:
+        base_space = {
+            "rps_threshold": [85],
+            "selected_rps_windows": [[50, 120]],
+            "cup_handle_params": [
+                {"min_cup_depth_pct": 10, "max_cup_depth_pct": 30},
+                {"min_cup_depth_pct": 12, "max_cup_depth_pct": 33},
+            ],
+            "stop_loss_pct": ["-0.08"],
+            "rps_exit_threshold": [80],
+        }
+        parameter_sets = build_parameter_sets(base_space)
+
+        groups = _parallel_parameter_groups(parameter_sets, group_size=8)
+
+        self.assertEqual(len(parameter_sets), 2)
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(len(groups[0]), 2)
+
+    def test_parallel_parameter_groups_batch_different_fundamental_params(self) -> None:
+        base_space = {
+            "rps_threshold": [85],
+            "selected_rps_windows": [[50, 120]],
+            "fundamental_growth_params": [
+                {"enabled": True, "min_years": 3, "min_growth_count": 1},
+                {"enabled": True, "min_years": 3, "min_growth_count": 2},
+            ],
+            "stop_loss_pct": ["-0.08"],
+            "rps_exit_threshold": [80],
+        }
+        parameter_sets = build_parameter_sets(base_space)
+
+        groups = _parallel_parameter_groups(parameter_sets, group_size=8)
+
+        self.assertEqual(len(parameter_sets), 2)
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(len(groups[0]), 2)
 
     def test_execute_optimization_run_isolates_failed_parameter_sets(self) -> None:
         def fake_backtest(*args, **kwargs):
@@ -973,7 +1048,10 @@ class OptimizationBacktestTests(unittest.TestCase):
 
         validation_trade = detail["validation"]["trades"][0]
         self.assertEqual(validation_trade["symbol"], "AAPL")
-        self.assertEqual(validation_trade["entry_reason"], "RPS 达到 80；未启用杯柄过滤")
+        self.assertEqual(
+            validation_trade["entry_reason"],
+            "RPS 达到 80；未启用杯柄过滤；财务增长通过",
+        )
         self.assertEqual(validation_trade["exit_reason_label"], "RPS 跌破退出阈值")
         self.assertEqual(validation_trade["entry_price"], "100.000000")
         self.assertEqual(validation_trade["exit_price"], "92.000000")

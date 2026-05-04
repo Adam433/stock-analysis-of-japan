@@ -345,6 +345,137 @@ def load_materialized_cup_handle_matches(
     return event_by_instrument
 
 
+def load_materialized_cup_handle_event_pool(
+    session,
+    *,
+    market: str,
+    start_date: date,
+    end_date: date,
+    params,
+) -> dict[int, list[CupHandlePatternEvent]] | None:
+    try:
+        materialization_run = find_covering_materialization_run(
+            session,
+            market=market,
+            signal_date=end_date,
+            params=params,
+        )
+    except OperationalError as exc:
+        if "cup_handle_materialization_runs" in str(exc) or "cup_handle_pattern_events" in str(exc):
+            return None
+        raise
+    if materialization_run is None:
+        return None
+
+    earliest_breakout_date = start_date - timedelta(days=int(params.breakout_lookback_days) * 3)
+    query: Select[tuple[CupHandlePatternEvent]] = select(CupHandlePatternEvent).where(
+        CupHandlePatternEvent.materialization_run_id == materialization_run.id,
+        CupHandlePatternEvent.market == normalize_market(market),
+        CupHandlePatternEvent.breakout_date >= earliest_breakout_date,
+        CupHandlePatternEvent.breakout_date <= end_date,
+    )
+    try:
+        events = list(
+            session.execute(
+                query.order_by(
+                    CupHandlePatternEvent.instrument_id.asc(),
+                    CupHandlePatternEvent.breakout_date.desc(),
+                    CupHandlePatternEvent.id.desc(),
+                )
+            ).scalars()
+        )
+    except OperationalError as exc:
+        if "cup_handle_pattern_events" in str(exc):
+            return None
+        raise
+
+    events_by_instrument: dict[int, list[CupHandlePatternEvent]] = {}
+    for event in events:
+        events_by_instrument.setdefault(event.instrument_id, []).append(event)
+    return events_by_instrument
+
+
+def materialized_cup_handle_event_matches_params(event: CupHandlePatternEvent, params) -> bool:
+    if not (
+        int(params.min_cup_duration) <= event.cup_duration <= int(params.max_cup_duration)
+        and int(params.min_handle_duration)
+        <= event.handle_duration
+        <= int(params.max_handle_duration)
+        and int(params.min_total_duration)
+        <= event.total_duration
+        <= int(params.max_total_duration)
+        and _decimal(params.min_cup_depth_pct)
+        <= event.cup_depth_pct
+        <= _decimal(params.max_cup_depth_pct)
+        and _decimal(params.min_handle_pullback_pct)
+        <= event.handle_depth_pct
+        <= _decimal(params.max_handle_pullback_pct)
+        and event.right_lip_delta_pct <= _decimal(params.max_right_lip_delta_pct)
+        and event.handle_low_position_pct >= _decimal(params.min_handle_low_position_pct)
+        and event.handle_depth_to_cup_depth_pct
+        <= _decimal(params.max_handle_depth_to_cup_depth_pct)
+        and event.handle_high_above_lip_pct <= _decimal(params.max_handle_high_above_lip_pct)
+    ):
+        return False
+
+    bottom_zone = int(Decimal(str(params.bottom_zone_pct)))
+    if bottom_zone == 20:
+        if not (
+            event.bottom_dwell_days_zone_20 >= int(params.min_bottom_dwell_days)
+            and event.bottom_span_pct_zone_20 >= _decimal(params.min_bottom_span_pct)
+        ):
+            return False
+    elif bottom_zone == 35:
+        if not (
+            event.bottom_dwell_days_zone_35 >= int(params.min_bottom_dwell_days)
+            and event.bottom_span_pct_zone_35 >= _decimal(params.min_bottom_span_pct)
+        ):
+            return False
+    else:
+        return False
+
+    if params.require_prior_uptrend:
+        prior_value = getattr(
+            event,
+            f"prior_uptrend_pct_{int(params.prior_uptrend_lookback_days)}",
+            None,
+        )
+        if prior_value is None or prior_value < _decimal(params.min_prior_uptrend_pct):
+            return False
+
+    if params.require_breakout_volume:
+        volume_value = getattr(
+            event,
+            f"breakout_volume_ratio_{int(params.breakout_volume_avg_days)}",
+            None,
+        )
+        if volume_value is None or volume_value < _decimal(params.min_breakout_volume_multiplier):
+            return False
+
+    return True
+
+
+def select_latest_materialized_cup_handle_matches(
+    events_by_instrument: dict[int, list[CupHandlePatternEvent]],
+    *,
+    signal_date: date,
+    instrument_ids: list[int],
+    params,
+) -> dict[int, CupHandlePatternEvent]:
+    earliest_breakout_date = signal_date - timedelta(days=int(params.breakout_lookback_days) * 3)
+    event_by_instrument: dict[int, CupHandlePatternEvent] = {}
+    for instrument_id in instrument_ids:
+        for event in events_by_instrument.get(instrument_id, []):
+            if event.breakout_date > signal_date:
+                continue
+            if event.breakout_date < earliest_breakout_date:
+                break
+            if materialized_cup_handle_event_matches_params(event, params):
+                event_by_instrument[instrument_id] = event
+                break
+    return event_by_instrument
+
+
 def materialize_cup_handle_candidates(
     session,
     *,
