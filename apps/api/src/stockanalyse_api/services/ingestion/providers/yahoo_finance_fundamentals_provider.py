@@ -40,6 +40,7 @@ class YahooFinanceFundamentalsProvider:
         self.default_currency = default_currency
         self.modules = modules or (
             "incomeStatementHistory",
+            "cashflowStatementHistory",
             "summaryDetail",
             "defaultKeyStatistics",
             "price",
@@ -176,6 +177,7 @@ class YahooFinanceFundamentalsProvider:
         first_result = results[0] if isinstance(results[0], dict) else {}
         income_section = first_result.get("incomeStatementHistory")
         income_rows = income_section.get("incomeStatementHistory") if isinstance(income_section, dict) else []
+        cash_flow_rows = self._parse_cash_flow_rows(first_result)
         summary_detail = first_result.get("summaryDetail")
         if not isinstance(summary_detail, dict):
             summary_detail = {}
@@ -203,6 +205,7 @@ class YahooFinanceFundamentalsProvider:
                 continue
 
             net_income = self._read_decimal(row, "netIncome")
+            cash_flow = cash_flow_rows.get(fiscal_year_end, {})
             parsed_rows.append(
                 ProviderFundamentalsAnnual(
                     symbol=symbol,
@@ -211,6 +214,8 @@ class YahooFinanceFundamentalsProvider:
                     fiscal_year_label=f"FY{fiscal_year_end.year}",
                     net_income=net_income,
                     net_income_currency=currency,
+                    operating_cash_flow=cash_flow.get("operating_cash_flow"),
+                    free_cash_flow=cash_flow.get("free_cash_flow"),
                     pe=None,
                     pb=None,
                     source=self.provider_name,
@@ -231,6 +236,40 @@ class YahooFinanceFundamentalsProvider:
                 latest_row.pb,
             )
         return parsed_rows[-5:]
+
+    def _parse_cash_flow_rows(
+        self,
+        quote_summary_result: dict[str, object],
+    ) -> dict[date, dict[str, Decimal | None]]:
+        cash_flow_section = quote_summary_result.get("cashflowStatementHistory")
+        if not isinstance(cash_flow_section, dict):
+            return {}
+        raw_rows = cash_flow_section.get("cashflowStatements")
+        if not isinstance(raw_rows, list):
+            raw_rows = cash_flow_section.get("cashflowStatementHistory")
+        if not isinstance(raw_rows, list):
+            return {}
+
+        rows: dict[date, dict[str, Decimal | None]] = {}
+        for row in raw_rows:
+            if not isinstance(row, dict):
+                continue
+            fiscal_year_end = self._read_date(row.get("endDate"))
+            if fiscal_year_end is None:
+                continue
+            operating_cash_flow = (
+                self._read_decimal(row, "totalCashFromOperatingActivities")
+                or self._read_decimal(row, "operatingCashflow")
+            )
+            capital_expenditures = self._read_decimal(row, "capitalExpenditures")
+            rows[fiscal_year_end] = {
+                "operating_cash_flow": operating_cash_flow,
+                "free_cash_flow": _free_cash_flow(
+                    operating_cash_flow,
+                    capital_expenditures,
+                ),
+            }
+        return rows
 
     @staticmethod
     def _read_decimal(payload: dict[str, object], field_name: str) -> Decimal | None:
@@ -272,3 +311,14 @@ class YahooFinanceFundamentalsProvider:
         if pe is None or pb is None:
             return "partial"
         return "complete"
+
+
+def _free_cash_flow(
+    operating_cash_flow: Decimal | None,
+    capital_expenditures: Decimal | None,
+) -> Decimal | None:
+    if operating_cash_flow is None or capital_expenditures is None:
+        return None
+    if capital_expenditures < 0:
+        return operating_cash_flow + capital_expenditures
+    return operating_cash_flow - capital_expenditures

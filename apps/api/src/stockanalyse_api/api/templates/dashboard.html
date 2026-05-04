@@ -145,6 +145,15 @@
     gap: 8px 12px;
   }
   .field-grid .field { margin-bottom: 0; min-width: 0; }
+  .compact-toggle-grid {
+    align-items: center;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  .compact-toggle-grid label.row {
+    min-height: 34px; margin: 0; padding: 7px 8px;
+    border: 1px solid var(--panel-border); border-radius: 6px;
+    background: var(--panel-subtle);
+  }
   .windows {
     display: flex; gap: 8px;
   }
@@ -332,7 +341,7 @@
       <div class="action-grid">
         <button class="secondary" id="runRefresh">更新数据</button>
         <button class="secondary" id="runMaterialize">物化指标</button>
-        <button class="secondary" id="runFundamentals">刷新业绩</button>
+        <button class="secondary" id="runFundamentals">刷新财务/估值</button>
       </div>
       <div id="maintenanceHint" class="maintenance-hint"></div>
       <div id="updateStatus" class="status-box">尚未执行</div>
@@ -345,10 +354,6 @@
         <button class="inline-action" type="button" data-toggle-tool="screenToolCard">展开</button>
       </div>
       <div class="tool-card-body">
-      <label class="row">
-        <input type="checkbox" id="useRps" checked />
-        <span>启用 RPS 筛选</span>
-      </label>
       <div class="field">
         <label>RPS 阈值</label>
         <input type="number" id="rpsThreshold" min="0" max="100" value="85" />
@@ -365,10 +370,6 @@
           <label><input type="checkbox" value="250" checked />250</label>
         </div>
       </div>
-      <label class="row">
-        <input type="checkbox" id="useCupHandle" checked />
-        <span>启用 欧奈尔 杯柄 (Cup-with-Handle) 筛选</span>
-      </label>
       <div class="field-grid">
         <div class="field">
           <label>整体最短周期</label>
@@ -467,18 +468,6 @@
           <input type="number" id="breakoutVolumeMultiplier" min="0" max="10" step="0.1" value="1.4" />
         </div>
       </div>
-      <label class="row" style="margin-top: 10px;">
-        <input type="checkbox" id="requirePriorUptrend" checked />
-        <span>要求杯柄前已有明显上涨</span>
-      </label>
-      <label class="row">
-        <input type="checkbox" id="requireBreakoutVolume" />
-        <span>要求突破日放量确认</span>
-      </label>
-      <label class="row">
-        <input type="checkbox" id="useFundamentalGrowth" />
-        <span>启用净利润连续增长筛选</span>
-      </label>
       <div class="field-grid">
         <div class="field">
           <label>净利润年份数</label>
@@ -496,11 +485,23 @@
           <label>财报可见延迟天数</label>
           <input type="number" id="fundamentalLagDays" min="0" max="365" value="120" />
         </div>
+        <div class="field">
+          <label>PE 上限</label>
+          <input type="number" id="fundamentalMaxPe" min="0" max="500" step="0.1" value="60" placeholder="不限" />
+        </div>
+        <div class="field">
+          <label>PB 上限</label>
+          <input type="number" id="fundamentalMaxPb" min="0" max="100" step="0.1" value="15" placeholder="不限" />
+        </div>
+        <div class="field">
+          <label>经营现金流增长次数</label>
+          <input type="number" id="fundamentalOcfGrowthCount" min="1" max="9" value="1" placeholder="不限" />
+        </div>
+        <div class="field">
+          <label>经营现金流 YoY %</label>
+          <input type="number" id="fundamentalOcfMinYoyPct" min="-100" max="500" step="0.1" value="0" />
+        </div>
       </div>
-      <label class="row">
-        <input type="checkbox" id="fundamentalPositiveOnly" checked />
-        <span>净利润必须为正</span>
-      </label>
       <div class="field">
         <label>截止交易日 (留空 = 最新)</label>
         <input type="date" id="cutoffDate" />
@@ -552,6 +553,44 @@
           <label>进场等待窗口</label>
           <input type="number" id="backtestEntryWindow" min="1" max="60" value="5" />
         </div>
+      </div>
+      <div class="card-title-row" style="margin-top: 14px;">
+        <h2>条件开关</h2>
+        <span class="mini-badge">筛选/回测共用</span>
+      </div>
+      <div class="field-grid compact-toggle-grid">
+        <label class="row">
+          <input type="checkbox" id="useRps" checked />
+          <span>启用 RPS 筛选</span>
+        </label>
+        <label class="row">
+          <input type="checkbox" id="useCupHandle" checked />
+          <span>启用欧奈尔杯柄筛选</span>
+        </label>
+        <label class="row">
+          <input type="checkbox" id="requirePriorUptrend" checked />
+          <span>要求杯柄前已有明显上涨</span>
+        </label>
+        <label class="row">
+          <input type="checkbox" id="requireBreakoutVolume" />
+          <span>要求突破日放量确认</span>
+        </label>
+        <label class="row">
+          <input type="checkbox" id="useFundamentalGrowth" checked />
+          <span>启用财务质量筛选</span>
+        </label>
+        <label class="row">
+          <input type="checkbox" id="fundamentalPositiveOnly" checked />
+          <span>净利润必须为正</span>
+        </label>
+        <label class="row">
+          <input type="checkbox" id="fundamentalPositiveOcf" checked />
+          <span>经营现金流必须为正</span>
+        </label>
+        <label class="row">
+          <input type="checkbox" id="fundamentalPositiveFcf" checked />
+          <span>自由现金流必须为正</span>
+        </label>
       </div>
       <button class="secondary" id="runStrategyBacktest" style="margin-top: 10px;">回测当前参数</button>
       <div id="backtestStatus" class="status-box">尚未运行</div>
@@ -711,6 +750,7 @@
           <select id="optimizationObjective">
             <option value="score">综合得分</option>
             <option value="average_annualized_return">平均年化收益</option>
+            <option value="robust_annualized_return">稳健年化收益</option>
             <option value="annualized_return">最高年化收益</option>
             <option value="max_drawdown">最低回撤</option>
             <option value="return_drawdown_ratio">最高收益回撤比</option>
@@ -725,6 +765,31 @@
           </label>
           <input type="text" id="optimizationComboCount" value="—" readonly />
         </div>
+      </div>
+      <div class="card-title-row" style="margin-top: 14px;">
+        <h2>启用条件</h2>
+        <span class="mini-badge">归因开关</span>
+      </div>
+      <div class="row-hint-wrap">
+        <label class="row">
+          <input type="checkbox" id="optimizationUseFundamental" checked disabled />
+          <span>财务必选</span>
+        </label>
+        <span class="hint" tabindex="0" data-tip="参数优化始终包含财务过滤；可调整财务要求强弱，但不做无财务策略。">?</span>
+      </div>
+      <div class="row-hint-wrap">
+        <label class="row">
+          <input type="checkbox" id="optimizationUseRps" checked />
+          <span>RPS</span>
+        </label>
+        <span class="hint" tabindex="0" data-tip="关闭后不使用 RPS 入场过滤，也不会使用 RPS 退出阈值。候选排序改为按代码排序。">?</span>
+      </div>
+      <div class="row-hint-wrap">
+        <label class="row">
+          <input type="checkbox" id="optimizationUseCupHandle" checked />
+          <span>K线形态</span>
+        </label>
+        <span class="hint" tabindex="0" data-tip="关闭后不使用欧奈尔杯柄形态过滤，用于比较只靠 RPS 和财务的候选池表现。">?</span>
       </div>
       <div class="card-title-row" style="margin-top: 14px;">
         <h2>财务质量参数网格</h2>
@@ -765,6 +830,48 @@
             <span class="hint" tabindex="0" data-tip="信号日向前推多少天作为财报可见性边界，避免使用当时尚未公布的数据。">?</span>
           </label>
           <input type="text" id="optimizationFundamentalLagDays" value="120" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>PE 上限</span>
+            <span class="hint" tabindex="0" data-tip="用 SEC EPS/股数与信号日价格动态计算；留空表示不限制。缺失估值输入会被过滤。">?</span>
+          </label>
+          <input type="text" id="optimizationFundamentalMaxPe" value="40,60" placeholder="不限，例如 40,60" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>PB 上限</span>
+            <span class="hint" tabindex="0" data-tip="用 SEC 股东权益/股数与信号日价格动态计算；留空表示不限制。缺失估值输入会被过滤。">?</span>
+          </label>
+          <input type="text" id="optimizationFundamentalMaxPb" value="8,15" placeholder="不限，例如 8,15" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>经营现金流为正</span>
+            <span class="hint" tabindex="0" data-tip="可填 true,false 做对照。启用后所需年度经营现金流必须为正；缺失现金流会被过滤。">?</span>
+          </label>
+          <input type="text" id="optimizationFundamentalPositiveOcfModes" value="true" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>自由现金流为正</span>
+            <span class="hint" tabindex="0" data-tip="可填 true,false 做对照。启用后所需年度自由现金流必须为正；缺失现金流会被过滤。">?</span>
+          </label>
+          <input type="text" id="optimizationFundamentalPositiveFcfModes" value="false,true" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>经营现金流增长次数</span>
+            <span class="hint" tabindex="0" data-tip="留空表示不限制；多个值用逗号分隔。用于测试利润增长之外的现金质量。">?</span>
+          </label>
+          <input type="text" id="optimizationFundamentalOcfGrowthCounts" value="1,2" placeholder="不限，例如 1,2" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>经营现金流 YoY %</span>
+            <span class="hint" tabindex="0" data-tip="经营现金流增长次数启用时使用；0 表示只要求不下降。">?</span>
+          </label>
+          <input type="text" id="optimizationFundamentalOcfMinYoyPcts" value="0" />
         </div>
       </div>
       <div class="card-title-row" style="margin-top: 14px;">
@@ -1006,6 +1113,7 @@
   const OPTIMIZATION_OBJECTIVE_LABELS = {
     score: '综合得分',
     average_annualized_return: '平均年化收益',
+    robust_annualized_return: '稳健年化收益',
     annualized_return: '最高年化收益',
     max_drawdown: '最低回撤',
     return_drawdown_ratio: '最高收益回撤比',
@@ -1058,6 +1166,13 @@
     return Number.isFinite(value) ? value : fallback;
   }
 
+  function readOptionalFloat(id) {
+    const raw = document.getElementById(id).value.trim();
+    if (!raw) return null;
+    const value = parseFloat(raw);
+    return Number.isFinite(value) ? value : null;
+  }
+
   function readOptionalInt(id) {
     const raw = document.getElementById(id).value.trim();
     if (!raw) return null;
@@ -1104,6 +1219,12 @@
       min_yoy_growth_pct: readFloat('fundamentalMinYoyPct', 0),
       require_positive_net_income: document.getElementById('fundamentalPositiveOnly').checked,
       reporting_lag_days: readInt('fundamentalLagDays', 120),
+      max_pe: readOptionalFloat('fundamentalMaxPe'),
+      max_pb: readOptionalFloat('fundamentalMaxPb'),
+      require_positive_operating_cash_flow: document.getElementById('fundamentalPositiveOcf').checked,
+      require_positive_free_cash_flow: document.getElementById('fundamentalPositiveFcf').checked,
+      min_operating_cash_flow_growth_count: readOptionalInt('fundamentalOcfGrowthCount'),
+      min_operating_cash_flow_yoy_growth_pct: readFloat('fundamentalOcfMinYoyPct', 0),
     };
   }
 
@@ -1246,7 +1367,7 @@
     }
     refreshBtn.textContent = activeAction === 'refresh' ? '更新中…' : '更新数据';
     materializeBtn.textContent = activeAction === 'materialize' ? '物化中…' : '物化指标';
-    fundamentalsBtn.textContent = activeAction === 'fundamentals' ? '刷新中…' : '刷新业绩';
+    fundamentalsBtn.textContent = activeAction === 'fundamentals' ? '刷新中…' : '刷新财务/估值';
   }
 
   function updatePhaseBadge(state) {
@@ -1296,7 +1417,7 @@
         return `物化完成 · 指标 +${fmt(state.materialize_inserted)}/~${fmt(state.materialize_updated)}`;
       }
       if (state.job_kind === 'fundamentals') {
-        return `业绩刷新完成 · 成功 ${fmt(state.fundamentals_refreshed)} · 失败 ${fmt(state.fundamentals_failed)}`;
+        return `财务/估值刷新完成 · 成功 ${fmt(state.fundamentals_refreshed)} · 失败 ${fmt(state.fundamentals_failed)}`;
       }
       return `完成 · 行情 +${fmt(state.refresh_inserted)}/~${fmt(state.refresh_updated)}` +
         ` · 指标 +${fmt(state.materialize_inserted)}/~${fmt(state.materialize_updated)}`;
@@ -1322,7 +1443,7 @@
     }
     if (state.phase === 'fundamentals') {
       const provider = state.fundamentals_provider ? ` · ${state.fundamentals_provider}` : '';
-      return `刷新业绩中${provider} · 已处理 ${fmt(state.fundamentals_processed)} · 成功 ${fmt(state.fundamentals_refreshed)} · 失败 ${fmt(state.fundamentals_failed)}`;
+      return `刷新财务/估值中${provider} · 已处理 ${fmt(state.fundamentals_processed)} · 成功 ${fmt(state.fundamentals_refreshed)} · 失败 ${fmt(state.fundamentals_failed)}`;
     }
     return '运行中…';
   }
@@ -1430,6 +1551,11 @@
       insufficient_history: '年份不足',
       not_positive: '非正利润',
       growth_failed: '增长不足',
+      cash_flow_missing: '现金流缺失',
+      cash_flow_not_positive: '现金流非正',
+      cash_flow_growth_failed: '现金流增长不足',
+      valuation_missing: '估值缺失',
+      valuation_failed: '估值不符',
     };
     return `<span class="badge warn">${labels[status] || status}</span>`;
   }
@@ -1508,6 +1634,7 @@
       const data = await api('POST', '/dashboard/api/backtest/cup-handle-rps', {
         start_date: startDate,
         end_date: endDate,
+        use_rps: criteria.use_rps,
         rps_threshold: criteria.rps_threshold,
         market: criteria.market,
         selected_rps_windows: criteria.selected_rps_windows,
@@ -1591,7 +1718,16 @@
       Number(params.min_years) >= 2 &&
       Number(params.min_growth_count) >= 1 &&
       Number(params.min_growth_count) <= Number(params.min_years) - 1 &&
-      Number(params.reporting_lag_days) >= 0
+      Number(params.reporting_lag_days) >= 0 &&
+      (params.max_pe === null || Number(params.max_pe) > 0) &&
+      (params.max_pb === null || Number(params.max_pb) > 0) &&
+      (
+        params.min_operating_cash_flow_growth_count === null ||
+        (
+          Number(params.min_operating_cash_flow_growth_count) >= 1 &&
+          Number(params.min_operating_cash_flow_growth_count) <= Number(params.min_years) - 1
+        )
+      )
     );
   }
 
@@ -1603,11 +1739,23 @@
       min_yoy_growth_pct: parseNumberList('optimizationFundamentalMinYoyPcts', ['0'], false),
       require_positive_net_income: parseBooleanList('optimizationFundamentalPositiveModes', [true]),
       reporting_lag_days: parseNumberList('optimizationFundamentalLagDays', ['120'], true),
+      max_pe: parseOptionalNumberList('optimizationFundamentalMaxPe', false),
+      max_pb: parseOptionalNumberList('optimizationFundamentalMaxPb', false),
+      require_positive_operating_cash_flow: parseBooleanList('optimizationFundamentalPositiveOcfModes', [false]),
+      require_positive_free_cash_flow: parseBooleanList('optimizationFundamentalPositiveFcfModes', [false]),
+      min_operating_cash_flow_growth_count: parseOptionalNumberList('optimizationFundamentalOcfGrowthCounts', true),
+      min_operating_cash_flow_yoy_growth_pct: parseNumberList('optimizationFundamentalOcfMinYoyPcts', ['0'], false),
     };
     const modes = dedupeParameterObjects(buildObjectCombinations(axes)
       .filter(isValidOptimizationFundamentalParams)
       .map((params) => Object.assign({}, params, {
         min_yoy_growth_pct: Number(params.min_yoy_growth_pct).toFixed(2),
+        max_pe: params.max_pe === null ? null : Number(params.max_pe).toFixed(2),
+        max_pb: params.max_pb === null ? null : Number(params.max_pb).toFixed(2),
+        min_operating_cash_flow_growth_count: params.min_operating_cash_flow_growth_count === null
+          ? null
+          : Number(params.min_operating_cash_flow_growth_count),
+        min_operating_cash_flow_yoy_growth_pct: Number(params.min_operating_cash_flow_yoy_growth_pct).toFixed(2),
       })));
     return modes.length
       ? modes
@@ -1618,6 +1766,12 @@
         min_yoy_growth_pct: '0.00',
         require_positive_net_income: true,
         reporting_lag_days: 120,
+        max_pe: '60.00',
+        max_pb: '15.00',
+        require_positive_operating_cash_flow: true,
+        require_positive_free_cash_flow: false,
+        min_operating_cash_flow_growth_count: 1,
+        min_operating_cash_flow_yoy_growth_pct: '0.00',
       }];
   }
 
@@ -1719,18 +1873,22 @@
   }
 
   function getOptimizationParameterSpace() {
+    const useRps = document.getElementById('optimizationUseRps').checked;
+    const useCupHandle = document.getElementById('optimizationUseCupHandle').checked;
     return {
-      rps_threshold: parseNumberList('optimizationRpsThresholds', ['90'], true),
-      selected_rps_windows: parseWindowSets(),
-      min_rps_windows_passing: [readInt('rpsMinPassing', 2)],
-      cup_handle_params: getOptimizationCupHandleParamSets(),
+      use_rps: [useRps],
+      rps_threshold: useRps ? parseNumberList('optimizationRpsThresholds', ['90'], true) : [0],
+      selected_rps_windows: useRps ? parseWindowSets() : [[50, 120, 250]],
+      min_rps_windows_passing: useRps ? [readInt('rpsMinPassing', 2)] : [1],
+      use_cup_handle: [useCupHandle],
+      cup_handle_params: useCupHandle ? getOptimizationCupHandleParamSets() : [{}],
       fundamental_growth_params: getOptimizationFundamentalModes(),
       holding_days: parseOptionalNumberList('optimizationHoldingDays', true),
       stop_loss_pct: parseNumberList('optimizationStopLosses', ['-0.08'], false).map((value) =>
         value.toFixed(4)
       ),
       take_profit_pct: [null],
-      rps_exit_threshold: parseOptionalNumberList('optimizationRpsExits', true),
+      rps_exit_threshold: useRps ? parseOptionalNumberList('optimizationRpsExits', true) : [null],
       portfolio_cap: [readInt('optimizationPortfolioCap', 10)],
       position_weight_pct: [readFloat('optimizationPositionWeight', 0.10).toFixed(4)],
       allow_reentry_while_open: [false],
@@ -1752,9 +1910,11 @@
 
   function countOptimizationCombinations(parameterSpace) {
     const axes = [
+      parameterSpace.use_rps,
       parameterSpace.rps_threshold,
       parameterSpace.selected_rps_windows,
       parameterSpace.min_rps_windows_passing,
+      parameterSpace.use_cup_handle,
       parameterSpace.cup_handle_params,
       parameterSpace.fundamental_growth_params,
       parameterSpace.holding_days,
@@ -2107,18 +2267,43 @@
     const cup = parameters.cup_handle_params || {};
     const fundamentals = parameters.fundamental_growth_params || {};
     const parts = [];
-    if (cup.min_cup_depth_pct !== undefined || cup.max_cup_depth_pct !== undefined) {
+    parts.push(parameters.use_rps === false ? 'RPS关闭' : 'RPS启用');
+    if (parameters.use_cup_handle === false) {
+      parts.push('K线关闭');
+    } else if (cup.min_cup_depth_pct !== undefined || cup.max_cup_depth_pct !== undefined) {
       parts.push(`杯深 ${cup.min_cup_depth_pct ?? '—'}-${cup.max_cup_depth_pct ?? '—'}%`);
+      if (cup.min_handle_pullback_pct !== undefined || cup.max_handle_pullback_pct !== undefined) {
+        parts.push(`把手 ${cup.min_handle_pullback_pct ?? '—'}-${cup.max_handle_pullback_pct ?? '—'}%`);
+      }
+      parts.push(cup.require_breakout_volume ? '要求放量' : '不要求放量');
+      parts.push(cup.require_prior_uptrend ? '要求前涨' : '不要求前涨');
     }
-    if (cup.min_handle_pullback_pct !== undefined || cup.max_handle_pullback_pct !== undefined) {
-      parts.push(`把手 ${cup.min_handle_pullback_pct ?? '—'}-${cup.max_handle_pullback_pct ?? '—'}%`);
+    if (fundamentals.enabled === false) {
+      parts.push('财务关闭');
+    } else {
+      parts.push(
+        `财务 ${fundamentals.min_years ?? 3}年/${fundamentals.min_growth_count ?? fundamentals.effective_min_growth_count ?? 2}次增长`
+      );
+      parts.push(fundamentals.require_positive_net_income === false ? '可非正利润' : '正利润');
+      if (fundamentals.max_pe !== null && fundamentals.max_pe !== undefined) {
+        parts.push(`PE≤${fundamentals.max_pe}`);
+      }
+      if (fundamentals.max_pb !== null && fundamentals.max_pb !== undefined) {
+        parts.push(`PB≤${fundamentals.max_pb}`);
+      }
+      if (fundamentals.require_positive_operating_cash_flow) {
+        parts.push('经营现金流为正');
+      }
+      if (fundamentals.require_positive_free_cash_flow) {
+        parts.push('自由现金流为正');
+      }
+      if (
+        fundamentals.min_operating_cash_flow_growth_count !== null &&
+        fundamentals.min_operating_cash_flow_growth_count !== undefined
+      ) {
+        parts.push(`经营现金流增长 ${fundamentals.min_operating_cash_flow_growth_count}次`);
+      }
     }
-    parts.push(cup.require_breakout_volume ? '要求放量' : '不要求放量');
-    parts.push(cup.require_prior_uptrend ? '要求前涨' : '不要求前涨');
-    parts.push(
-      `财务 ${fundamentals.min_years ?? 3}年/${fundamentals.min_growth_count ?? fundamentals.effective_min_growth_count ?? 2}次增长`
-    );
-    parts.push(fundamentals.require_positive_net_income === false ? '可非正利润' : '正利润');
     return parts.join(' · ');
   }
 
@@ -2270,7 +2455,9 @@
     const windows = Array.isArray(parameters.selected_rps_windows)
       ? parameters.selected_rps_windows.join('+')
       : '—';
-    return `RPS ${parameters.rps_threshold || '—'} · ${windows}`;
+    const rpsText = parameters.use_rps === false ? 'RPS关闭' : `RPS ${parameters.rps_threshold || '—'}`;
+    const cupText = parameters.use_cup_handle === false ? 'K线关闭' : 'K线启用';
+    return `${rpsText} · ${windows} · ${cupText}`;
   }
 
   function formatYearlyReturns(yearlyReturns) {
@@ -2518,6 +2705,8 @@
 
   function applyStrategyParameters(parameters) {
     if (!parameters) return;
+    setCheckboxValue('useRps', parameters.use_rps !== false);
+    setCheckboxValue('useCupHandle', parameters.use_cup_handle !== false);
     setInputValue('rpsThreshold', parameters.rps_threshold);
     setInputValue('rpsMinPassing', parameters.min_rps_windows_passing);
     if (Array.isArray(parameters.selected_rps_windows)) {
@@ -2594,7 +2783,13 @@
     setInputValue('fundamentalGrowthCount', fundamentals.min_growth_count);
     setInputValue('fundamentalMinYoyPct', fundamentals.min_yoy_growth_pct);
     setInputValue('fundamentalLagDays', fundamentals.reporting_lag_days);
+    setInputValue('fundamentalMaxPe', fundamentals.max_pe);
+    setInputValue('fundamentalMaxPb', fundamentals.max_pb);
+    setInputValue('fundamentalOcfGrowthCount', fundamentals.min_operating_cash_flow_growth_count);
+    setInputValue('fundamentalOcfMinYoyPct', fundamentals.min_operating_cash_flow_yoy_growth_pct);
     setCheckboxValue('fundamentalPositiveOnly', fundamentals.require_positive_net_income);
+    setCheckboxValue('fundamentalPositiveOcf', fundamentals.require_positive_operating_cash_flow);
+    setCheckboxValue('fundamentalPositiveFcf', fundamentals.require_positive_free_cash_flow);
 
     document.getElementById('backtestHoldingDays').value = parameters.holding_days ?? '';
     setInputValue('backtestStopLoss', parameters.stop_loss_pct);
@@ -2615,11 +2810,20 @@
     setInputValue('optimizationPositionWeight', parameters.position_weight_pct);
     setInputValue('optimizationEntryDelays', parameters.entry_delay_days);
     setInputValue('optimizationEntryWindow', parameters.entry_deferral_window_days);
+    setCheckboxValue('optimizationUseRps', parameters.use_rps !== false);
+    setCheckboxValue('optimizationUseCupHandle', parameters.use_cup_handle !== false);
+    setCheckboxValue('optimizationUseFundamental', true);
     setInputValue('optimizationFundamentalYears', fundamentals.min_years);
     setInputValue('optimizationFundamentalGrowthCounts', fundamentals.min_growth_count || fundamentals.effective_min_growth_count);
     setInputValue('optimizationFundamentalMinYoyPcts', fundamentals.min_yoy_growth_pct);
     setInputValue('optimizationFundamentalPositiveModes', String(fundamentals.require_positive_net_income !== false));
     setInputValue('optimizationFundamentalLagDays', fundamentals.reporting_lag_days);
+    setInputValue('optimizationFundamentalMaxPe', fundamentals.max_pe);
+    setInputValue('optimizationFundamentalMaxPb', fundamentals.max_pb);
+    setInputValue('optimizationFundamentalPositiveOcfModes', String(Boolean(fundamentals.require_positive_operating_cash_flow)));
+    setInputValue('optimizationFundamentalPositiveFcfModes', String(Boolean(fundamentals.require_positive_free_cash_flow)));
+    setInputValue('optimizationFundamentalOcfGrowthCounts', fundamentals.min_operating_cash_flow_growth_count);
+    setInputValue('optimizationFundamentalOcfMinYoyPcts', fundamentals.min_operating_cash_flow_yoy_growth_pct);
     updateOptimizationPreview();
   }
 
@@ -2876,11 +3080,20 @@
     'optimizationSearchMode',
     'optimizationRandomSeed',
     'optimizationObjective',
+    'optimizationUseFundamental',
+    'optimizationUseRps',
+    'optimizationUseCupHandle',
     'optimizationFundamentalYears',
     'optimizationFundamentalGrowthCounts',
     'optimizationFundamentalMinYoyPcts',
     'optimizationFundamentalPositiveModes',
     'optimizationFundamentalLagDays',
+    'optimizationFundamentalMaxPe',
+    'optimizationFundamentalMaxPb',
+    'optimizationFundamentalPositiveOcfModes',
+    'optimizationFundamentalPositiveFcfModes',
+    'optimizationFundamentalOcfGrowthCounts',
+    'optimizationFundamentalOcfMinYoyPcts',
     'optimizationCupMinDepths',
     'optimizationCupMaxDepths',
     'optimizationHandleMinPullbacks',

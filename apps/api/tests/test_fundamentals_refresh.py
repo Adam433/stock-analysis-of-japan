@@ -67,6 +67,11 @@ class FundamentalsRefreshTests(unittest.TestCase):
                 fiscal_year_end_date=date(2019 + index, 3, 31),
                 fiscal_year_label=f"FY{2019 + index}",
                 net_income=Decimal("1000000") + Decimal(index),
+                operating_cash_flow=Decimal("2000000") + Decimal(index),
+                free_cash_flow=Decimal("1500000") + Decimal(index),
+                diluted_eps=Decimal("2.5") + Decimal(index) / Decimal("10"),
+                stockholders_equity=Decimal("5000000") + Decimal(index),
+                weighted_average_diluted_shares=Decimal("1000000") + Decimal(index),
                 pe=Decimal("10.1") + Decimal(index),
                 pb=Decimal("1.11") + Decimal(index) / Decimal("10"),
                 source="stub",
@@ -92,6 +97,11 @@ class FundamentalsRefreshTests(unittest.TestCase):
         self.assertEqual(len(rows), 5)
         self.assertEqual(rows[0].fiscal_year_label, "FY2020")
         self.assertEqual(rows[-1].fiscal_year_label, "FY2024")
+        self.assertEqual(rows[-1].operating_cash_flow, Decimal("2000005"))
+        self.assertEqual(rows[-1].free_cash_flow, Decimal("1500005"))
+        self.assertEqual(rows[-1].diluted_eps, Decimal("3.000000"))
+        self.assertEqual(rows[-1].stockholders_equity, Decimal("5000005"))
+        self.assertEqual(rows[-1].weighted_average_diluted_shares, Decimal("1000005"))
 
     def test_refresh_instrument_fundamentals_keeps_existing_status_when_provider_fails(self) -> None:
         instrument_id = self._seed_instrument()

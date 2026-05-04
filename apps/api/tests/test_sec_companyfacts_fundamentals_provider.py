@@ -64,7 +64,77 @@ class SecCompanyFactsFundamentalsProviderTests(unittest.TestCase):
                                 },
                             ]
                         }
-                    }
+                    },
+                    "NetCashProvidedByUsedInOperatingActivities": {
+                        "units": {
+                            "USD": [
+                                {
+                                    "form": "10-K",
+                                    "fp": "FY",
+                                    "end": "2024-09-28",
+                                    "filed": "2024-11-04",
+                                    "fy": 2024,
+                                    "val": 118254000000,
+                                }
+                            ]
+                        }
+                    },
+                    "PaymentsToAcquirePropertyPlantAndEquipment": {
+                        "units": {
+                            "USD": [
+                                {
+                                    "form": "10-K",
+                                    "fp": "FY",
+                                    "end": "2024-09-28",
+                                    "filed": "2024-11-04",
+                                    "fy": 2024,
+                                    "val": 9447000000,
+                                }
+                            ]
+                        }
+                    },
+                    "EarningsPerShareDiluted": {
+                        "units": {
+                            "USD/shares": [
+                                {
+                                    "form": "10-K",
+                                    "fp": "FY",
+                                    "end": "2024-09-28",
+                                    "filed": "2024-11-04",
+                                    "fy": 2024,
+                                    "val": 6.08,
+                                }
+                            ]
+                        }
+                    },
+                    "StockholdersEquity": {
+                        "units": {
+                            "USD": [
+                                {
+                                    "form": "10-K",
+                                    "fp": "FY",
+                                    "end": "2024-09-28",
+                                    "filed": "2024-11-04",
+                                    "fy": 2024,
+                                    "val": 56950000000,
+                                }
+                            ]
+                        }
+                    },
+                    "WeightedAverageNumberOfDilutedSharesOutstanding": {
+                        "units": {
+                            "shares": [
+                                {
+                                    "form": "10-K",
+                                    "fp": "FY",
+                                    "end": "2024-09-28",
+                                    "filed": "2024-11-04",
+                                    "fy": 2024,
+                                    "val": 15408095000,
+                                }
+                            ]
+                        }
+                    },
                 }
             }
         }
@@ -75,10 +145,15 @@ class SecCompanyFactsFundamentalsProviderTests(unittest.TestCase):
         self.assertEqual(rows[0].fiscal_year_label, "FY2024")
         self.assertEqual(rows[0].fiscal_year_end_date, date(2024, 9, 28))
         self.assertEqual(rows[0].net_income, Decimal("93740000000"))
+        self.assertEqual(rows[0].operating_cash_flow, Decimal("118254000000"))
+        self.assertEqual(rows[0].free_cash_flow, Decimal("108807000000"))
+        self.assertEqual(rows[0].diluted_eps, Decimal("6.08"))
+        self.assertEqual(rows[0].stockholders_equity, Decimal("56950000000"))
+        self.assertEqual(rows[0].weighted_average_diluted_shares, Decimal("15408095000"))
         self.assertEqual(rows[0].source_as_of_date, date(2024, 11, 4))
         self.assertEqual(rows[0].data_status, "partial")
 
-    def test_parse_companyfacts_labels_restated_comparative_rows_by_period_end(self) -> None:
+    def test_parse_companyfacts_prefers_primary_fiscal_year_over_later_comparative_rows(self) -> None:
         provider = SecCompanyFactsFundamentalsProvider()
         payload = {
             "facts": {
@@ -114,8 +189,8 @@ class SecCompanyFactsFundamentalsProviderTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].fiscal_year_label, "FY2023")
         self.assertEqual(rows[0].fiscal_year_end_date, date(2023, 10, 31))
-        self.assertEqual(rows[0].net_income, Decimal("1241000000"))
-        self.assertEqual(rows[0].source_as_of_date, date(2025, 12, 22))
+        self.assertEqual(rows[0].net_income, Decimal("1240000000"))
+        self.assertEqual(rows[0].source_as_of_date, date(2023, 12, 20))
 
     def test_parse_companyfacts_supports_ifrs_annual_reports_and_non_usd_currency(self) -> None:
         provider = SecCompanyFactsFundamentalsProvider()

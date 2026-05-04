@@ -30,6 +30,7 @@ from stockanalyse_api.services.optimization_backtest import (
     _attach_average_annualized_return,
     _extract_metrics,
     _parallel_parameter_groups,
+    _score_metric_pair,
     _score_metrics,
     build_optimization_result_detail,
     build_parameter_sets,
@@ -157,8 +158,13 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(fundamentals["min_years"], 3)
         self.assertEqual(fundamentals["min_growth_count"], 2)
         self.assertTrue(fundamentals["require_positive_net_income"])
+        self.assertEqual(fundamentals["max_pe"], "60")
+        self.assertEqual(fundamentals["max_pb"], "15")
+        self.assertTrue(fundamentals["require_positive_operating_cash_flow"])
+        self.assertFalse(fundamentals["require_positive_free_cash_flow"])
+        self.assertEqual(fundamentals["min_operating_cash_flow_growth_count"], 1)
 
-    def test_build_parameter_sets_forces_fundamentals_when_disabled_payload(self) -> None:
+    def test_build_parameter_sets_forces_fundamentals_when_payload_disables_it(self) -> None:
         parameter_sets = build_parameter_sets(
             {
                 "rps_threshold": [90],
@@ -183,6 +189,70 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(fundamentals["min_yoy_growth_pct"], "5")
         self.assertFalse(fundamentals["require_positive_net_income"])
         self.assertEqual(fundamentals["reporting_lag_days"], 90)
+
+    def test_build_parameter_sets_can_disable_rps_for_attribution(self) -> None:
+        parameter_sets = build_parameter_sets(
+            {
+                "use_rps": [False],
+                "rps_threshold": [80, 90],
+                "selected_rps_windows": [[50, 120], [50, 120, 250]],
+                "rps_exit_threshold": [80],
+            }
+        )
+
+        self.assertEqual(len(parameter_sets), 1)
+        self.assertFalse(parameter_sets[0]["use_rps"])
+        self.assertEqual(parameter_sets[0]["rps_threshold"], 0)
+        self.assertEqual(parameter_sets[0]["selected_rps_windows"], [50, 120, 250])
+        self.assertEqual(parameter_sets[0]["min_rps_windows_passing"], 1)
+        self.assertIsNone(parameter_sets[0]["rps_exit_threshold"])
+
+    def test_build_parameter_sets_can_disable_cup_handle_for_attribution(self) -> None:
+        parameter_sets = build_parameter_sets(
+            {
+                "use_cup_handle": [False],
+                "cup_handle_params": [
+                    {"min_cup_depth_pct": 5},
+                    {"min_cup_depth_pct": 12},
+                ],
+            }
+        )
+
+        self.assertEqual(len(parameter_sets), 1)
+        self.assertFalse(parameter_sets[0]["use_cup_handle"])
+        self.assertEqual(
+            parameter_sets[0]["cup_handle_params"],
+            DEFAULT_CUP_HANDLE_PARAMS.to_dict(),
+        )
+
+    def test_build_parameter_sets_preserves_optional_valuation_filters(self) -> None:
+        parameter_sets = build_parameter_sets(
+            {
+                "fundamental_growth_params": [
+                    {
+                        "enabled": True,
+                        "min_years": 3,
+                        "min_growth_count": 2,
+                        "min_yoy_growth_pct": "10",
+                        "max_pe": "30",
+                        "max_pb": "8",
+                        "require_positive_operating_cash_flow": True,
+                        "require_positive_free_cash_flow": True,
+                        "min_operating_cash_flow_growth_count": 2,
+                        "min_operating_cash_flow_yoy_growth_pct": "5",
+                    }
+                ],
+            }
+        )
+
+        fundamentals = parameter_sets[0]["fundamental_growth_params"]
+
+        self.assertEqual(fundamentals["max_pe"], "30")
+        self.assertEqual(fundamentals["max_pb"], "8")
+        self.assertTrue(fundamentals["require_positive_operating_cash_flow"])
+        self.assertTrue(fundamentals["require_positive_free_cash_flow"])
+        self.assertEqual(fundamentals["min_operating_cash_flow_growth_count"], 2)
+        self.assertEqual(fundamentals["min_operating_cash_flow_yoy_growth_pct"], "5")
 
     def test_build_parameter_sets_supports_seeded_random_sampling(self) -> None:
         parameter_space = {
@@ -432,6 +502,33 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(len(groups), 1)
         self.assertEqual(len(groups[0]), 2)
 
+    def test_parallel_parameter_groups_split_small_runs_to_fill_workers(self) -> None:
+        base_space = {
+            "rps_threshold": [85],
+            "selected_rps_windows": [[50, 120], [50, 120, 250]],
+            "fundamental_growth_params": [
+                {"enabled": True, "min_years": 3, "min_growth_count": 1, "min_yoy_growth_pct": "0"},
+                {"enabled": True, "min_years": 3, "min_growth_count": 1, "min_yoy_growth_pct": "5"},
+                {"enabled": True, "min_years": 3, "min_growth_count": 1, "min_yoy_growth_pct": "10"},
+                {"enabled": True, "min_years": 3, "min_growth_count": 1, "min_yoy_growth_pct": "20"},
+                {"enabled": True, "min_years": 3, "min_growth_count": 2, "min_yoy_growth_pct": "0"},
+                {"enabled": True, "min_years": 3, "min_growth_count": 2, "min_yoy_growth_pct": "5"},
+                {"enabled": True, "min_years": 3, "min_growth_count": 2, "min_yoy_growth_pct": "10"},
+                {"enabled": True, "min_years": 3, "min_growth_count": 2, "min_yoy_growth_pct": "20"},
+            ],
+        }
+        parameter_sets = build_parameter_sets(base_space)
+
+        groups = _parallel_parameter_groups(
+            parameter_sets,
+            group_size=8,
+            target_group_count=6,
+        )
+
+        self.assertEqual(len(parameter_sets), 16)
+        self.assertEqual(len(groups), 6)
+        self.assertLessEqual(max(len(group) for group in groups), 3)
+
     def test_execute_optimization_run_isolates_failed_parameter_sets(self) -> None:
         def fake_backtest(*args, **kwargs):
             if kwargs["rps_threshold"] == 85:
@@ -666,6 +763,41 @@ class OptimizationBacktestTests(unittest.TestCase):
             Decimal("0.200000"),
         )
 
+    def test_robust_annualized_return_penalizes_unstable_cross_period_results(self) -> None:
+        stable_train = {
+            "annualized_return": "0.180000",
+            "max_drawdown": "-0.120000",
+            "completed_trades": 120,
+        }
+        stable_validation = {
+            "annualized_return": "0.160000",
+            "max_drawdown": "-0.110000",
+            "completed_trades": 110,
+        }
+        unstable_train = {
+            "annualized_return": "-0.020000",
+            "max_drawdown": "-0.180000",
+            "completed_trades": 120,
+        }
+        unstable_validation = {
+            "annualized_return": "0.650000",
+            "max_drawdown": "-0.150000",
+            "completed_trades": 110,
+        }
+
+        self.assertGreater(
+            _score_metric_pair(
+                stable_train,
+                stable_validation,
+                objective="robust_annualized_return",
+            ),
+            _score_metric_pair(
+                unstable_train,
+                unstable_validation,
+                objective="robust_annualized_return",
+            ),
+        )
+
     def test_create_optimization_run_rejects_unsupported_objective(self) -> None:
         with self.session_factory() as session:
             with self.assertRaisesRegex(ValueError, "objective must be one of"):
@@ -721,6 +853,59 @@ class OptimizationBacktestTests(unittest.TestCase):
 
         self.assertEqual(screen_mock.call_count, 2)
         self.assertEqual(len(cache), 2)
+
+    def test_backtest_reuses_trade_cache_for_identical_selected_trade(self) -> None:
+        trade_cache: dict[tuple[object, ...], object] = {}
+        screen_payload = {
+            "hits": [
+                {
+                    "instrument_id": 1,
+                    "symbol": "AAPL",
+                    "rps_50": "95",
+                    "rps_120": "90",
+                    "rps_250": "88",
+                }
+            ],
+            "total_evaluated": 10,
+        }
+        rows = [
+            _market_row(date(2025, 1, 2), "100"),
+            _market_row(date(2025, 1, 3), "110"),
+        ]
+
+        with (
+            patch(
+                "stockanalyse_api.services.dashboard_strategy_backtest._load_trade_dates",
+                return_value=[date(2025, 1, 1)],
+            ),
+            patch(
+                "stockanalyse_api.services.dashboard_strategy_backtest.screen_universe",
+                return_value=screen_payload,
+            ),
+            patch(
+                "stockanalyse_api.services.dashboard_strategy_backtest._load_future_rows",
+                return_value=rows,
+            ) as future_rows_mock,
+        ):
+            for _ in range(2):
+                run_cup_handle_rps_backtest(
+                    None,
+                    start_date=date(2025, 1, 1),
+                    end_date=date(2025, 1, 31),
+                    rps_threshold=90,
+                    selected_rps_windows=[50, 120],
+                    min_rps_windows_passing=1,
+                    use_cup_handle=False,
+                    cup_handle_params=DEFAULT_CUP_HANDLE_PARAMS,
+                    market="us",
+                    holding_days=1,
+                    stop_loss_pct=Decimal("-0.50"),
+                    portfolio_cap=1,
+                    trade_cache=trade_cache,
+                )
+
+        self.assertEqual(future_rows_mock.call_count, 1)
+        self.assertEqual(len(trade_cache), 1)
 
     def test_simulate_trade_respects_entry_delay_days(self) -> None:
         rows = [

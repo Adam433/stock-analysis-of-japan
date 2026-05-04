@@ -7,7 +7,7 @@ from decimal import Decimal
 from math import ceil
 from pathlib import Path
 
-from sqlalchemy import distinct, func, select
+from sqlalchemy import case, distinct, func, literal, select
 
 from stockanalyse_api.config.settings import (
     get_local_csv_raw_dir,
@@ -20,6 +20,7 @@ from stockanalyse_api.services.market_data_adjustments import adjusted_ohlc
 from stockanalyse_api.services.market_data_adjustments import has_extreme_price_gap
 from stockanalyse_api.services.market_data_adjustments import is_complete_market_row
 from stockanalyse_api.services.cup_handle_materialization import (
+    filter_materialized_cup_handle_event_pool,
     load_materialized_cup_handle_event_pool,
     load_materialized_cup_handle_matches,
     select_latest_materialized_cup_handle_matches,
@@ -119,6 +120,12 @@ class FundamentalGrowthParams:
     min_yoy_growth_pct: Decimal = Decimal("0")
     require_positive_net_income: bool = True
     reporting_lag_days: int = 120
+    max_pe: Decimal | None = None
+    max_pb: Decimal | None = None
+    require_positive_operating_cash_flow: bool = False
+    require_positive_free_cash_flow: bool = False
+    min_operating_cash_flow_growth_count: int | None = None
+    min_operating_cash_flow_yoy_growth_pct: Decimal = Decimal("0")
 
     @property
     def effective_min_growth_count(self) -> int:
@@ -134,6 +141,22 @@ class FundamentalGrowthParams:
 
 
 DEFAULT_FUNDAMENTAL_GROWTH_PARAMS = FundamentalGrowthParams()
+
+
+@dataclass(frozen=True, slots=True)
+class _FundamentalAnnualSnapshot:
+    fiscal_year_end_date: date
+    fiscal_year_label: str
+    net_income: Decimal | None
+    net_income_currency: str = "USD"
+    source_as_of_date: date | None = None
+    operating_cash_flow: Decimal | None = None
+    free_cash_flow: Decimal | None = None
+    diluted_eps: Decimal | None = None
+    stockholders_equity: Decimal | None = None
+    weighted_average_diluted_shares: Decimal | None = None
+    pe: Decimal | None = None
+    pb: Decimal | None = None
 
 
 def normalize_market(value: str | None) -> str:
@@ -398,6 +421,200 @@ def _normalize_min_rps_windows_passing(value: int, selected_windows: list[int]) 
     return value
 
 
+def _screen_candidate_cache_key(
+    *,
+    market: str,
+    trade_date: date,
+    use_rps: bool,
+    rps_threshold: int,
+    selected_windows: list[int],
+    min_rps_windows_passing: int,
+) -> tuple[object, ...]:
+    return (
+        "screen_candidates",
+        market,
+        trade_date.isoformat(),
+        bool(use_rps),
+        int(rps_threshold),
+        tuple(selected_windows),
+        int(min_rps_windows_passing),
+    )
+
+
+def _rps_pass_expression(
+    *,
+    threshold: Decimal,
+    selected_windows: list[int],
+):
+    rps_pass_expression = literal(0)
+    for window in selected_windows:
+        rps_column = getattr(DerivedIndicatorDaily, f"rps_{window}")
+        rps_pass_expression = rps_pass_expression + case(
+            (rps_column >= threshold, 1),
+            else_=0,
+        )
+    return rps_pass_expression
+
+
+def _screen_candidate_payload(
+    *,
+    instrument_id: int,
+    symbol: str,
+    exchange: str,
+    name: str | None,
+    rps_50,
+    rps_120,
+    rps_250,
+    use_rps: bool,
+    threshold_decimal: Decimal,
+    selected_windows: list[int],
+    min_rps_windows_passing: int,
+) -> dict[str, object]:
+    rps_value_by_window = {
+        50: rps_50,
+        120: rps_120,
+        250: rps_250,
+    }
+
+    rps_pass_count = sum(
+        1
+        for window in selected_windows
+        if rps_value_by_window[window] is not None
+        and rps_value_by_window[window] >= threshold_decimal
+    )
+    rps_passed = rps_pass_count >= min_rps_windows_passing if use_rps else True
+
+    return {
+        "instrument_id": instrument_id,
+        "symbol": symbol,
+        "exchange": exchange,
+        "name": name,
+        "rps_50": rps_50,
+        "rps_120": rps_120,
+        "rps_250": rps_250,
+        "rps_passed": rps_passed,
+        "rps_pass_count": rps_pass_count,
+    }
+
+
+def preload_screen_candidate_cache(
+    session,
+    *,
+    market: str | None,
+    trade_dates: list[date],
+    use_rps: bool,
+    rps_threshold: int,
+    selected_rps_windows: list[int],
+    min_rps_windows_passing: int = 1,
+    candidate_cache: dict[tuple[object, ...], dict[str, object]] | None,
+) -> None:
+    if candidate_cache is None or not trade_dates:
+        return
+    resolved_market = normalize_market(market)
+    selected_windows = _normalize_rps_windows(selected_rps_windows)
+    resolved_min_rps_passing = _normalize_min_rps_windows_passing(
+        min_rps_windows_passing,
+        selected_windows,
+    )
+    if use_rps and not selected_windows:
+        return
+
+    missing_dates = [
+        trade_date
+        for trade_date in trade_dates
+        if _screen_candidate_cache_key(
+            market=resolved_market,
+            trade_date=trade_date,
+            use_rps=use_rps,
+            rps_threshold=rps_threshold,
+            selected_windows=selected_windows,
+            min_rps_windows_passing=resolved_min_rps_passing,
+        )
+        not in candidate_cache
+    ]
+    if not missing_dates:
+        return
+
+    exchanges = _market_exchanges(resolved_market)
+    start_date = min(missing_dates)
+    end_date = max(missing_dates)
+    base_filters = (
+        DerivedIndicatorDaily.trade_date >= start_date,
+        DerivedIndicatorDaily.trade_date <= end_date,
+        Instrument.exchange.in_(exchanges),
+    )
+    counts_by_date = {
+        row.trade_date: int(row.total_evaluated)
+        for row in session.execute(
+            select(
+                DerivedIndicatorDaily.trade_date,
+                func.count(DerivedIndicatorDaily.instrument_id).label("total_evaluated"),
+            )
+            .join(Instrument, Instrument.id == DerivedIndicatorDaily.instrument_id)
+            .where(*base_filters)
+            .group_by(DerivedIndicatorDaily.trade_date)
+        ).all()
+    }
+
+    query = (
+        select(
+            DerivedIndicatorDaily.trade_date,
+            DerivedIndicatorDaily.instrument_id,
+            DerivedIndicatorDaily.rps_50,
+            DerivedIndicatorDaily.rps_120,
+            DerivedIndicatorDaily.rps_250,
+            Instrument.symbol,
+            Instrument.exchange,
+            Instrument.name,
+        )
+        .join(Instrument, Instrument.id == DerivedIndicatorDaily.instrument_id)
+        .where(*base_filters)
+        .order_by(DerivedIndicatorDaily.trade_date.asc(), Instrument.symbol.asc())
+    )
+
+    threshold_decimal = Decimal(rps_threshold)
+    if use_rps:
+        query = query.where(
+            _rps_pass_expression(
+                threshold=threshold_decimal,
+                selected_windows=selected_windows,
+            )
+            >= resolved_min_rps_passing
+        )
+
+    candidates_by_date: dict[date, list[dict[str, object]]] = defaultdict(list)
+    for row in session.execute(query):
+        candidates_by_date[row.trade_date].append(
+            _screen_candidate_payload(
+                instrument_id=row.instrument_id,
+                symbol=row.symbol,
+                exchange=row.exchange,
+                name=row.name,
+                rps_50=row.rps_50,
+                rps_120=row.rps_120,
+                rps_250=row.rps_250,
+                use_rps=use_rps,
+                threshold_decimal=threshold_decimal,
+                selected_windows=selected_windows,
+                min_rps_windows_passing=resolved_min_rps_passing,
+            )
+        )
+
+    for trade_date in missing_dates:
+        cache_key = _screen_candidate_cache_key(
+            market=resolved_market,
+            trade_date=trade_date,
+            use_rps=use_rps,
+            rps_threshold=rps_threshold,
+            selected_windows=selected_windows,
+            min_rps_windows_passing=resolved_min_rps_passing,
+        )
+        candidate_cache[cache_key] = {
+            "total_evaluated": counts_by_date.get(trade_date, 0),
+            "candidates": candidates_by_date.get(trade_date, []),
+        }
+
+
 def _normalize_fundamental_growth_params(
     params: FundamentalGrowthParams | None = None,
 ) -> FundamentalGrowthParams:
@@ -412,6 +629,23 @@ def _normalize_fundamental_growth_params(
         raise ValueError("fundamental min_growth_count must be greater than or equal to 1.")
     if params.effective_min_growth_count > params.min_years - 1:
         raise ValueError("fundamental min_growth_count cannot exceed min_years - 1.")
+    if params.max_pe is not None and params.max_pe <= 0:
+        raise ValueError("fundamental max_pe must be greater than 0 when provided.")
+    if params.max_pb is not None and params.max_pb <= 0:
+        raise ValueError("fundamental max_pb must be greater than 0 when provided.")
+    if params.min_operating_cash_flow_yoy_growth_pct < Decimal("-100"):
+        raise ValueError(
+            "fundamental min_operating_cash_flow_yoy_growth_pct must be greater than or equal to -100."
+        )
+    if params.min_operating_cash_flow_growth_count is not None:
+        if params.min_operating_cash_flow_growth_count < 1:
+            raise ValueError(
+                "fundamental min_operating_cash_flow_growth_count must be greater than or equal to 1."
+            )
+        if params.min_operating_cash_flow_growth_count > params.min_years - 1:
+            raise ValueError(
+                "fundamental min_operating_cash_flow_growth_count cannot exceed min_years - 1."
+            )
     return params
 
 
@@ -451,7 +685,7 @@ def screen_universe(
     trade_date: date | None = None,
     market: str | None = None,
     candidate_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
-    fundamental_growth_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
+    fundamental_growth_cache: dict[tuple[object, ...], object] | None = None,
     cup_event_cache: dict[tuple[object, ...], dict[int, list[object]] | None] | None = None,
     cup_event_cache_start_date: date | None = None,
     cup_event_cache_end_date: date | None = None,
@@ -505,68 +739,65 @@ def screen_universe(
             "hits": [],
         }
 
-    candidate_cache_key = (
-        "screen_candidates",
-        resolved_market,
-        target_date.isoformat(),
-        bool(use_rps),
-        int(rps_threshold),
-        tuple(selected_windows),
-        int(resolved_min_rps_passing),
+    candidate_cache_key = _screen_candidate_cache_key(
+        market=resolved_market,
+        trade_date=target_date,
+        use_rps=use_rps,
+        rps_threshold=rps_threshold,
+        selected_windows=selected_windows,
+        min_rps_windows_passing=resolved_min_rps_passing,
     )
     cached_candidates = (
         candidate_cache.get(candidate_cache_key) if candidate_cache is not None else None
     )
     if cached_candidates is None:
-        rows = session.execute(
+        base_filters = (
+            DerivedIndicatorDaily.trade_date == target_date,
+            Instrument.exchange.in_(exchanges),
+        )
+        total_evaluated = session.execute(
+            select(func.count(DerivedIndicatorDaily.instrument_id))
+            .join(Instrument, Instrument.id == DerivedIndicatorDaily.instrument_id)
+            .where(*base_filters)
+        ).scalar_one()
+        query = (
             select(DerivedIndicatorDaily, Instrument)
             .join(Instrument, Instrument.id == DerivedIndicatorDaily.instrument_id)
-            .where(
-                DerivedIndicatorDaily.trade_date == target_date,
-                Instrument.exchange.in_(exchanges),
-            )
+            .where(*base_filters)
             .order_by(Instrument.symbol.asc())
-        ).all()
+        )
 
         threshold_decimal = Decimal(rps_threshold)
+        if use_rps:
+            query = query.where(
+                _rps_pass_expression(
+                    threshold=threshold_decimal,
+                    selected_windows=selected_windows,
+                )
+                >= resolved_min_rps_passing
+            )
+
+        rows = session.execute(query).all()
         candidates: list[dict[str, object]] = []
 
         for indicator_row, instrument in rows:
-            rps_value_by_window = {
-                50: indicator_row.rps_50,
-                120: indicator_row.rps_120,
-                250: indicator_row.rps_250,
-            }
-
-            rps_pass_count = sum(
-                1
-                for window in selected_windows
-                if rps_value_by_window[window] is not None
-                and rps_value_by_window[window] >= threshold_decimal
-            )
-            if use_rps:
-                rps_passed = rps_pass_count >= resolved_min_rps_passing
-            else:
-                rps_passed = True
-
-            if use_rps and not rps_passed:
-                continue
-
             candidates.append(
-                {
-                    "instrument_id": instrument.id,
-                    "symbol": instrument.symbol,
-                    "exchange": instrument.exchange,
-                    "name": instrument.name,
-                    "rps_50": indicator_row.rps_50,
-                    "rps_120": indicator_row.rps_120,
-                    "rps_250": indicator_row.rps_250,
-                    "rps_passed": rps_passed,
-                    "rps_pass_count": rps_pass_count,
-                }
+                _screen_candidate_payload(
+                    instrument_id=instrument.id,
+                    symbol=instrument.symbol,
+                    exchange=instrument.exchange,
+                    name=instrument.name,
+                    rps_50=indicator_row.rps_50,
+                    rps_120=indicator_row.rps_120,
+                    rps_250=indicator_row.rps_250,
+                    use_rps=use_rps,
+                    threshold_decimal=threshold_decimal,
+                    selected_windows=selected_windows,
+                    min_rps_windows_passing=resolved_min_rps_passing,
+                )
             )
         cached_candidates = {
-            "total_evaluated": len(rows),
+            "total_evaluated": total_evaluated,
             "candidates": candidates,
         }
         if candidate_cache is not None:
@@ -574,14 +805,14 @@ def screen_universe(
 
     total_evaluated = int(cached_candidates["total_evaluated"])
     candidates = list(cached_candidates["candidates"])  # type: ignore[arg-type]
+    candidate_instrument_ids = [
+        int(candidate["instrument_id"]) for candidate in candidates
+    ]
 
     cup_handle_source = "disabled"
     materialized_cup_events = None
     candles_by_instrument: dict[int, list[_PatternCandle]] = {}
     if use_cup_handle and candidates:
-        candidate_instrument_ids = [
-            int(candidate["instrument_id"]) for candidate in candidates
-        ]
         if (
             cup_event_cache is not None
             and cup_event_cache_start_date is not None
@@ -604,14 +835,39 @@ def screen_universe(
                     params=resolved_cup_params,
                 )
                 cup_event_cache[cup_event_cache_key] = cached_event_pool
+            filtered_event_pool = cached_event_pool
+            if cached_event_pool is not None:
+                filtered_cup_event_cache_key = (
+                    "filtered_materialized_cup_event_pool",
+                    resolved_market,
+                    cup_event_cache_start_date.isoformat(),
+                    cup_event_cache_end_date.isoformat(),
+                    int(resolved_cup_params.breakout_lookback_days),
+                    tuple(
+                        (key, str(value))
+                        for key, value in resolved_cup_params.to_dict().items()
+                    ),
+                )
+                cached_filtered_event_pool = cup_event_cache.get(
+                    filtered_cup_event_cache_key,
+                    ...,
+                )
+                if cached_filtered_event_pool is ...:
+                    cached_filtered_event_pool = filter_materialized_cup_handle_event_pool(
+                        cached_event_pool,  # type: ignore[arg-type]
+                        params=resolved_cup_params,
+                    )
+                    cup_event_cache[filtered_cup_event_cache_key] = cached_filtered_event_pool
+                filtered_event_pool = cached_filtered_event_pool
             materialized_cup_events = (
                 select_latest_materialized_cup_handle_matches(
-                    cached_event_pool,  # type: ignore[arg-type]
+                    filtered_event_pool,  # type: ignore[arg-type]
                     signal_date=target_date,
                     instrument_ids=candidate_instrument_ids,
                     params=resolved_cup_params,
+                    assume_params_matched=True,
                 )
-                if cached_event_pool is not None
+                if filtered_event_pool is not None
                 else None
             )
         else:
@@ -632,6 +888,33 @@ def screen_universe(
             )
         else:
             cup_handle_source = "materialized"
+
+    fundamental_rows_by_instrument: dict[int, list[_FundamentalAnnualSnapshot]] = {}
+    fundamental_market_price_by_instrument: dict[int, Decimal] = {}
+    if (
+        resolved_fundamental_params.enabled
+        and candidate_instrument_ids
+        and fundamental_growth_cache is not None
+    ):
+        fundamental_rows_by_instrument = _load_fundamental_rows_by_instrument(
+            session,
+            instrument_ids=candidate_instrument_ids,
+            cache=fundamental_growth_cache,
+        )
+    if (
+        resolved_fundamental_params.enabled
+        and candidate_instrument_ids
+        and (
+            resolved_fundamental_params.max_pe is not None
+            or resolved_fundamental_params.max_pb is not None
+        )
+    ):
+        fundamental_market_price_by_instrument = _load_market_close_by_instrument(
+            session,
+            instrument_ids=candidate_instrument_ids,
+            trade_date=target_date,
+            cache=fundamental_growth_cache,
+        )
 
     hits: list[ScreenHit] = []
     fundamental_status_counts: dict[str, int] = defaultdict(int)
@@ -664,19 +947,41 @@ def screen_universe(
             str(resolved_fundamental_params.min_yoy_growth_pct),
             bool(resolved_fundamental_params.require_positive_net_income),
             int(resolved_fundamental_params.reporting_lag_days),
+            str(resolved_fundamental_params.max_pe),
+            str(resolved_fundamental_params.max_pb),
+            bool(resolved_fundamental_params.require_positive_operating_cash_flow),
+            bool(resolved_fundamental_params.require_positive_free_cash_flow),
+            (
+                int(resolved_fundamental_params.min_operating_cash_flow_growth_count)
+                if resolved_fundamental_params.min_operating_cash_flow_growth_count is not None
+                else None
+            ),
+            str(resolved_fundamental_params.min_operating_cash_flow_yoy_growth_pct),
         )
-        fundamental_meta = (
+        cached_fundamental_meta = (
             fundamental_growth_cache.get(fundamental_cache_key)
             if fundamental_growth_cache is not None
             else None
         )
+        fundamental_meta = (
+            cached_fundamental_meta if isinstance(cached_fundamental_meta, dict) else None
+        )
         if fundamental_meta is None:
-            fundamental_meta = _evaluate_fundamental_growth(
-                session,
-                instrument_id=instrument_id,
-                signal_date=target_date,
-                params=resolved_fundamental_params,
-            )
+            if instrument_id in fundamental_rows_by_instrument:
+                fundamental_meta = _evaluate_fundamental_growth_from_rows(
+                    fundamental_rows_by_instrument[instrument_id],
+                    signal_date=target_date,
+                    params=resolved_fundamental_params,
+                    market_price=fundamental_market_price_by_instrument.get(instrument_id),
+                )
+            else:
+                fundamental_meta = _evaluate_fundamental_growth(
+                    session,
+                    instrument_id=instrument_id,
+                    signal_date=target_date,
+                    params=resolved_fundamental_params,
+                    market_price=fundamental_market_price_by_instrument.get(instrument_id),
+                )
             if fundamental_growth_cache is not None:
                 fundamental_growth_cache[fundamental_cache_key] = fundamental_meta
         fundamental_status_counts[str(fundamental_meta["status"])] += 1
@@ -952,12 +1257,132 @@ def _load_candles_by_instrument(
     return dict(candles_by_instrument)
 
 
-def _evaluate_fundamental_growth(
+def _load_fundamental_rows_by_instrument(
     session,
     *,
-    instrument_id: int,
+    instrument_ids: list[int],
+    cache: dict[tuple[object, ...], object],
+    chunk_size: int = 500,
+) -> dict[int, list[_FundamentalAnnualSnapshot]]:
+    rows_by_instrument: dict[int, list[_FundamentalAnnualSnapshot]] = {}
+    missing_ids: list[int] = []
+    for instrument_id in dict.fromkeys(instrument_ids):
+        cache_key = ("fundamental_growth_rows", instrument_id)
+        cached_rows = cache.get(cache_key)
+        if isinstance(cached_rows, list):
+            rows_by_instrument[instrument_id] = cached_rows
+        else:
+            missing_ids.append(instrument_id)
+
+    for offset in range(0, len(missing_ids), chunk_size):
+        chunk = missing_ids[offset : offset + chunk_size]
+        loaded: dict[int, list[_FundamentalAnnualSnapshot]] = {
+            instrument_id: [] for instrument_id in chunk
+        }
+        rows = session.execute(
+            select(
+                FundamentalsAnnual.instrument_id,
+                FundamentalsAnnual.fiscal_year_end_date,
+                FundamentalsAnnual.fiscal_year_label,
+                FundamentalsAnnual.net_income,
+                FundamentalsAnnual.net_income_currency,
+                FundamentalsAnnual.source_as_of_date,
+                FundamentalsAnnual.operating_cash_flow,
+                FundamentalsAnnual.free_cash_flow,
+                FundamentalsAnnual.diluted_eps,
+                FundamentalsAnnual.stockholders_equity,
+                FundamentalsAnnual.weighted_average_diluted_shares,
+                FundamentalsAnnual.pe,
+                FundamentalsAnnual.pb,
+            )
+            .where(
+                FundamentalsAnnual.instrument_id.in_(chunk),
+                FundamentalsAnnual.net_income.is_not(None),
+                FundamentalsAnnual.data_status != "missing",
+            )
+            .order_by(
+                FundamentalsAnnual.instrument_id.asc(),
+                FundamentalsAnnual.fiscal_year_end_date.asc(),
+            )
+        ).all()
+        for row in rows:
+            loaded[row.instrument_id].append(
+                _FundamentalAnnualSnapshot(
+                    fiscal_year_end_date=row.fiscal_year_end_date,
+                    fiscal_year_label=row.fiscal_year_label,
+                    net_income=row.net_income,
+                    net_income_currency=row.net_income_currency,
+                    source_as_of_date=row.source_as_of_date,
+                    operating_cash_flow=row.operating_cash_flow,
+                    free_cash_flow=row.free_cash_flow,
+                    diluted_eps=row.diluted_eps,
+                    stockholders_equity=row.stockholders_equity,
+                    weighted_average_diluted_shares=row.weighted_average_diluted_shares,
+                    pe=row.pe,
+                    pb=row.pb,
+                )
+            )
+        for instrument_id, snapshots in loaded.items():
+            cache[("fundamental_growth_rows", instrument_id)] = snapshots
+            rows_by_instrument[instrument_id] = snapshots
+
+    return rows_by_instrument
+
+
+def _load_market_close_by_instrument(
+    session,
+    *,
+    instrument_ids: list[int],
+    trade_date: date,
+    cache: dict[tuple[object, ...], object] | None = None,
+    chunk_size: int = 500,
+) -> dict[int, Decimal]:
+    prices_by_instrument: dict[int, Decimal] = {}
+    missing_ids: list[int] = []
+    for instrument_id in dict.fromkeys(instrument_ids):
+        cache_key = ("fundamental_market_close", instrument_id, trade_date.isoformat())
+        cached_price = cache.get(cache_key) if cache is not None else None
+        if isinstance(cached_price, Decimal):
+            prices_by_instrument[instrument_id] = cached_price
+        elif cached_price is False:
+            continue
+        else:
+            missing_ids.append(instrument_id)
+
+    for offset in range(0, len(missing_ids), chunk_size):
+        chunk = missing_ids[offset : offset + chunk_size]
+        loaded = session.execute(
+            select(
+                MarketDataDaily.instrument_id,
+                MarketDataDaily.close,
+                MarketDataDaily.adj_close,
+            )
+            .where(
+                MarketDataDaily.instrument_id.in_(chunk),
+                MarketDataDaily.trade_date == trade_date,
+            )
+        ).all()
+        loaded_by_id: dict[int, Decimal] = {}
+        for row in loaded:
+            price = row.close if row.close is not None else row.adj_close
+            if price is not None and price > 0:
+                loaded_by_id[row.instrument_id] = price
+                prices_by_instrument[row.instrument_id] = price
+        if cache is not None:
+            for instrument_id in chunk:
+                cache[("fundamental_market_close", instrument_id, trade_date.isoformat())] = (
+                    loaded_by_id.get(instrument_id) or False
+                )
+
+    return prices_by_instrument
+
+
+def _evaluate_fundamental_growth_from_rows(
+    rows: list[_FundamentalAnnualSnapshot],
+    *,
     signal_date: date,
     params: FundamentalGrowthParams,
+    market_price: Decimal | None = None,
 ) -> dict[str, object]:
     if not params.enabled:
         return {
@@ -969,20 +1394,27 @@ def _evaluate_fundamental_growth(
         }
 
     available_cutoff = signal_date - timedelta(days=params.reporting_lag_days)
-    rows = list(
-        session.execute(
-            select(FundamentalsAnnual)
-            .where(
-                FundamentalsAnnual.instrument_id == instrument_id,
-                FundamentalsAnnual.fiscal_year_end_date <= available_cutoff,
-                FundamentalsAnnual.net_income.is_not(None),
-                FundamentalsAnnual.data_status != "missing",
-            )
-            .order_by(FundamentalsAnnual.fiscal_year_end_date.desc())
-            .limit(params.min_years)
-        ).scalars()
+    available_rows = [
+        row
+        for row in rows
+        if row.fiscal_year_end_date <= available_cutoff
+        and (row.source_as_of_date is None or row.source_as_of_date <= signal_date)
+    ][-params.min_years :]
+    return _evaluate_fundamental_growth_from_available_rows(
+        available_rows,
+        signal_date=signal_date,
+        market_price=market_price,
+        params=params,
     )
-    rows.reverse()
+
+
+def _evaluate_fundamental_growth_from_available_rows(
+    rows: list[_FundamentalAnnualSnapshot],
+    *,
+    signal_date: date,
+    params: FundamentalGrowthParams,
+    market_price: Decimal | None = None,
+) -> dict[str, object]:
     if len(rows) < params.min_years:
         return {
             "passed": False,
@@ -1004,6 +1436,122 @@ def _evaluate_fundamental_growth(
             "latest_fiscal_year": rows[-1].fiscal_year_label,
         }
 
+    latest_row = rows[-1]
+    if params.require_positive_operating_cash_flow:
+        operating_cash_flow_values = [row.operating_cash_flow for row in rows]
+        if any(value is None for value in operating_cash_flow_values):
+            return {
+                "passed": False,
+                "status": "cash_flow_missing",
+                "available_years": len(rows),
+                "growth_count": None,
+                "latest_fiscal_year": latest_row.fiscal_year_label,
+            }
+        if any(value <= 0 for value in operating_cash_flow_values if value is not None):
+            return {
+                "passed": False,
+                "status": "cash_flow_not_positive",
+                "available_years": len(rows),
+                "growth_count": None,
+                "latest_fiscal_year": latest_row.fiscal_year_label,
+            }
+    if params.require_positive_free_cash_flow:
+        free_cash_flow_values = [row.free_cash_flow for row in rows]
+        if any(value is None for value in free_cash_flow_values):
+            return {
+                "passed": False,
+                "status": "cash_flow_missing",
+                "available_years": len(rows),
+                "growth_count": None,
+                "latest_fiscal_year": latest_row.fiscal_year_label,
+            }
+        if any(value <= 0 for value in free_cash_flow_values if value is not None):
+            return {
+                "passed": False,
+                "status": "cash_flow_not_positive",
+                "available_years": len(rows),
+                "growth_count": None,
+                "latest_fiscal_year": latest_row.fiscal_year_label,
+            }
+    if params.min_operating_cash_flow_growth_count is not None:
+        operating_cash_flow_values = [row.operating_cash_flow for row in rows]
+        if any(value is None for value in operating_cash_flow_values):
+            return {
+                "passed": False,
+                "status": "cash_flow_missing",
+                "available_years": len(rows),
+                "growth_count": None,
+                "latest_fiscal_year": latest_row.fiscal_year_label,
+            }
+        cash_flow_growth_multiplier = Decimal("1") + (
+            params.min_operating_cash_flow_yoy_growth_pct / Decimal("100")
+        )
+        cash_flow_growth_count = 0
+        for previous, current in zip(
+            operating_cash_flow_values,
+            operating_cash_flow_values[1:],
+        ):
+            if previous is None or current is None:
+                continue
+            if previous > 0:
+                passed_growth = current >= previous * cash_flow_growth_multiplier
+            else:
+                passed_growth = current > previous
+            if passed_growth:
+                cash_flow_growth_count += 1
+        if cash_flow_growth_count < params.min_operating_cash_flow_growth_count:
+            return {
+                "passed": False,
+                "status": "cash_flow_growth_failed",
+                "available_years": len(rows),
+                "growth_count": cash_flow_growth_count,
+                "latest_fiscal_year": latest_row.fiscal_year_label,
+            }
+    if params.max_pe is not None:
+        pe = _point_in_time_pe(
+            latest_row,
+            market_price=market_price,
+            signal_date=signal_date,
+        )
+        if pe is None:
+            return {
+                "passed": False,
+                "status": "valuation_missing",
+                "available_years": len(rows),
+                "growth_count": None,
+                "latest_fiscal_year": latest_row.fiscal_year_label,
+            }
+        if pe <= 0 or pe > params.max_pe:
+            return {
+                "passed": False,
+                "status": "valuation_failed",
+                "available_years": len(rows),
+                "growth_count": None,
+                "latest_fiscal_year": latest_row.fiscal_year_label,
+            }
+    if params.max_pb is not None:
+        pb = _point_in_time_pb(
+            latest_row,
+            market_price=market_price,
+            signal_date=signal_date,
+        )
+        if pb is None:
+            return {
+                "passed": False,
+                "status": "valuation_missing",
+                "available_years": len(rows),
+                "growth_count": None,
+                "latest_fiscal_year": latest_row.fiscal_year_label,
+            }
+        if pb <= 0 or pb > params.max_pb:
+            return {
+                "passed": False,
+                "status": "valuation_failed",
+                "available_years": len(rows),
+                "growth_count": None,
+                "latest_fiscal_year": latest_row.fiscal_year_label,
+            }
+
     growth_multiplier = Decimal("1") + (params.min_yoy_growth_pct / Decimal("100"))
     growth_count = 0
     for previous, current in zip(net_income_values, net_income_values[1:]):
@@ -1023,6 +1571,134 @@ def _evaluate_fundamental_growth(
         "growth_count": growth_count,
         "latest_fiscal_year": rows[-1].fiscal_year_label,
     }
+
+
+def _is_usd_financial_row(row: _FundamentalAnnualSnapshot) -> bool:
+    return (row.net_income_currency or "").upper() == "USD"
+
+
+def _current_valuation_is_available(
+    row: _FundamentalAnnualSnapshot,
+    *,
+    signal_date: date,
+) -> bool:
+    return row.source_as_of_date is not None and row.source_as_of_date <= signal_date
+
+
+def _point_in_time_pe(
+    row: _FundamentalAnnualSnapshot,
+    *,
+    market_price: Decimal | None,
+    signal_date: date,
+) -> Decimal | None:
+    if market_price is not None and market_price > 0 and _is_usd_financial_row(row):
+        if row.diluted_eps is not None:
+            return market_price / row.diluted_eps if row.diluted_eps > 0 else Decimal("-1")
+        if (
+            row.weighted_average_diluted_shares is not None
+            and row.weighted_average_diluted_shares > 0
+            and row.net_income is not None
+        ):
+            return (
+                (market_price * row.weighted_average_diluted_shares) / row.net_income
+                if row.net_income > 0
+                else Decimal("-1")
+            )
+    if row.pe is not None and _current_valuation_is_available(row, signal_date=signal_date):
+        return row.pe
+    return None
+
+
+def _point_in_time_pb(
+    row: _FundamentalAnnualSnapshot,
+    *,
+    market_price: Decimal | None,
+    signal_date: date,
+) -> Decimal | None:
+    if (
+        market_price is not None
+        and market_price > 0
+        and _is_usd_financial_row(row)
+        and row.weighted_average_diluted_shares is not None
+        and row.weighted_average_diluted_shares > 0
+        and row.stockholders_equity is not None
+    ):
+        return (
+            (market_price * row.weighted_average_diluted_shares) / row.stockholders_equity
+            if row.stockholders_equity > 0
+            else Decimal("-1")
+        )
+    if row.pb is not None and _current_valuation_is_available(row, signal_date=signal_date):
+        return row.pb
+    return None
+
+
+def _evaluate_fundamental_growth(
+    session,
+    *,
+    instrument_id: int,
+    signal_date: date,
+    params: FundamentalGrowthParams,
+    market_price: Decimal | None = None,
+) -> dict[str, object]:
+    if not params.enabled:
+        return {
+            "passed": True,
+            "status": "not_required",
+            "available_years": None,
+            "growth_count": None,
+            "latest_fiscal_year": None,
+        }
+
+    available_cutoff = signal_date - timedelta(days=params.reporting_lag_days)
+    rows = [
+        _FundamentalAnnualSnapshot(
+            fiscal_year_end_date=row.fiscal_year_end_date,
+            fiscal_year_label=row.fiscal_year_label,
+            net_income=row.net_income,
+            net_income_currency=row.net_income_currency,
+            source_as_of_date=row.source_as_of_date,
+            operating_cash_flow=row.operating_cash_flow,
+            free_cash_flow=row.free_cash_flow,
+            diluted_eps=row.diluted_eps,
+            stockholders_equity=row.stockholders_equity,
+            weighted_average_diluted_shares=row.weighted_average_diluted_shares,
+            pe=row.pe,
+            pb=row.pb,
+        )
+        for row in session.execute(
+            select(
+                FundamentalsAnnual.fiscal_year_end_date,
+                FundamentalsAnnual.fiscal_year_label,
+                FundamentalsAnnual.net_income,
+                FundamentalsAnnual.net_income_currency,
+                FundamentalsAnnual.source_as_of_date,
+                FundamentalsAnnual.operating_cash_flow,
+                FundamentalsAnnual.free_cash_flow,
+                FundamentalsAnnual.diluted_eps,
+                FundamentalsAnnual.stockholders_equity,
+                FundamentalsAnnual.weighted_average_diluted_shares,
+                FundamentalsAnnual.pe,
+                FundamentalsAnnual.pb,
+            )
+            .where(
+                FundamentalsAnnual.instrument_id == instrument_id,
+                FundamentalsAnnual.fiscal_year_end_date <= available_cutoff,
+                FundamentalsAnnual.source_as_of_date <= signal_date,
+                FundamentalsAnnual.net_income.is_not(None),
+                FundamentalsAnnual.data_status != "missing",
+            )
+            .order_by(FundamentalsAnnual.fiscal_year_end_date.desc())
+            .limit(params.min_years)
+        ).all()
+    ]
+    rows.reverse()
+    return _evaluate_fundamental_growth_from_available_rows(
+        rows,
+        signal_date=signal_date,
+        market_price=market_price,
+        params=params,
+    )
 
 
 def _detect_cup_handle_pattern(

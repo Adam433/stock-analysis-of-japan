@@ -20,6 +20,7 @@ from stockanalyse_api.services.dashboard import CupHandleParams
 from stockanalyse_api.services.dashboard import FundamentalGrowthParams
 from stockanalyse_api.services.dashboard import _market_exchanges
 from stockanalyse_api.services.dashboard import normalize_market
+from stockanalyse_api.services.dashboard import preload_screen_candidate_cache
 from stockanalyse_api.services.dashboard import screen_universe
 from stockanalyse_api.services.market_data_adjustments import adjusted_close
 from stockanalyse_api.services.market_data_adjustments import adjusted_ohlc
@@ -247,6 +248,7 @@ def _screen_cache_key(
     *,
     signal_date: date,
     market: str,
+    use_rps: bool,
     rps_threshold: int,
     selected_rps_windows: list[int],
     min_rps_windows_passing: int,
@@ -257,6 +259,7 @@ def _screen_cache_key(
     payload = {
         "signal_date": signal_date.isoformat(),
         "market": market,
+        "use_rps": use_rps,
         "rps_threshold": rps_threshold,
         "selected_rps_windows": selected_rps_windows,
         "min_rps_windows_passing": min_rps_windows_passing,
@@ -283,19 +286,38 @@ def _simulate_trade(
     rps_exit_threshold: int | None = None,
     entry_delay_days: int = 0,
     entry_deferral_window_days: int = 5,
+    future_rows_cache: dict[tuple[object, ...], list[MarketDataDaily]] | None = None,
+    future_indicator_cache: dict[tuple[object, ...], dict[date, DerivedIndicatorDaily]] | None = None,
 ) -> CupHandleRpsTrade | dict[str, object]:
     instrument_id = int(hit["instrument_id"])
     symbol = str(hit["symbol"])
-    rows = _load_future_rows(
-        session,
-        instrument_id=instrument_id,
-        signal_date=signal_date,
-        limit=(
-            MAX_TRADE_LOOKAHEAD_ROWS
-            if holding_days is None
-            else entry_delay_days + entry_deferral_window_days + holding_days + 40
-        ),
+    future_row_limit = (
+        MAX_TRADE_LOOKAHEAD_ROWS
+        if holding_days is None
+        else entry_delay_days + entry_deferral_window_days + holding_days + 40
     )
+    future_rows_cache_key = (
+        "future_rows",
+        instrument_id,
+        signal_date.isoformat(),
+        future_row_limit,
+    )
+    cached_rows = (
+        future_rows_cache.get(future_rows_cache_key)
+        if future_rows_cache is not None
+        else None
+    )
+    if cached_rows is None:
+        rows = _load_future_rows(
+            session,
+            instrument_id=instrument_id,
+            signal_date=signal_date,
+            limit=future_row_limit,
+        )
+        if future_rows_cache is not None:
+            future_rows_cache[future_rows_cache_key] = rows
+    else:
+        rows = cached_rows
     if len(rows) < entry_delay_days + entry_deferral_window_days:
         return {
             "signal_date": signal_date.isoformat(),
@@ -325,16 +347,30 @@ def _simulate_trade(
 
     entry_row = rows[entry_index]
     last_mark_price = entry_price
-    indicator_by_date = (
-        _load_future_indicator_map(
-            session,
-            instrument_id=instrument_id,
-            signal_date=signal_date,
-            limit=len(rows),
+    indicator_by_date: dict[date, DerivedIndicatorDaily] = {}
+    if rps_exit_threshold is not None:
+        future_indicator_cache_key = (
+            "future_indicator_map",
+            instrument_id,
+            signal_date.isoformat(),
+            len(rows),
         )
-        if rps_exit_threshold is not None
-        else {}
-    )
+        cached_indicator_map = (
+            future_indicator_cache.get(future_indicator_cache_key)
+            if future_indicator_cache is not None
+            else None
+        )
+        if cached_indicator_map is None:
+            indicator_by_date = _load_future_indicator_map(
+                session,
+                instrument_id=instrument_id,
+                signal_date=signal_date,
+                limit=len(rows),
+            )
+            if future_indicator_cache is not None:
+                future_indicator_cache[future_indicator_cache_key] = indicator_by_date
+        else:
+            indicator_by_date = cached_indicator_map
     trigger_index: int | None = None
     trigger_reason = "holding_period_elapsed"
     immediate_exit_row: MarketDataDaily | None = None
@@ -436,6 +472,99 @@ def _simulate_trade(
     )
 
 
+def _trade_cache_key(
+    *,
+    signal_date: date,
+    hit: dict[str, object],
+    selected_windows: list[int],
+    holding_days: int | None,
+    stop_loss_pct: Decimal,
+    take_profit_pct: Decimal | None,
+    rps_exit_threshold: int | None,
+    entry_delay_days: int,
+    entry_deferral_window_days: int,
+) -> tuple[object, ...]:
+    return (
+        "trade_simulation",
+        signal_date.isoformat(),
+        int(hit["instrument_id"]),
+        str(hit["symbol"]),
+        tuple(selected_windows),
+        str(hit.get("rps_50")),
+        str(hit.get("rps_120")),
+        str(hit.get("rps_250")),
+        holding_days,
+        str(stop_loss_pct),
+        str(take_profit_pct),
+        rps_exit_threshold,
+        entry_delay_days,
+        entry_deferral_window_days,
+    )
+
+
+def _simulate_trade_with_cache(
+    session,
+    *,
+    signal_date: date,
+    hit: dict[str, object],
+    selected_windows: list[int],
+    holding_days: int | None,
+    stop_loss_pct: Decimal,
+    take_profit_pct: Decimal | None = None,
+    rps_exit_threshold: int | None = None,
+    entry_delay_days: int = 0,
+    entry_deferral_window_days: int = 5,
+    trade_cache: dict[tuple[object, ...], CupHandleRpsTrade | dict[str, object]] | None = None,
+    future_rows_cache: dict[tuple[object, ...], list[MarketDataDaily]] | None = None,
+    future_indicator_cache: dict[tuple[object, ...], dict[date, DerivedIndicatorDaily]] | None = None,
+) -> CupHandleRpsTrade | dict[str, object]:
+    if trade_cache is None:
+        return _simulate_trade(
+            session,
+            signal_date=signal_date,
+            hit=hit,
+            selected_windows=selected_windows,
+            holding_days=holding_days,
+            stop_loss_pct=stop_loss_pct,
+            take_profit_pct=take_profit_pct,
+            rps_exit_threshold=rps_exit_threshold,
+            entry_delay_days=entry_delay_days,
+            entry_deferral_window_days=entry_deferral_window_days,
+            future_rows_cache=future_rows_cache,
+            future_indicator_cache=future_indicator_cache,
+        )
+    cache_key = _trade_cache_key(
+        signal_date=signal_date,
+        hit=hit,
+        selected_windows=selected_windows,
+        holding_days=holding_days,
+        stop_loss_pct=stop_loss_pct,
+        take_profit_pct=take_profit_pct,
+        rps_exit_threshold=rps_exit_threshold,
+        entry_delay_days=entry_delay_days,
+        entry_deferral_window_days=entry_deferral_window_days,
+    )
+    cached = trade_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    trade_or_exclusion = _simulate_trade(
+        session,
+        signal_date=signal_date,
+        hit=hit,
+        selected_windows=selected_windows,
+        holding_days=holding_days,
+        stop_loss_pct=stop_loss_pct,
+        take_profit_pct=take_profit_pct,
+        rps_exit_threshold=rps_exit_threshold,
+        entry_delay_days=entry_delay_days,
+        entry_deferral_window_days=entry_deferral_window_days,
+        future_rows_cache=future_rows_cache,
+        future_indicator_cache=future_indicator_cache,
+    )
+    trade_cache[cache_key] = trade_or_exclusion
+    return trade_or_exclusion
+
+
 def run_cup_handle_rps_backtest(
     session,
     *,
@@ -444,6 +573,7 @@ def run_cup_handle_rps_backtest(
     rps_threshold: int,
     selected_rps_windows: list[int],
     cup_handle_params: CupHandleParams,
+    use_rps: bool = True,
     min_rps_windows_passing: int = 1,
     use_cup_handle: bool = True,
     fundamental_growth_params: FundamentalGrowthParams | None = None,
@@ -460,8 +590,12 @@ def run_cup_handle_rps_backtest(
     max_trades_returned: int = 300,
     screen_cache: dict[str, dict[str, object]] | None = None,
     screen_candidate_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
-    fundamental_growth_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
+    fundamental_growth_cache: dict[tuple[object, ...], object] | None = None,
     cup_event_cache: dict[tuple[object, ...], dict[int, list[object]] | None] | None = None,
+    trade_cache: dict[tuple[object, ...], CupHandleRpsTrade | dict[str, object]] | None = None,
+    trade_dates_cache: dict[tuple[object, ...], list[date]] | None = None,
+    future_rows_cache: dict[tuple[object, ...], list[MarketDataDaily]] | None = None,
+    future_indicator_cache: dict[tuple[object, ...], dict[date, DerivedIndicatorDaily]] | None = None,
     should_cancel: Callable[[], bool] | None = None,
 ) -> CupHandleRpsBacktestResult:
     if start_date > end_date:
@@ -486,12 +620,39 @@ def run_cup_handle_rps_backtest(
         raise ValueError("max_trades_returned must be greater than or equal to 0.")
 
     resolved_market = normalize_market(market)
-    trade_dates = _load_trade_dates(
-        session,
-        start_date=start_date,
-        end_date=end_date,
-        market=resolved_market,
+    trade_dates_cache_key = (
+        "trade_dates",
+        resolved_market,
+        start_date.isoformat(),
+        end_date.isoformat(),
     )
+    cached_trade_dates = (
+        trade_dates_cache.get(trade_dates_cache_key)
+        if trade_dates_cache is not None
+        else None
+    )
+    if cached_trade_dates is None:
+        trade_dates = _load_trade_dates(
+            session,
+            start_date=start_date,
+            end_date=end_date,
+            market=resolved_market,
+        )
+        if trade_dates_cache is not None:
+            trade_dates_cache[trade_dates_cache_key] = trade_dates
+    else:
+        trade_dates = cached_trade_dates
+    if use_rps:
+        preload_screen_candidate_cache(
+            session,
+            market=resolved_market,
+            trade_dates=trade_dates,
+            use_rps=use_rps,
+            rps_threshold=rps_threshold,
+            selected_rps_windows=selected_rps_windows,
+            min_rps_windows_passing=min_rps_windows_passing,
+            candidate_cache=screen_candidate_cache,
+        )
     signal_days: list[CupHandleRpsSignalDay] = []
     completed_trades: list[CupHandleRpsTrade] = []
     excluded: list[dict[str, object]] = []
@@ -509,6 +670,7 @@ def run_cup_handle_rps_backtest(
         cache_key = _screen_cache_key(
             signal_date=signal_date,
             market=resolved_market,
+            use_rps=use_rps,
             rps_threshold=rps_threshold,
             selected_rps_windows=selected_rps_windows,
             min_rps_windows_passing=min_rps_windows_passing,
@@ -520,7 +682,7 @@ def run_cup_handle_rps_backtest(
         if screen_result is None:
             screen_result = screen_universe(
                 session,
-                use_rps=True,
+                use_rps=use_rps,
                 rps_threshold=rps_threshold,
                 selected_rps_windows=selected_rps_windows,
                 min_rps_windows_passing=min_rps_windows_passing,
@@ -541,12 +703,15 @@ def run_cup_handle_rps_backtest(
         total_candidates_evaluated += int(screen_result["total_evaluated"])
         qualifying_observations += len(hits)
 
-        hits.sort(
-            key=lambda hit: (
-                -(_hit_rps_score(hit, selected_rps_windows) or Decimal("-1")),
-                str(hit["symbol"]),
+        if use_rps:
+            hits.sort(
+                key=lambda hit: (
+                    -(_hit_rps_score(hit, selected_rps_windows) or Decimal("-1")),
+                    str(hit["symbol"]),
+                )
             )
-        )
+        else:
+            hits.sort(key=lambda hit: str(hit["symbol"]))
         available_slots = max(portfolio_cap - len(open_positions), 0)
         open_symbols = {symbol for symbol, _ in open_positions}
         selected_hits: list[dict[str, object]] = []
@@ -561,7 +726,7 @@ def run_cup_handle_rps_backtest(
         day_returns: list[Decimal] = []
         day_completed = 0
         for hit in selected_hits:
-            trade_or_exclusion = _simulate_trade(
+            trade_or_exclusion = _simulate_trade_with_cache(
                 session,
                 signal_date=signal_date,
                 hit=hit,
@@ -572,6 +737,9 @@ def run_cup_handle_rps_backtest(
                 rps_exit_threshold=rps_exit_threshold,
                 entry_delay_days=entry_delay_days,
                 entry_deferral_window_days=entry_deferral_window_days,
+                trade_cache=trade_cache,
+                future_rows_cache=future_rows_cache,
+                future_indicator_cache=future_indicator_cache,
             )
             if isinstance(trade_or_exclusion, CupHandleRpsTrade):
                 completed_trades.append(trade_or_exclusion)
@@ -646,6 +814,7 @@ def run_cup_handle_rps_backtest(
         excluded=excluded[:max_trades_returned],
         parameters={
             "rps_threshold": rps_threshold,
+            "use_rps": use_rps,
             "selected_rps_windows": selected_rps_windows,
             "min_rps_windows_passing": min_rps_windows_passing,
             "use_cup_handle": use_cup_handle,

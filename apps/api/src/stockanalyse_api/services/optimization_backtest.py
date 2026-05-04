@@ -37,7 +37,7 @@ from stockanalyse_api.services.dashboard_strategy_backtest import (
 
 DEFAULT_OPTIMIZATION_OBJECTIVE = "score"
 DEFAULT_MAX_PARAMETER_SETS = 1000
-DEFAULT_OPTIMIZATION_PARALLEL_GROUP_SIZE = 8
+DEFAULT_OPTIMIZATION_PARALLEL_GROUP_SIZE = 1
 DEFAULT_OPTIMIZATION_DETAIL_CACHE_TRADES = 300
 MAX_AUTO_OPTIMIZATION_WORKERS = 6
 DEFAULT_OPTIMIZATION_FUNDAMENTAL_GROWTH_PARAMS = FundamentalGrowthParams(
@@ -47,11 +47,18 @@ DEFAULT_OPTIMIZATION_FUNDAMENTAL_GROWTH_PARAMS = FundamentalGrowthParams(
     min_yoy_growth_pct=Decimal("0"),
     require_positive_net_income=True,
     reporting_lag_days=120,
+    max_pe=Decimal("60"),
+    max_pb=Decimal("15"),
+    require_positive_operating_cash_flow=True,
+    require_positive_free_cash_flow=False,
+    min_operating_cash_flow_growth_count=1,
+    min_operating_cash_flow_yoy_growth_pct=Decimal("0"),
 )
 RATIO_PATTERN = Decimal("0.000001")
 SUPPORTED_OPTIMIZATION_OBJECTIVES = {
     "score",
     "average_annualized_return",
+    "robust_annualized_return",
     "annualized_return",
     "max_drawdown",
     "return_drawdown_ratio",
@@ -59,6 +66,15 @@ SUPPORTED_OPTIMIZATION_OBJECTIVES = {
     "total_return",
 }
 SUPPORTED_SEARCH_MODES = {"grid", "random"}
+
+_WORKER_SCREEN_CACHE: dict[str, dict[str, object]] = {}
+_WORKER_SCREEN_CANDIDATE_CACHE: dict[tuple[object, ...], dict[str, object]] = {}
+_WORKER_FUNDAMENTAL_GROWTH_CACHE: dict[tuple[object, ...], object] = {}
+_WORKER_CUP_EVENT_CACHE: dict[tuple[object, ...], dict[int, list[object]] | None] = {}
+_WORKER_TRADE_CACHE: dict[tuple[object, ...], object] = {}
+_WORKER_TRADE_DATES_CACHE: dict[tuple[object, ...], list[date]] = {}
+_WORKER_FUTURE_ROWS_CACHE: dict[tuple[object, ...], object] = {}
+_WORKER_FUTURE_INDICATOR_CACHE: dict[tuple[object, ...], object] = {}
 
 
 def _json_default(value: object) -> str:
@@ -129,6 +145,7 @@ def _configured_max_workers_from_metadata(metadata: dict[str, object]) -> int | 
 
 def _parameter_axes(parameter_space: dict[str, object]) -> list[tuple[str, list[object]]]:
     return [
+        ("use_rps", _as_list(parameter_space.get("use_rps"), default=[True])),
         ("rps_threshold", _as_list(parameter_space.get("rps_threshold"), default=[90])),
         (
             "selected_rps_windows",
@@ -236,11 +253,40 @@ def _fundamental_params_from_payload(
         ),
         require_positive_net_income=bool(merged["require_positive_net_income"]),
         reporting_lag_days=int(merged["reporting_lag_days"]),
+        max_pe=(
+            None
+            if merged.get("max_pe") is None
+            else _coerce_decimal(merged["max_pe"], field_name="max_pe")
+        ),
+        max_pb=(
+            None
+            if merged.get("max_pb") is None
+            else _coerce_decimal(merged["max_pb"], field_name="max_pb")
+        ),
+        require_positive_operating_cash_flow=bool(
+            merged["require_positive_operating_cash_flow"]
+        ),
+        require_positive_free_cash_flow=bool(merged["require_positive_free_cash_flow"]),
+        min_operating_cash_flow_growth_count=(
+            None
+            if merged.get("min_operating_cash_flow_growth_count") is None
+            else int(merged["min_operating_cash_flow_growth_count"])
+        ),
+        min_operating_cash_flow_yoy_growth_pct=_coerce_decimal(
+            merged["min_operating_cash_flow_yoy_growth_pct"],
+            field_name="min_operating_cash_flow_yoy_growth_pct",
+        ),
     )
 
 
 def _normalize_parameter_set(parameters: dict[str, object]) -> dict[str, object]:
-    cup_params = _cup_handle_params_from_payload(parameters.get("cup_handle_params") if isinstance(parameters.get("cup_handle_params"), dict) else {})
+    use_rps = bool(parameters.get("use_rps", True))
+    use_cup_handle = bool(parameters.get("use_cup_handle", True))
+    cup_params = _cup_handle_params_from_payload(
+        parameters.get("cup_handle_params")
+        if use_cup_handle and isinstance(parameters.get("cup_handle_params"), dict)
+        else {}
+    )
     fundamental_params = _fundamental_params_from_payload(
         parameters.get("fundamental_growth_params")
         if isinstance(parameters.get("fundamental_growth_params"), dict)
@@ -248,6 +294,8 @@ def _normalize_parameter_set(parameters: dict[str, object]) -> dict[str, object]
         default_params=DEFAULT_OPTIMIZATION_FUNDAMENTAL_GROWTH_PARAMS,
         force_enabled=True,
     )
+    if not fundamental_params.enabled:
+        fundamental_params = DEFAULT_OPTIMIZATION_FUNDAMENTAL_GROWTH_PARAMS
     selected_windows = [int(window) for window in parameters.get("selected_rps_windows", [50, 120, 250])]  # type: ignore[arg-type]
     selected_windows = sorted(set(selected_windows), key=selected_windows.index)
     take_profit_pct = _coerce_optional_decimal(
@@ -262,6 +310,9 @@ def _normalize_parameter_set(parameters: dict[str, object]) -> dict[str, object]
     )
     if rps_exit_threshold is not None and not 0 <= rps_exit_threshold <= 100:
         raise ValueError("rps_exit_threshold must be between 0 and 100 when provided.")
+    if not use_rps:
+        rps_exit_threshold = None
+        selected_windows = [50, 120, 250]
     holding_days = _coerce_optional_int(
         parameters.get("holding_days", 130),
         field_name="holding_days",
@@ -275,10 +326,11 @@ def _normalize_parameter_set(parameters: dict[str, object]) -> dict[str, object]
     if position_weight_pct <= Decimal("0") or position_weight_pct > Decimal("1"):
         raise ValueError("position_weight_pct must be greater than 0 and less than or equal to 1.")
     return {
-        "rps_threshold": int(parameters.get("rps_threshold", 90)),
+        "use_rps": use_rps,
+        "rps_threshold": int(parameters.get("rps_threshold", 90)) if use_rps else 0,
         "selected_rps_windows": selected_windows,
-        "min_rps_windows_passing": int(parameters.get("min_rps_windows_passing", 1)),
-        "use_cup_handle": bool(parameters.get("use_cup_handle", True)),
+        "min_rps_windows_passing": int(parameters.get("min_rps_windows_passing", 1)) if use_rps else 1,
+        "use_cup_handle": use_cup_handle,
         "cup_handle_params": cup_params.to_dict(),
         "fundamental_growth_params": fundamental_params.to_dict(),
         "holding_days": holding_days,
@@ -770,6 +822,8 @@ def _score_metrics(
             "average_annualized_return",
             default=str(metrics.get("annualized_return") or "0"),
         ).quantize(RATIO_PATTERN)
+    if objective == "robust_annualized_return":
+        return _decimal_metric(metrics, "annualized_return").quantize(RATIO_PATTERN)
     if objective == "annualized_return":
         return _decimal_metric(metrics, "annualized_return").quantize(RATIO_PATTERN)
     if objective == "max_drawdown":
@@ -781,6 +835,52 @@ def _score_metrics(
     if objective == "total_return":
         return _decimal_metric(metrics, "total_return").quantize(RATIO_PATTERN)
     raise ValueError(f"Unsupported optimization objective: {objective}.")
+
+
+def _score_metric_pair(
+    train_metrics: dict[str, object],
+    validation_metrics: dict[str, object] | None,
+    *,
+    objective: str = DEFAULT_OPTIMIZATION_OBJECTIVE,
+) -> Decimal:
+    if objective != "robust_annualized_return":
+        return _score_metrics(validation_metrics or train_metrics, objective=objective)
+    train_annualized = _decimal_metric(train_metrics, "annualized_return")
+    validation_annualized = (
+        _decimal_metric(validation_metrics, "annualized_return")
+        if validation_metrics is not None
+        else train_annualized
+    )
+    train_drawdown = abs(_decimal_metric(train_metrics, "max_drawdown"))
+    validation_drawdown = (
+        abs(_decimal_metric(validation_metrics, "max_drawdown"))
+        if validation_metrics is not None
+        else train_drawdown
+    )
+    train_completed = Decimal(int(train_metrics.get("completed_trades", 0) or 0))
+    validation_completed = (
+        Decimal(int(validation_metrics.get("completed_trades", 0) or 0))
+        if validation_metrics is not None
+        else train_completed
+    )
+    consistency_floor = min(train_annualized, validation_annualized)
+    average_return = (train_annualized + validation_annualized) / Decimal("2")
+    positive_gap = abs(train_annualized - validation_annualized)
+    drawdown_penalty = max(train_drawdown, validation_drawdown) * Decimal("0.15")
+    gap_penalty = positive_gap * Decimal("0.35")
+    sample_penalty = Decimal("0")
+    if min(train_completed, validation_completed) < Decimal("50"):
+        sample_penalty = Decimal("0.08")
+    elif min(train_completed, validation_completed) < Decimal("100"):
+        sample_penalty = Decimal("0.03")
+    score = (
+        consistency_floor * Decimal("0.70")
+        + average_return * Decimal("0.30")
+        - gap_penalty
+        - drawdown_penalty
+        - sample_penalty
+    )
+    return score.quantize(RATIO_PATTERN)
 
 
 def _attach_average_annualized_return(
@@ -809,14 +909,19 @@ def _run_backtest_once(
     max_trades_returned: int = 0,
     screen_cache: dict[str, dict[str, object]] | None = None,
     screen_candidate_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
-    fundamental_growth_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
+    fundamental_growth_cache: dict[tuple[object, ...], object] | None = None,
     cup_event_cache: dict[tuple[object, ...], dict[int, list[object]] | None] | None = None,
+    trade_cache: dict[tuple[object, ...], object] | None = None,
+    trade_dates_cache: dict[tuple[object, ...], list[date]] | None = None,
+    future_rows_cache: dict[tuple[object, ...], object] | None = None,
+    future_indicator_cache: dict[tuple[object, ...], object] | None = None,
     should_cancel=None,
 ) -> dict[str, object]:
     result = run_cup_handle_rps_backtest(
         session,
         start_date=start_date,
         end_date=end_date,
+        use_rps=bool(parameters.get("use_rps", True)),
         rps_threshold=int(parameters["rps_threshold"]),
         selected_rps_windows=list(parameters["selected_rps_windows"]),  # type: ignore[arg-type]
         min_rps_windows_passing=int(parameters["min_rps_windows_passing"]),
@@ -850,6 +955,10 @@ def _run_backtest_once(
         screen_candidate_cache=screen_candidate_cache,
         fundamental_growth_cache=fundamental_growth_cache,
         cup_event_cache=cup_event_cache,
+        trade_cache=trade_cache,
+        trade_dates_cache=trade_dates_cache,
+        future_rows_cache=future_rows_cache,  # type: ignore[arg-type]
+        future_indicator_cache=future_indicator_cache,  # type: ignore[arg-type]
         should_cancel=should_cancel,
     )
     return result.to_dict()
@@ -867,8 +976,12 @@ def _evaluate_parameter_set(
     parameters: dict[str, object],
     screen_cache: dict[str, dict[str, object]] | None = None,
     screen_candidate_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
-    fundamental_growth_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
+    fundamental_growth_cache: dict[tuple[object, ...], object] | None = None,
     cup_event_cache: dict[tuple[object, ...], dict[int, list[object]] | None] | None = None,
+    trade_cache: dict[tuple[object, ...], object] | None = None,
+    trade_dates_cache: dict[tuple[object, ...], list[date]] | None = None,
+    future_rows_cache: dict[tuple[object, ...], object] | None = None,
+    future_indicator_cache: dict[tuple[object, ...], object] | None = None,
     should_cancel=None,
 ) -> dict[str, object]:
     try:
@@ -883,6 +996,10 @@ def _evaluate_parameter_set(
             screen_candidate_cache=screen_candidate_cache,
             fundamental_growth_cache=fundamental_growth_cache,
             cup_event_cache=cup_event_cache,
+            trade_cache=trade_cache,
+            trade_dates_cache=trade_dates_cache,
+            future_rows_cache=future_rows_cache,
+            future_indicator_cache=future_indicator_cache,
             should_cancel=should_cancel,
         )
         train_metrics = _extract_metrics(train_result)
@@ -901,12 +1018,20 @@ def _evaluate_parameter_set(
                 screen_candidate_cache=screen_candidate_cache,
                 fundamental_growth_cache=fundamental_growth_cache,
                 cup_event_cache=cup_event_cache,
+                trade_cache=trade_cache,
+                trade_dates_cache=trade_dates_cache,
+                future_rows_cache=future_rows_cache,
+                future_indicator_cache=future_indicator_cache,
                 should_cancel=should_cancel,
             )
             validation_metrics = _extract_metrics(validation_result)
             score_source = validation_metrics
         _attach_average_annualized_return(train_metrics, validation_metrics)
-        score = _score_metrics(score_source, objective=objective)
+        score = _score_metric_pair(
+            train_metrics,
+            validation_metrics,
+            objective=objective,
+        )
         return {
             "parameters": parameters,
             "train_metrics": train_metrics,
@@ -945,10 +1070,6 @@ def _evaluate_parameter_set_group_worker(payload: dict[str, object]) -> list[dic
     if not isinstance(parameter_sets, list):
         raise ValueError("Worker payload parameter_sets must be a list.")
     results: list[dict[str, object]] = []
-    screen_cache: dict[str, dict[str, object]] = {}
-    screen_candidate_cache: dict[tuple[object, ...], dict[str, object]] = {}
-    fundamental_growth_cache: dict[tuple[object, ...], dict[str, object]] = {}
-    cup_event_cache: dict[tuple[object, ...], dict[int, list[object]] | None] = {}
     with SessionLocal() as session:
         for parameters in parameter_sets:
             if not isinstance(parameters, dict):
@@ -963,10 +1084,14 @@ def _evaluate_parameter_set_group_worker(payload: dict[str, object]) -> list[dic
                     market=str(payload["market"]),
                     objective=str(payload["objective"]),
                     parameters=parameters,
-                    screen_cache=screen_cache,
-                    screen_candidate_cache=screen_candidate_cache,
-                    fundamental_growth_cache=fundamental_growth_cache,
-                    cup_event_cache=cup_event_cache,
+                    screen_cache=_WORKER_SCREEN_CACHE,
+                    screen_candidate_cache=_WORKER_SCREEN_CANDIDATE_CACHE,
+                    fundamental_growth_cache=_WORKER_FUNDAMENTAL_GROWTH_CACHE,
+                    cup_event_cache=_WORKER_CUP_EVENT_CACHE,
+                    trade_cache=_WORKER_TRADE_CACHE,
+                    trade_dates_cache=_WORKER_TRADE_DATES_CACHE,
+                    future_rows_cache=_WORKER_FUTURE_ROWS_CACHE,
+                    future_indicator_cache=_WORKER_FUTURE_INDICATOR_CACHE,
                     should_cancel=None,
                 )
             )
@@ -977,6 +1102,7 @@ def _parameter_screen_signature(parameters: dict[str, object]) -> str:
     return dump_json(
         {
             "rps_threshold": parameters.get("rps_threshold"),
+            "use_rps": parameters.get("use_rps"),
             "selected_rps_windows": parameters.get("selected_rps_windows"),
             "min_rps_windows_passing": parameters.get("min_rps_windows_passing"),
             "use_cup_handle": parameters.get("use_cup_handle"),
@@ -988,12 +1114,16 @@ def _parallel_parameter_groups(
     parameter_sets: list[dict[str, object]],
     *,
     group_size: int = DEFAULT_OPTIMIZATION_PARALLEL_GROUP_SIZE,
+    target_group_count: int | None = None,
 ) -> list[list[dict[str, object]]]:
     grouped: dict[str, list[dict[str, object]]] = {}
     for parameters in parameter_sets:
         grouped.setdefault(_parameter_screen_signature(parameters), []).append(parameters)
     groups: list[list[dict[str, object]]] = []
     chunk_size = max(int(group_size), 1)
+    if target_group_count is not None and len(grouped) < target_group_count:
+        target_chunk_size = max(1, math.ceil(len(parameter_sets) / max(target_group_count, 1)))
+        chunk_size = min(chunk_size, target_chunk_size)
     for group in grouped.values():
         for index in range(0, len(group), chunk_size):
             groups.append(group[index : index + chunk_size])
@@ -1044,6 +1174,22 @@ def _evaluation_failure(parameters: dict[str, object], exc: BaseException) -> di
     }
 
 
+def _terminate_process_pool(
+    executor: ProcessPoolExecutor,
+    pending: dict[Future[list[dict[str, object]]], list[dict[str, object]]],
+) -> None:
+    for future in pending:
+        future.cancel()
+    processes = getattr(executor, "_processes", None)
+    if isinstance(processes, dict):
+        for process in list(processes.values()):
+            if getattr(process, "is_alive", lambda: False)():
+                process.terminate()
+    shutdown = getattr(executor, "shutdown", None)
+    if shutdown is not None:
+        shutdown(wait=False, cancel_futures=True)
+
+
 def _persist_evaluation_result(
     session,
     *,
@@ -1088,7 +1234,11 @@ def _persist_evaluation_result(
 
 def _entry_reason(parameters: dict[str, object]) -> str:
     parts = [
-        f"RPS 达到 {parameters.get('rps_threshold', '—')}",
+        (
+            f"RPS 达到 {parameters.get('rps_threshold', '—')}"
+            if parameters.get("use_rps", True)
+            else "未启用 RPS 过滤"
+        ),
         "杯柄突破" if parameters.get("use_cup_handle", True) else "未启用杯柄过滤",
     ]
     fundamentals = parameters.get("fundamental_growth_params")
@@ -1252,8 +1402,12 @@ def build_optimization_result_detail(
         else:
             screen_cache: dict[str, dict[str, object]] = {}
             screen_candidate_cache: dict[tuple[object, ...], dict[str, object]] = {}
-            fundamental_growth_cache: dict[tuple[object, ...], dict[str, object]] = {}
+            fundamental_growth_cache: dict[tuple[object, ...], object] = {}
             cup_event_cache: dict[tuple[object, ...], dict[int, list[object]] | None] = {}
+            trade_cache: dict[tuple[object, ...], object] = {}
+            trade_dates_cache: dict[tuple[object, ...], list[date]] = {}
+            future_rows_cache: dict[tuple[object, ...], object] = {}
+            future_indicator_cache: dict[tuple[object, ...], object] = {}
             train_result = _run_backtest_once(
                 session,
                 start_date=run.train_start_date,
@@ -1265,6 +1419,10 @@ def build_optimization_result_detail(
                 screen_candidate_cache=screen_candidate_cache,
                 fundamental_growth_cache=fundamental_growth_cache,
                 cup_event_cache=cup_event_cache,
+                trade_cache=trade_cache,
+                trade_dates_cache=trade_dates_cache,
+                future_rows_cache=future_rows_cache,
+                future_indicator_cache=future_indicator_cache,
             )
             validation_result = None
             if run.validation_start_date is not None and run.validation_end_date is not None:
@@ -1279,6 +1437,10 @@ def build_optimization_result_detail(
                     screen_candidate_cache=screen_candidate_cache,
                     fundamental_growth_cache=fundamental_growth_cache,
                     cup_event_cache=cup_event_cache,
+                    trade_cache=trade_cache,
+                    trade_dates_cache=trade_dates_cache,
+                    future_rows_cache=future_rows_cache,
+                    future_indicator_cache=future_indicator_cache,
                 )
         _store_detail_cache(
             session,
@@ -1439,8 +1601,12 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
     )
     screen_cache: dict[str, dict[str, object]] = {}
     screen_candidate_cache: dict[tuple[object, ...], dict[str, object]] = {}
-    fundamental_growth_cache: dict[tuple[object, ...], dict[str, object]] = {}
+    fundamental_growth_cache: dict[tuple[object, ...], object] = {}
     cup_event_cache: dict[tuple[object, ...], dict[int, list[object]] | None] = {}
+    trade_cache: dict[tuple[object, ...], object] = {}
+    trade_dates_cache: dict[tuple[object, ...], list[date]] = {}
+    future_rows_cache: dict[tuple[object, ...], object] = {}
+    future_indicator_cache: dict[tuple[object, ...], object] = {}
 
     cancel_state = {"checked_at": 0.0, "cached": False}
 
@@ -1483,6 +1649,10 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
                     screen_candidate_cache=screen_candidate_cache,
                     fundamental_growth_cache=fundamental_growth_cache,
                     cup_event_cache=cup_event_cache,
+                    trade_cache=trade_cache,
+                    trade_dates_cache=trade_dates_cache,
+                    future_rows_cache=future_rows_cache,
+                    future_indicator_cache=future_indicator_cache,
                     should_cancel=should_cancel,
                 )
                 _persist_evaluation_result(session, run=run, evaluation=evaluation)
@@ -1504,7 +1674,10 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
         }
 
     def execute_parallel() -> OptimizationRun | None:
-        groups = _parallel_parameter_groups(parameter_sets)
+        groups = _parallel_parameter_groups(
+            parameter_sets,
+            target_group_count=max_workers,
+        )
         if not groups:
             return None
         pending: dict[Future[list[dict[str, object]]], list[dict[str, object]]] = {}
@@ -1526,8 +1699,7 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
                 if not done:
                     session.refresh(run)
                     if run.status == "cancel_requested":
-                        for future in pending:
-                            future.cancel()
+                        _terminate_process_pool(executor, pending)
                         return finalize_cancel()
                     continue
 
@@ -1542,10 +1714,10 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
                     session.commit()
                     session.refresh(run)
                     if run.status == "cancel_requested":
-                        for pending_future in pending:
-                            pending_future.cancel()
+                        _terminate_process_pool(executor, pending)
                         return finalize_cancel()
                     submit_next(executor)
+            _terminate_process_pool(executor, pending)
         return None
 
     try:

@@ -171,6 +171,22 @@ class FundamentalGrowthParamsRequest(BaseModel):
         ge=0,
         le=365,
     )
+    max_pe: float | None = Field(default=None, gt=0, le=500)
+    max_pb: float | None = Field(default=None, gt=0, le=100)
+    require_positive_operating_cash_flow: bool = (
+        DEFAULT_FUNDAMENTAL_GROWTH_PARAMS.require_positive_operating_cash_flow
+    )
+    require_positive_free_cash_flow: bool = (
+        DEFAULT_FUNDAMENTAL_GROWTH_PARAMS.require_positive_free_cash_flow
+    )
+    min_operating_cash_flow_growth_count: int | None = Field(default=None, ge=1, le=9)
+    min_operating_cash_flow_yoy_growth_pct: float = Field(
+        default=float(
+            DEFAULT_FUNDAMENTAL_GROWTH_PARAMS.min_operating_cash_flow_yoy_growth_pct
+        ),
+        ge=-100,
+        le=500,
+    )
 
     def to_service_params(self) -> FundamentalGrowthParams:
         return FundamentalGrowthParams(
@@ -180,6 +196,14 @@ class FundamentalGrowthParamsRequest(BaseModel):
             min_yoy_growth_pct=Decimal(str(self.min_yoy_growth_pct)),
             require_positive_net_income=self.require_positive_net_income,
             reporting_lag_days=self.reporting_lag_days,
+            max_pe=None if self.max_pe is None else Decimal(str(self.max_pe)),
+            max_pb=None if self.max_pb is None else Decimal(str(self.max_pb)),
+            require_positive_operating_cash_flow=self.require_positive_operating_cash_flow,
+            require_positive_free_cash_flow=self.require_positive_free_cash_flow,
+            min_operating_cash_flow_growth_count=self.min_operating_cash_flow_growth_count,
+            min_operating_cash_flow_yoy_growth_pct=Decimal(
+                str(self.min_operating_cash_flow_yoy_growth_pct)
+            ),
         )
 
 
@@ -216,6 +240,7 @@ class CupHandleRpsBacktestRequest(BaseModel):
     market: str = Field(default="jp", pattern="^(jp|us)$")
     start_date: date
     end_date: date
+    use_rps: bool = True
     rps_threshold: int = Field(default=DEFAULT_RPS_THRESHOLD, ge=0, le=100)
     selected_rps_windows: list[int] = Field(default_factory=lambda: list(APPROVED_RPS_WINDOWS))
     min_rps_windows_passing: int = Field(default=2, ge=1, le=len(APPROVED_RPS_WINDOWS))
@@ -546,6 +571,7 @@ def post_cup_handle_rps_backtest(payload: CupHandleRpsBacktestRequest) -> dict[s
                 session,
                 start_date=payload.start_date,
                 end_date=payload.end_date,
+                use_rps=payload.use_rps,
                 rps_threshold=payload.rps_threshold,
                 selected_rps_windows=payload.selected_rps_windows,
                 min_rps_windows_passing=payload.min_rps_windows_passing,

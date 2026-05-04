@@ -41,6 +41,11 @@ class ProviderFundamentalsAnnual:
     fiscal_year_label: str
     net_income: Decimal | None = None
     net_income_currency: str = "JPY"
+    operating_cash_flow: Decimal | None = None
+    free_cash_flow: Decimal | None = None
+    diluted_eps: Decimal | None = None
+    stockholders_equity: Decimal | None = None
+    weighted_average_diluted_shares: Decimal | None = None
     pe: Decimal | None = None
     pb: Decimal | None = None
     source: str = "unknown"

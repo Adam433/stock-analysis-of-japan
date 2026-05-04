@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from bisect import bisect_right
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from math import ceil
 from decimal import Decimal
@@ -53,6 +55,33 @@ CANDIDATE_GENERATION_BOUNDS: dict[str, object] = {
     "min_breakout_volume_multiplier": None,
     "breakout_lookback_days": 60,
 }
+
+
+@dataclass(frozen=True, slots=True)
+class MaterializedCupHandleEvent:
+    id: int
+    instrument_id: int
+    breakout_date: date
+    cup_duration: int
+    handle_duration: int
+    total_duration: int
+    cup_depth_pct: Decimal
+    handle_depth_pct: Decimal
+    right_lip_delta_pct: Decimal
+    handle_low_position_pct: Decimal
+    handle_depth_to_cup_depth_pct: Decimal
+    handle_high_above_lip_pct: Decimal
+    bottom_dwell_days_zone_20: int
+    bottom_dwell_days_zone_35: int
+    bottom_span_pct_zone_20: Decimal
+    bottom_span_pct_zone_35: Decimal
+    prior_uptrend_pct_60: Decimal | None
+    prior_uptrend_pct_90: Decimal | None
+    prior_uptrend_pct_120: Decimal | None
+    prior_uptrend_pct_180: Decimal | None
+    breakout_volume_ratio_20: Decimal | None
+    breakout_volume_ratio_50: Decimal | None
+    breakout_volume_ratio_60: Decimal | None
 
 
 def _json_default(value: object) -> str:
@@ -352,7 +381,7 @@ def load_materialized_cup_handle_event_pool(
     start_date: date,
     end_date: date,
     params,
-) -> dict[int, list[CupHandlePatternEvent]] | None:
+) -> dict[int, list[MaterializedCupHandleEvent]] | None:
     try:
         materialization_run = find_covering_materialization_run(
             session,
@@ -368,7 +397,31 @@ def load_materialized_cup_handle_event_pool(
         return None
 
     earliest_breakout_date = start_date - timedelta(days=int(params.breakout_lookback_days) * 3)
-    query: Select[tuple[CupHandlePatternEvent]] = select(CupHandlePatternEvent).where(
+    query = select(
+        CupHandlePatternEvent.id,
+        CupHandlePatternEvent.instrument_id,
+        CupHandlePatternEvent.breakout_date,
+        CupHandlePatternEvent.cup_duration,
+        CupHandlePatternEvent.handle_duration,
+        CupHandlePatternEvent.total_duration,
+        CupHandlePatternEvent.cup_depth_pct,
+        CupHandlePatternEvent.handle_depth_pct,
+        CupHandlePatternEvent.right_lip_delta_pct,
+        CupHandlePatternEvent.handle_low_position_pct,
+        CupHandlePatternEvent.handle_depth_to_cup_depth_pct,
+        CupHandlePatternEvent.handle_high_above_lip_pct,
+        CupHandlePatternEvent.bottom_dwell_days_zone_20,
+        CupHandlePatternEvent.bottom_dwell_days_zone_35,
+        CupHandlePatternEvent.bottom_span_pct_zone_20,
+        CupHandlePatternEvent.bottom_span_pct_zone_35,
+        CupHandlePatternEvent.prior_uptrend_pct_60,
+        CupHandlePatternEvent.prior_uptrend_pct_90,
+        CupHandlePatternEvent.prior_uptrend_pct_120,
+        CupHandlePatternEvent.prior_uptrend_pct_180,
+        CupHandlePatternEvent.breakout_volume_ratio_20,
+        CupHandlePatternEvent.breakout_volume_ratio_50,
+        CupHandlePatternEvent.breakout_volume_ratio_60,
+    ).where(
         CupHandlePatternEvent.materialization_run_id == materialization_run.id,
         CupHandlePatternEvent.market == normalize_market(market),
         CupHandlePatternEvent.breakout_date >= earliest_breakout_date,
@@ -379,23 +432,51 @@ def load_materialized_cup_handle_event_pool(
             session.execute(
                 query.order_by(
                     CupHandlePatternEvent.instrument_id.asc(),
-                    CupHandlePatternEvent.breakout_date.desc(),
-                    CupHandlePatternEvent.id.desc(),
+                    CupHandlePatternEvent.breakout_date.asc(),
+                    CupHandlePatternEvent.id.asc(),
                 )
-            ).scalars()
+            )
         )
     except OperationalError as exc:
         if "cup_handle_pattern_events" in str(exc):
             return None
         raise
 
-    events_by_instrument: dict[int, list[CupHandlePatternEvent]] = {}
+    events_by_instrument: dict[int, list[MaterializedCupHandleEvent]] = {}
     for event in events:
-        events_by_instrument.setdefault(event.instrument_id, []).append(event)
+        event_snapshot = MaterializedCupHandleEvent(
+            id=event.id,
+            instrument_id=event.instrument_id,
+            breakout_date=event.breakout_date,
+            cup_duration=event.cup_duration,
+            handle_duration=event.handle_duration,
+            total_duration=event.total_duration,
+            cup_depth_pct=event.cup_depth_pct,
+            handle_depth_pct=event.handle_depth_pct,
+            right_lip_delta_pct=event.right_lip_delta_pct,
+            handle_low_position_pct=event.handle_low_position_pct,
+            handle_depth_to_cup_depth_pct=event.handle_depth_to_cup_depth_pct,
+            handle_high_above_lip_pct=event.handle_high_above_lip_pct,
+            bottom_dwell_days_zone_20=event.bottom_dwell_days_zone_20,
+            bottom_dwell_days_zone_35=event.bottom_dwell_days_zone_35,
+            bottom_span_pct_zone_20=event.bottom_span_pct_zone_20,
+            bottom_span_pct_zone_35=event.bottom_span_pct_zone_35,
+            prior_uptrend_pct_60=event.prior_uptrend_pct_60,
+            prior_uptrend_pct_90=event.prior_uptrend_pct_90,
+            prior_uptrend_pct_120=event.prior_uptrend_pct_120,
+            prior_uptrend_pct_180=event.prior_uptrend_pct_180,
+            breakout_volume_ratio_20=event.breakout_volume_ratio_20,
+            breakout_volume_ratio_50=event.breakout_volume_ratio_50,
+            breakout_volume_ratio_60=event.breakout_volume_ratio_60,
+        )
+        events_by_instrument.setdefault(event_snapshot.instrument_id, []).append(event_snapshot)
     return events_by_instrument
 
 
-def materialized_cup_handle_event_matches_params(event: CupHandlePatternEvent, params) -> bool:
+def materialized_cup_handle_event_matches_params(
+    event: CupHandlePatternEvent | MaterializedCupHandleEvent,
+    params,
+) -> bool:
     if not (
         int(params.min_cup_duration) <= event.cup_duration <= int(params.max_cup_duration)
         and int(params.min_handle_duration)
@@ -455,22 +536,41 @@ def materialized_cup_handle_event_matches_params(event: CupHandlePatternEvent, p
     return True
 
 
+def filter_materialized_cup_handle_event_pool(
+    events_by_instrument: dict[int, list[CupHandlePatternEvent | MaterializedCupHandleEvent]],
+    *,
+    params,
+) -> dict[int, list[CupHandlePatternEvent | MaterializedCupHandleEvent]]:
+    filtered_by_instrument: dict[int, list[CupHandlePatternEvent | MaterializedCupHandleEvent]] = {}
+    for instrument_id, events in events_by_instrument.items():
+        filtered_events = [
+            event
+            for event in events
+            if materialized_cup_handle_event_matches_params(event, params)
+        ]
+        if filtered_events:
+            filtered_by_instrument[instrument_id] = filtered_events
+    return filtered_by_instrument
+
+
 def select_latest_materialized_cup_handle_matches(
-    events_by_instrument: dict[int, list[CupHandlePatternEvent]],
+    events_by_instrument: dict[int, list[CupHandlePatternEvent | MaterializedCupHandleEvent]],
     *,
     signal_date: date,
     instrument_ids: list[int],
     params,
-) -> dict[int, CupHandlePatternEvent]:
+    assume_params_matched: bool = False,
+) -> dict[int, CupHandlePatternEvent | MaterializedCupHandleEvent]:
     earliest_breakout_date = signal_date - timedelta(days=int(params.breakout_lookback_days) * 3)
-    event_by_instrument: dict[int, CupHandlePatternEvent] = {}
+    event_by_instrument: dict[int, CupHandlePatternEvent | MaterializedCupHandleEvent] = {}
     for instrument_id in instrument_ids:
-        for event in events_by_instrument.get(instrument_id, []):
-            if event.breakout_date > signal_date:
-                continue
+        events = events_by_instrument.get(instrument_id, [])
+        start_index = bisect_right(events, signal_date, key=lambda event: event.breakout_date)
+        for event_index in range(start_index - 1, -1, -1):
+            event = events[event_index]
             if event.breakout_date < earliest_breakout_date:
                 break
-            if materialized_cup_handle_event_matches_params(event, params):
+            if assume_params_matched or materialized_cup_handle_event_matches_params(event, params):
                 event_by_instrument[instrument_id] = event
                 break
     return event_by_instrument
