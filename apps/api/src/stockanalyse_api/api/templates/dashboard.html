@@ -546,6 +546,14 @@
           <input type="number" id="backtestPositionWeight" min="0.01" max="1" step="0.01" value="0.10" />
         </div>
         <div class="field">
+          <label>初始资金</label>
+          <input type="number" id="backtestInitialCapital" min="1" step="1000" value="100000" />
+        </div>
+        <div class="field">
+          <label>每笔投入金额</label>
+          <input type="number" id="backtestPositionSizeAmount" min="1" step="1000" placeholder="留空按单票权重" />
+        </div>
+        <div class="field">
           <label>进场延迟日</label>
           <input type="number" id="backtestEntryDelay" min="0" max="60" value="0" />
         </div>
@@ -600,12 +608,14 @@
         <div class="stat"><div class="label">平均收益</div><div class="value" id="btAverageReturn">—</div><div class="sub" id="btMedianReturn">—</div></div>
         <div class="stat"><div class="label">胜率</div><div class="value" id="btWinRate">—</div><div class="sub" id="btBestWorst">—</div></div>
         <div class="stat"><div class="label">风险</div><div class="value" id="btStopLossRatio">—</div><div class="sub" id="btLossStreak">—</div></div>
+        <div class="stat"><div class="label">账户资金</div><div class="value" id="btFinalCapital">—</div><div class="sub" id="btCapitalDetail">—</div></div>
+        <div class="stat"><div class="label">资金收益</div><div class="value" id="btAccountReturn">—</div><div class="sub" id="btAccountRisk">—</div></div>
       </div>
       <div class="table-wrap" style="margin-top: 10px;">
         <table>
           <thead>
             <tr>
-              <th>信号日</th><th>代码</th><th>进场</th><th>退出</th><th>收益</th>
+              <th>信号日</th><th>代码</th><th>进场</th><th>退出</th><th>收益</th><th>资金</th>
             </tr>
           </thead>
           <tbody id="backtestTradesBody"></tbody>
@@ -696,6 +706,20 @@
             <span class="hint" tabindex="0" data-tip="每支股票占组合资金的比例（0–1）。&#10;例：0.10 = 每只 10%（满仓需 10 只股票）。">?</span>
           </label>
           <input type="number" id="optimizationPositionWeight" min="0.01" max="1" step="0.01" value="0.10" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>初始资金</span>
+            <span class="hint" tabindex="0" data-tip="参数优化回测使用的模拟账户初始现金。&#10;每组参数会按同一资金账户口径计算最终资金和资金收益。">?</span>
+          </label>
+          <input type="number" id="optimizationInitialCapital" min="1" step="1000" value="100000" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>每笔投入金额</span>
+            <span class="hint" tabindex="0" data-tip="固定每次买入投入的资金。&#10;留空时使用 初始资金 × 单票权重。">?</span>
+          </label>
+          <input type="number" id="optimizationPositionSizeAmount" min="1" step="1000" placeholder="留空按单票权重" />
         </div>
         <div class="field">
           <label class="label-with-hint">
@@ -1335,6 +1359,16 @@
     return (Number(value) * 100).toFixed(1) + '%';
   }
 
+  function formatMoney(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return '—';
+    return numeric.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+
   function setToolCardCollapsed(cardId, collapsed) {
     const card = document.getElementById(cardId);
     if (!card) return;
@@ -1602,6 +1636,13 @@
       formatRatioPct(result.stop_loss_trigger_ratio);
     document.getElementById('btLossStreak').textContent =
       `止损 ${fmt(result.stop_loss_trades)} · RPS退 ${fmt(result.rps_exit_trades)} · 连亏 ${fmt(result.max_consecutive_losses)}`;
+    document.getElementById('btFinalCapital').textContent = formatMoney(result.final_capital);
+    document.getElementById('btCapitalDetail').textContent =
+      `初始 ${formatMoney(result.initial_capital)} · 每笔 ${formatMoney(result.position_size_amount)}`;
+    document.getElementById('btAccountReturn').textContent =
+      formatRatioPct(result.account_total_return);
+    document.getElementById('btAccountRisk').textContent =
+      `收益 ${formatMoney(result.total_profit)} · 回撤 ${formatRatioPct(result.account_max_drawdown)}`;
 
     const body = document.getElementById('backtestTradesBody');
     body.innerHTML = '';
@@ -1613,6 +1654,7 @@
         <td>${escapeHtml(trade.entry_date)}<div style="color:var(--muted);font-size:11px">${escapeHtml(trade.entry_price)}</div></td>
         <td>${escapeHtml(trade.exit_date)}<div style="color:var(--muted);font-size:11px">${escapeHtml(trade.exit_reason)}</div></td>
         <td>${formatRatioPct(trade.realized_return)}</td>
+        <td>${formatMoney(trade.realized_profit)}<div style="color:var(--muted);font-size:11px">${formatMoney(trade.invested_cash)} → ${formatMoney(trade.exit_cash)}</div></td>
       `;
       body.appendChild(tr);
     }
@@ -1639,6 +1681,7 @@
         market: criteria.market,
         selected_rps_windows: criteria.selected_rps_windows,
         min_rps_windows_passing: criteria.min_rps_windows_passing,
+        use_cup_handle: criteria.use_cup_handle,
         cup_handle_params: criteria.cup_handle_params,
         fundamental_growth_params: criteria.fundamental_growth_params,
         holding_days: readOptionalInt('backtestHoldingDays'),
@@ -1646,6 +1689,8 @@
         rps_exit_threshold: readOptionalInt('backtestRpsExit'),
         portfolio_cap: readInt('backtestPortfolioCap', 10),
         position_weight_pct: readFloat('backtestPositionWeight', 0.10),
+        initial_capital: readFloat('backtestInitialCapital', 100000),
+        position_size_amount: readOptionalFloat('backtestPositionSizeAmount'),
         allow_reentry_while_open: false,
         entry_delay_days: readInt('backtestEntryDelay', 0),
         entry_deferral_window_days: readInt('backtestEntryWindow', 5),
@@ -1663,13 +1708,26 @@
     }
   }
 
+  function dedupeParsedValues(values, keyFn) {
+    const seen = new Set();
+    const rows = [];
+    for (const value of values) {
+      const key = keyFn ? keyFn(value) : String(value);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(value);
+    }
+    return rows;
+  }
+
   function parseNumberList(id, fallback, integerOnly) {
     const raw = document.getElementById(id).value.trim();
     const source = raw ? raw.split(/[,，\s]+/) : fallback;
     const values = source
       .map((item) => integerOnly ? parseInt(item, 10) : parseFloat(item))
       .filter((value) => Number.isFinite(value));
-    return values.length ? values : fallback.map((item) => integerOnly ? parseInt(item, 10) : parseFloat(item));
+    const fallbackValues = fallback.map((item) => integerOnly ? parseInt(item, 10) : parseFloat(item));
+    return dedupeParsedValues(values.length ? values : fallbackValues);
   }
 
   function parseOptionalNumberList(id, integerOnly) {
@@ -1679,7 +1737,7 @@
       .split(/[,，\s]+/)
       .map((item) => integerOnly ? parseInt(item, 10) : parseFloat(item))
       .filter((value) => Number.isFinite(value));
-    return values.length ? values : [null];
+    return values.length ? dedupeParsedValues(values) : [null];
   }
 
   function formatHoldingDays(value) {
@@ -1696,7 +1754,9 @@
         .filter((value) => Number.isFinite(value))
       )
       .filter((group) => group.length);
-    return parsed.length ? parsed : [[50, 120, 250]];
+    return parsed.length
+      ? dedupeParsedValues(parsed, (group) => group.join('+'))
+      : [[50, 120, 250]];
   }
 
   function parseBooleanList(id, fallback) {
@@ -1891,6 +1951,8 @@
       rps_exit_threshold: useRps ? parseOptionalNumberList('optimizationRpsExits', true) : [null],
       portfolio_cap: [readInt('optimizationPortfolioCap', 10)],
       position_weight_pct: [readFloat('optimizationPositionWeight', 0.10).toFixed(4)],
+      initial_capital: [readFloat('optimizationInitialCapital', 100000).toFixed(2)],
+      position_size_amount: [readOptionalFloat('optimizationPositionSizeAmount')],
       allow_reentry_while_open: [false],
       entry_delay_days: parseNumberList('optimizationEntryDelays', ['0'], true),
       entry_deferral_window_days: [readInt('optimizationEntryWindow', 5)],
@@ -1923,24 +1985,13 @@
       parameterSpace.rps_exit_threshold,
       parameterSpace.portfolio_cap,
       parameterSpace.position_weight_pct,
+      parameterSpace.initial_capital,
+      parameterSpace.position_size_amount,
       parameterSpace.allow_reentry_while_open,
       parameterSpace.entry_delay_days,
       parameterSpace.entry_deferral_window_days,
     ].map((values) => Array.isArray(values) && values.length ? values : [null]);
-    const seen = new Set();
-    const current = new Array(axes.length);
-    function recurse(index) {
-      if (index === axes.length) {
-        seen.add(stableStringify(current));
-        return;
-      }
-      for (const value of axes[index]) {
-        current[index] = value;
-        recurse(index + 1);
-      }
-    }
-    recurse(0);
-    return seen.size;
+    return axes.reduce((total, values) => total * values.length, 1);
   }
 
   function updateOptimizationPreview() {
@@ -2105,8 +2156,7 @@
     let currentSetLine = '';
     if (run.status === 'running' && total > 0) {
       const idx = Math.min(done + 1, total);
-      const sets = Array.isArray(run.parameter_sets) ? run.parameter_sets : [];
-      const currentParams = sets[done] || null;
+      const currentParams = run.current_parameter_set || null;
       const summary = summarizeParameters(currentParams);
       currentSetLine = ` · 第 ${fmt(idx)}/${fmt(total)} 组进行中${summary ? ' · ' + summary : ''}`;
     }
@@ -2162,11 +2212,12 @@
           RPS ${params.rps_threshold || '—'} · ${windows}
           <div class="metric-muted">持有 ${formatHoldingDays(params.holding_days)} · 延迟 ${params.entry_delay_days || 0} · 止损 ${params.stop_loss_pct || '—'}</div>
           <div class="metric-muted">RPS 退出 ${params.rps_exit_threshold || '—'} · 持仓 ${params.portfolio_cap || '—'} · 权重 ${formatRatioPct(params.position_weight_pct)}</div>
+          <div class="metric-muted">初始 ${formatMoney(params.initial_capital)} · 每笔 ${formatMoney(params.position_size_amount || metrics.position_size_amount)}</div>
         </td>
         <td>
           年化 ${formatRatioPct(metrics.annualized_return)} · 回撤 ${formatRatioPct(metrics.max_drawdown)}
           <div class="metric-muted">交易 ${fmt(metrics.completed_trades)} · 胜率 ${formatRatioPct(metrics.win_rate)} · 均值 ${formatRatioPct(metrics.average_trade_return)}</div>
-          <div class="metric-muted">总收益 ${formatRatioPct(metrics.total_return)} · 收益/回撤 ${metrics.return_drawdown_ratio || '—'}</div>
+          <div class="metric-muted">总收益 ${formatRatioPct(metrics.total_return)} · 终值 ${formatMoney(metrics.final_capital)} · 收益/回撤 ${metrics.return_drawdown_ratio || '—'}</div>
           <div class="metric-muted">止损 ${formatRatioPct(metrics.stop_loss_trigger_ratio)} · RPS退 ${formatRatioPct(metrics.rps_exit_trigger_ratio)}</div>
           <div class="metric-muted">平均年化 ${formatRatioPct(metrics.average_annualized_return)} · 连亏 ${fmt(metrics.max_consecutive_losses)}</div>
           <div class="metric-muted">${optimizationRankSummary(result)}</div>
@@ -2470,6 +2521,10 @@
 
   function renderOptimizationComparisonChart(selectedResults) {
     const chart = document.getElementById('optimizationComparisonChart');
+    if (selectedResults.some((result) => !(optimizationMetricSource(result).equity_curve || []).length)) {
+      chart.innerHTML = '<div class="empty">列表已省略权益曲线，打开详情查看曲线数据</div>';
+      return;
+    }
     const series = selectedResults
       .map((result) => ({
         result,
@@ -2697,6 +2752,12 @@
     el.value = value;
   }
 
+  function setNullableInputValue(id, value) {
+    const el = document.getElementById(id);
+    if (!el || value === undefined) return;
+    el.value = value === null ? '' : value;
+  }
+
   function setCheckboxValue(id, value) {
     const el = document.getElementById(id);
     if (!el || value === undefined || value === null) return;
@@ -2796,6 +2857,8 @@
     setInputValue('backtestRpsExit', parameters.rps_exit_threshold);
     setInputValue('backtestPortfolioCap', parameters.portfolio_cap);
     setInputValue('backtestPositionWeight', parameters.position_weight_pct);
+    setInputValue('backtestInitialCapital', parameters.initial_capital);
+    setNullableInputValue('backtestPositionSizeAmount', parameters.position_size_amount);
     setInputValue('backtestEntryDelay', parameters.entry_delay_days);
     setInputValue('backtestEntryWindow', parameters.entry_deferral_window_days);
 
@@ -2808,6 +2871,8 @@
     setInputValue('optimizationRpsExits', parameters.rps_exit_threshold);
     setInputValue('optimizationPortfolioCap', parameters.portfolio_cap);
     setInputValue('optimizationPositionWeight', parameters.position_weight_pct);
+    setInputValue('optimizationInitialCapital', parameters.initial_capital);
+    setNullableInputValue('optimizationPositionSizeAmount', parameters.position_size_amount);
     setInputValue('optimizationEntryDelays', parameters.entry_delay_days);
     setInputValue('optimizationEntryWindow', parameters.entry_deferral_window_days);
     setCheckboxValue('optimizationUseRps', parameters.use_rps !== false);
@@ -3073,6 +3138,8 @@
     'optimizationRpsExits',
     'optimizationPortfolioCap',
     'optimizationPositionWeight',
+    'optimizationInitialCapital',
+    'optimizationPositionSizeAmount',
     'optimizationEntryDelays',
     'optimizationEntryWindow',
     'optimizationMaxSets',

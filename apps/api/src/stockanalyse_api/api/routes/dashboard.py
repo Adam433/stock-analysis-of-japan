@@ -255,6 +255,8 @@ class CupHandleRpsBacktestRequest(BaseModel):
     rps_exit_threshold: int | None = Field(default=None, ge=0, le=100)
     portfolio_cap: int = Field(default=10, ge=1, le=200)
     position_weight_pct: float = Field(default=0.10, gt=0, le=1)
+    initial_capital: float = Field(default=100000, gt=0, le=1_000_000_000)
+    position_size_amount: float | None = Field(default=None, gt=0, le=1_000_000_000)
     allow_reentry_while_open: bool = False
     entry_delay_days: int = Field(default=0, ge=0, le=60)
     entry_deferral_window_days: int = Field(default=5, ge=1, le=60)
@@ -265,13 +267,13 @@ class CupHandleRpsBacktestRequest(BaseModel):
 @router.get("/", response_class=HTMLResponse, include_in_schema=False)
 def dashboard_index() -> HTMLResponse:
     html = _INDEX_HTML_PATH.read_text(encoding="utf-8")
-    return HTMLResponse(content=html)
+    return HTMLResponse(content=html, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/chart-view", response_class=HTMLResponse, include_in_schema=False)
 def dashboard_chart_view() -> HTMLResponse:
     html = _CHART_HTML_PATH.read_text(encoding="utf-8")
-    return HTMLResponse(content=html)
+    return HTMLResponse(content=html, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/optimization-results/{result_id}", response_class=HTMLResponse, include_in_schema=False)
@@ -363,6 +365,7 @@ def dashboard_optimization_result_detail(result_id: int) -> HTMLResponse:
             <th>卖出价</th>
             <th>卖出原因</th>
             <th>收益</th>
+            <th>资金</th>
             <th>RPS</th>
           </tr>
         </thead>
@@ -388,6 +391,16 @@ def dashboard_optimization_result_detail(result_id: int) -> HTMLResponse:
     const number = Number(value);
     if (!Number.isFinite(number)) return escapeHtml(value);
     return `${(number * 100).toFixed(2)}%`;
+  }
+
+  function money(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    const number = Number(value);
+    if (!Number.isFinite(number)) return escapeHtml(value);
+    return number.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
   }
 
   async function api(path) {
@@ -419,6 +432,8 @@ def dashboard_optimization_result_detail(result_id: int) -> HTMLResponse:
       stat('卖点', `止损 ${params.stop_loss_pct ?? '—'} · RPS退 ${params.rps_exit_threshold ?? '—'} · 持有 ${formatHoldingDays(params.holding_days)}`),
       stat('交易', `${metrics.completed_trades ?? '—'} 笔 · 胜率 ${pct(metrics.win_rate)}`),
       stat('收益/风险', `总 ${pct(metrics.total_return)} · 回撤 ${pct(metrics.max_drawdown)}`),
+      stat('资金', `初始 ${money(params.initial_capital || metrics.initial_capital)} · 每笔 ${money(params.position_size_amount || metrics.position_size_amount)}`),
+      stat('终值', `${money(metrics.final_capital)} · 盈亏 ${money(metrics.total_profit)}`),
     ].join('');
   }
 
@@ -445,6 +460,7 @@ def dashboard_optimization_result_detail(result_id: int) -> HTMLResponse:
           <td>${escapeHtml(trade.exit_price)}</td>
           <td class="reason">${escapeHtml(trade.exit_reason_label || trade.exit_reason)}</td>
           <td class="${returnClass}">${pct(trade.realized_return)}</td>
+          <td>${money(trade.realized_profit)}<div class="muted">${money(trade.invested_cash)} → ${money(trade.exit_cash)}</div></td>
           <td>${escapeHtml(trade.rps_score)}</td>
         </tr>
       `;
@@ -480,7 +496,10 @@ def dashboard_optimization_result_detail(result_id: int) -> HTMLResponse:
 </body>
 </html>
 """
-    return HTMLResponse(content=html.replace("__RESULT_ID__", str(result_id)))
+    return HTMLResponse(
+        content=html.replace("__RESULT_ID__", str(result_id)),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/api/overview")
@@ -589,6 +608,12 @@ def post_cup_handle_rps_backtest(payload: CupHandleRpsBacktestRequest) -> dict[s
                 rps_exit_threshold=payload.rps_exit_threshold,
                 portfolio_cap=payload.portfolio_cap,
                 position_weight_pct=Decimal(str(payload.position_weight_pct)),
+                initial_capital=Decimal(str(payload.initial_capital)),
+                position_size_amount=(
+                    Decimal(str(payload.position_size_amount))
+                    if payload.position_size_amount is not None
+                    else None
+                ),
                 allow_reentry_while_open=payload.allow_reentry_while_open,
                 entry_delay_days=payload.entry_delay_days,
                 entry_deferral_window_days=payload.entry_deferral_window_days,

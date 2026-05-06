@@ -287,6 +287,8 @@ class OptimizationBacktestTests(unittest.TestCase):
                 "rps_exit_threshold": [80],
                 "portfolio_cap": [10],
                 "position_weight_pct": ["0.10"],
+                "initial_capital": ["100000"],
+                "position_size_amount": ["10000"],
                 "allow_reentry_while_open": [False],
             }
         )
@@ -295,6 +297,8 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(parameter_sets[0]["rps_exit_threshold"], 80)
         self.assertEqual(parameter_sets[0]["portfolio_cap"], 10)
         self.assertEqual(parameter_sets[0]["position_weight_pct"], "0.1000")
+        self.assertEqual(parameter_sets[0]["initial_capital"], "100000.00")
+        self.assertEqual(parameter_sets[0]["position_size_amount"], "10000.00")
         self.assertFalse(parameter_sets[0]["allow_reentry_while_open"])
 
     def test_create_optimization_run_persists_random_search_metadata(self) -> None:
@@ -377,8 +381,14 @@ class OptimizationBacktestTests(unittest.TestCase):
         class FakeProcessPoolExecutor:
             instances: list["FakeProcessPoolExecutor"] = []
 
-            def __init__(self, *, max_workers: int) -> None:
+            def __init__(
+                self,
+                *,
+                max_workers: int,
+                max_tasks_per_child: int | None = None,
+            ) -> None:
                 self.max_workers = max_workers
+                self.max_tasks_per_child = max_tasks_per_child
                 self.submitted = 0
                 FakeProcessPoolExecutor.instances.append(self)
 
@@ -780,7 +790,7 @@ class OptimizationBacktestTests(unittest.TestCase):
             "completed_trades": 120,
         }
         unstable_validation = {
-            "annualized_return": "0.650000",
+            "annualized_return": "0.200000",
             "max_drawdown": "-0.150000",
             "completed_trades": 110,
         }
@@ -794,6 +804,100 @@ class OptimizationBacktestTests(unittest.TestCase):
             _score_metric_pair(
                 unstable_train,
                 unstable_validation,
+                objective="robust_annualized_return",
+            ),
+        )
+
+    def test_robust_annualized_return_keeps_validation_return_directional(self) -> None:
+        shared_train = {
+            "annualized_return": "0.010000",
+            "max_drawdown": "-0.080000",
+            "completed_trades": 120,
+        }
+        lower_validation = {
+            "annualized_return": "0.080000",
+            "max_drawdown": "-0.120000",
+            "completed_trades": 140,
+        }
+        higher_validation = {
+            "annualized_return": "0.220000",
+            "max_drawdown": "-0.120000",
+            "completed_trades": 140,
+        }
+
+        self.assertGreater(
+            _score_metric_pair(
+                shared_train,
+                higher_validation,
+                objective="robust_annualized_return",
+            ),
+            _score_metric_pair(
+                shared_train,
+                lower_validation,
+                objective="robust_annualized_return",
+            ),
+        )
+
+    def test_robust_annualized_return_rejects_missing_or_tiny_train_sample(self) -> None:
+        healthy_train = {
+            "annualized_return": "0.010000",
+            "max_drawdown": "-0.080000",
+            "completed_trades": 120,
+        }
+        tiny_missing_train = {
+            "max_drawdown": "0.000000",
+            "completed_trades": 2,
+        }
+        validation = {
+            "annualized_return": "0.250000",
+            "max_drawdown": "-0.100000",
+            "completed_trades": 150,
+        }
+
+        self.assertGreater(
+            _score_metric_pair(
+                healthy_train,
+                validation,
+                objective="robust_annualized_return",
+            ),
+            _score_metric_pair(
+                tiny_missing_train,
+                validation,
+                objective="robust_annualized_return",
+            ),
+        )
+
+    def test_robust_annualized_return_rejects_severely_negative_training(self) -> None:
+        viable_train = {
+            "annualized_return": "0.050000",
+            "max_drawdown": "-0.150000",
+            "completed_trades": 120,
+        }
+        viable_validation = {
+            "annualized_return": "0.100000",
+            "max_drawdown": "-0.150000",
+            "completed_trades": 120,
+        }
+        failed_train = {
+            "annualized_return": "-0.100000",
+            "max_drawdown": "-0.200000",
+            "completed_trades": 120,
+        }
+        failed_validation = {
+            "annualized_return": "0.300000",
+            "max_drawdown": "-0.200000",
+            "completed_trades": 120,
+        }
+
+        self.assertGreater(
+            _score_metric_pair(
+                viable_train,
+                viable_validation,
+                objective="robust_annualized_return",
+            ),
+            _score_metric_pair(
+                failed_train,
+                failed_validation,
                 objective="robust_annualized_return",
             ),
         )
@@ -854,6 +958,55 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(screen_mock.call_count, 2)
         self.assertEqual(len(cache), 2)
 
+    def test_backtest_skips_screen_when_portfolio_is_full(self) -> None:
+        screen_payload = {
+            "hits": [
+                {
+                    "instrument_id": 1,
+                    "symbol": "AAPL",
+                    "rps_50": "95",
+                    "rps_120": "90",
+                    "rps_250": "88",
+                }
+            ],
+            "total_evaluated": 10,
+        }
+        rows = [_market_row(date(2025, 1, day), "100") for day in range(2, 9)]
+
+        with (
+            patch(
+                "stockanalyse_api.services.dashboard_strategy_backtest._load_trade_dates",
+                return_value=[date(2025, 1, 1), date(2025, 1, 2)],
+            ),
+            patch(
+                "stockanalyse_api.services.dashboard_strategy_backtest.screen_universe",
+                return_value=screen_payload,
+            ) as screen_mock,
+            patch(
+                "stockanalyse_api.services.dashboard_strategy_backtest._load_future_rows",
+                return_value=rows,
+            ),
+        ):
+            run_cup_handle_rps_backtest(
+                None,
+                start_date=date(2025, 1, 1),
+                end_date=date(2025, 1, 31),
+                rps_threshold=90,
+                selected_rps_windows=[50, 120],
+                min_rps_windows_passing=1,
+                use_cup_handle=False,
+                cup_handle_params=DEFAULT_CUP_HANDLE_PARAMS,
+                market="us",
+                holding_days=5,
+                stop_loss_pct=Decimal("-0.50"),
+                portfolio_cap=1,
+                entry_deferral_window_days=1,
+                execution_limited_screen=True,
+            )
+
+        self.assertEqual(screen_mock.call_count, 1)
+        self.assertEqual(screen_mock.call_args.kwargs["max_hits"], 1)
+
     def test_backtest_reuses_trade_cache_for_identical_selected_trade(self) -> None:
         trade_cache: dict[tuple[object, ...], object] = {}
         screen_payload = {
@@ -906,6 +1059,70 @@ class OptimizationBacktestTests(unittest.TestCase):
 
         self.assertEqual(future_rows_mock.call_count, 1)
         self.assertEqual(len(trade_cache), 1)
+
+    def test_backtest_tracks_cash_account_with_fixed_position_size(self) -> None:
+        screen_payload = {
+            "hits": [
+                {
+                    "instrument_id": 1,
+                    "symbol": "AAPL",
+                    "rps_50": "95",
+                    "rps_120": "90",
+                    "rps_250": "88",
+                }
+            ],
+            "total_evaluated": 10,
+        }
+        rows = [
+            _market_row(date(2025, 1, 2), "100"),
+            _market_row(date(2025, 1, 3), "110"),
+        ]
+
+        with (
+            patch(
+                "stockanalyse_api.services.dashboard_strategy_backtest._load_trade_dates",
+                return_value=[date(2025, 1, 1)],
+            ),
+            patch(
+                "stockanalyse_api.services.dashboard_strategy_backtest.screen_universe",
+                return_value=screen_payload,
+            ),
+            patch(
+                "stockanalyse_api.services.dashboard_strategy_backtest._load_future_rows",
+                return_value=rows,
+            ),
+        ):
+            result = run_cup_handle_rps_backtest(
+                None,
+                start_date=date(2025, 1, 1),
+                end_date=date(2025, 1, 31),
+                rps_threshold=90,
+                selected_rps_windows=[50, 120],
+                min_rps_windows_passing=1,
+                use_cup_handle=False,
+                cup_handle_params=DEFAULT_CUP_HANDLE_PARAMS,
+                market="us",
+                holding_days=1,
+                stop_loss_pct=Decimal("-0.50"),
+                portfolio_cap=1,
+                initial_capital=Decimal("100000"),
+                position_size_amount=Decimal("10000"),
+                entry_deferral_window_days=1,
+            )
+
+        payload = result.to_dict()
+        self.assertEqual(payload["initial_capital"], "100000.00")
+        self.assertEqual(payload["position_size_amount"], "10000.00")
+        self.assertEqual(payload["final_capital"], "101000.00")
+        self.assertEqual(payload["total_profit"], "1000.00")
+        self.assertEqual(payload["account_total_return"], "0.010000")
+        self.assertEqual(payload["account_final_date"], "2025-01-03")
+        self.assertEqual(payload["trades"][0]["invested_cash"], "10000.00")
+        self.assertEqual(payload["trades"][0]["exit_cash"], "11000.00")
+        self.assertEqual(payload["trades"][0]["realized_profit"], "1000.00")
+        metrics = _extract_metrics(payload)
+        self.assertEqual(metrics["total_return"], "0.010000")
+        self.assertEqual(metrics["final_capital"], "101000.00")
 
     def test_simulate_trade_respects_entry_delay_days(self) -> None:
         rows = [

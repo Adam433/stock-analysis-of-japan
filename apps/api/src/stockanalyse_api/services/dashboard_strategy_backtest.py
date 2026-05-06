@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
@@ -28,6 +29,7 @@ from stockanalyse_api.services.market_data_adjustments import adjusted_open
 from stockanalyse_api.services.market_data_adjustments import is_complete_market_row
 
 RATIO_PATTERN = Decimal("0.000001")
+MONEY_PATTERN = Decimal("0.01")
 MAX_TRADE_LOOKAHEAD_ROWS = 5000
 
 
@@ -43,6 +45,9 @@ class CupHandleRpsTrade:
     exit_reason: str
     realized_return: str
     rps_score: str | None
+    invested_cash: str | None = None
+    exit_cash: str | None = None
+    realized_profit: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -83,6 +88,17 @@ class CupHandleRpsBacktestResult:
     rps_exit_trades: int
     rps_exit_trigger_ratio: str | None
     max_consecutive_losses: int
+    initial_capital: str
+    position_size_amount: str
+    final_capital: str
+    total_profit: str
+    account_total_return: str | None
+    account_annualized_return: str | None
+    account_max_drawdown: str | None
+    account_peak_capital: str
+    account_final_date: str
+    account_equity_curve: list[dict[str, object]]
+    account_yearly_returns: dict[str, object]
     signal_days: list[dict[str, object]]
     trades: list[dict[str, object]]
     excluded: list[dict[str, object]]
@@ -92,14 +108,48 @@ class CupHandleRpsBacktestResult:
         return asdict(self)
 
 
+@dataclass(slots=True)
+class _OpenAccountPosition:
+    symbol: str
+    exit_date: date
+    invested_cash: Decimal
+    exit_cash: Decimal
+
+
 def _quantize_ratio(value: Decimal) -> Decimal:
     return value.quantize(RATIO_PATTERN, rounding=ROUND_HALF_UP)
+
+
+def _quantize_money(value: Decimal) -> Decimal:
+    return value.quantize(MONEY_PATTERN, rounding=ROUND_HALF_UP)
 
 
 def _format_ratio(value: Decimal | None) -> str | None:
     if value is None:
         return None
     return f"{_quantize_ratio(value):.6f}"
+
+
+def _format_money(value: Decimal | None) -> str | None:
+    if value is None:
+        return None
+    return f"{_quantize_money(value):.2f}"
+
+
+def _annualize_return(
+    total_return: Decimal,
+    *,
+    start_date: date,
+    end_date: date,
+) -> Decimal | None:
+    elapsed_days = max((end_date - start_date).days, 0)
+    if elapsed_days == 0:
+        return None
+    base = Decimal("1") + total_return
+    if base <= Decimal("0"):
+        return None
+    annualized = math.pow(float(base), 365.25 / elapsed_days) - 1.0
+    return Decimal(str(annualized)).quantize(RATIO_PATTERN)
 
 
 def _hit_rps_score(hit: dict[str, object], selected_windows: list[int]) -> Decimal | None:
@@ -124,6 +174,31 @@ def _max_consecutive_losses(trade_returns: list[Decimal]) -> int:
         else:
             current = 0
     return maximum
+
+
+def _trade_with_account_values(
+    trade: CupHandleRpsTrade,
+    *,
+    invested_cash: Decimal,
+) -> CupHandleRpsTrade:
+    realized_return = Decimal(trade.realized_return)
+    exit_cash = invested_cash * (Decimal("1") + realized_return)
+    realized_profit = exit_cash - invested_cash
+    return CupHandleRpsTrade(
+        signal_date=trade.signal_date,
+        instrument_id=trade.instrument_id,
+        symbol=trade.symbol,
+        entry_date=trade.entry_date,
+        entry_price=trade.entry_price,
+        exit_date=trade.exit_date,
+        exit_price=trade.exit_price,
+        exit_reason=trade.exit_reason,
+        realized_return=trade.realized_return,
+        rps_score=trade.rps_score,
+        invested_cash=_format_money(invested_cash),
+        exit_cash=_format_money(exit_cash),
+        realized_profit=_format_money(realized_profit),
+    )
 
 
 def _load_trade_dates(
@@ -255,6 +330,8 @@ def _screen_cache_key(
     use_cup_handle: bool,
     cup_handle_params: CupHandleParams,
     fundamental_growth_params: FundamentalGrowthParams | None,
+    max_hits: int | None = None,
+    exclude_symbols: set[str] | frozenset[str] | None = None,
 ) -> str:
     payload = {
         "signal_date": signal_date.isoformat(),
@@ -270,6 +347,8 @@ def _screen_cache_key(
             if fundamental_growth_params is not None
             else None
         ),
+        "max_hits": max_hits,
+        "exclude_symbols": sorted(exclude_symbols or []),
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
@@ -584,6 +663,8 @@ def run_cup_handle_rps_backtest(
     rps_exit_threshold: int | None = None,
     portfolio_cap: int = 10,
     position_weight_pct: Decimal = Decimal("0.10"),
+    initial_capital: Decimal = Decimal("100000"),
+    position_size_amount: Decimal | None = None,
     allow_reentry_while_open: bool = False,
     entry_delay_days: int = 0,
     entry_deferral_window_days: int = 5,
@@ -597,6 +678,8 @@ def run_cup_handle_rps_backtest(
     future_rows_cache: dict[tuple[object, ...], list[MarketDataDaily]] | None = None,
     future_indicator_cache: dict[tuple[object, ...], dict[date, DerivedIndicatorDaily]] | None = None,
     should_cancel: Callable[[], bool] | None = None,
+    preload_screen_candidates: bool = True,
+    execution_limited_screen: bool = False,
 ) -> CupHandleRpsBacktestResult:
     if start_date > end_date:
         raise ValueError("start_date must be on or before end_date.")
@@ -612,6 +695,19 @@ def run_cup_handle_rps_backtest(
         raise ValueError("portfolio_cap must be greater than or equal to 1.")
     if position_weight_pct <= Decimal("0") or position_weight_pct > Decimal("1"):
         raise ValueError("position_weight_pct must be greater than 0 and less than or equal to 1.")
+    if initial_capital <= Decimal("0"):
+        raise ValueError("initial_capital must be greater than 0.")
+    resolved_position_size_amount = (
+        position_size_amount
+        if position_size_amount is not None
+        else initial_capital * position_weight_pct
+    )
+    if resolved_position_size_amount <= Decimal("0"):
+        raise ValueError("position_size_amount must be greater than 0 when provided.")
+    if resolved_position_size_amount > initial_capital:
+        raise ValueError("position_size_amount cannot exceed initial_capital.")
+    initial_capital = _quantize_money(initial_capital)
+    resolved_position_size_amount = _quantize_money(resolved_position_size_amount)
     if entry_delay_days < 0:
         raise ValueError("entry_delay_days must be greater than or equal to 0.")
     if entry_deferral_window_days < 1:
@@ -642,7 +738,7 @@ def run_cup_handle_rps_backtest(
             trade_dates_cache[trade_dates_cache_key] = trade_dates
     else:
         trade_dates = cached_trade_dates
-    if use_rps:
+    if use_rps and preload_screen_candidates:
         preload_screen_candidate_cache(
             session,
             market=resolved_market,
@@ -659,14 +755,72 @@ def run_cup_handle_rps_backtest(
     total_candidates_evaluated = 0
     qualifying_observations = 0
     selected_trade_count = 0
-    open_positions: list[tuple[str, date]] = []
+    open_positions: list[_OpenAccountPosition] = []
+    account_cash = initial_capital
+    account_peak_capital = initial_capital
+    account_max_drawdown = Decimal("0")
+    account_equity_curve: list[dict[str, object]] = []
+    account_year_start_equity: dict[str, Decimal] = {}
+    account_year_latest_equity: dict[str, Decimal] = {}
+    account_final_date = start_date
+
+    def invested_cash_total() -> Decimal:
+        return sum((position.invested_cash for position in open_positions), Decimal("0"))
+
+    def account_equity() -> Decimal:
+        return account_cash + invested_cash_total()
+
+    def append_account_point(point_date: date, event: str) -> None:
+        nonlocal account_peak_capital, account_max_drawdown, account_final_date
+        equity = account_equity()
+        if equity > account_peak_capital:
+            account_peak_capital = equity
+        drawdown = (
+            (equity / account_peak_capital) - Decimal("1")
+            if account_peak_capital > Decimal("0")
+            else Decimal("0")
+        )
+        if drawdown < account_max_drawdown:
+            account_max_drawdown = drawdown
+        year = point_date.isoformat()[:4]
+        account_year_start_equity.setdefault(year, equity)
+        account_year_latest_equity[year] = equity
+        account_final_date = max(account_final_date, point_date)
+        account_equity_curve.append(
+            {
+                "signal_date": point_date.isoformat(),
+                "date": point_date.isoformat(),
+                "event": event,
+                "equity": _format_ratio(equity / initial_capital),
+                "capital": _format_money(equity),
+                "cash": _format_money(account_cash),
+                "invested_cash": _format_money(invested_cash_total()),
+                "drawdown": _format_ratio(drawdown),
+            }
+        )
+
+    append_account_point(start_date, "start")
 
     for index, signal_date in enumerate(trade_dates):
         if should_cancel is not None and index % 5 == 0 and should_cancel():
             raise BacktestCancelledError()
-        open_positions = [
-            (symbol, exit_date) for symbol, exit_date in open_positions if exit_date > signal_date
-        ]
+        settled_positions: list[_OpenAccountPosition] = []
+        remaining_positions: list[_OpenAccountPosition] = []
+        for position in open_positions:
+            if position.exit_date <= signal_date:
+                account_cash += position.exit_cash
+                settled_positions.append(position)
+            else:
+                remaining_positions.append(position)
+        open_positions = remaining_positions
+        if settled_positions:
+            append_account_point(signal_date, "settlement")
+        available_slots = max(portfolio_cap - len(open_positions), 0)
+        if execution_limited_screen and available_slots <= 0:
+            continue
+        open_symbols = {position.symbol for position in open_positions}
+        screen_max_hits = available_slots if execution_limited_screen else None
+        screen_exclude_symbols = open_symbols if execution_limited_screen else None
         cache_key = _screen_cache_key(
             signal_date=signal_date,
             market=resolved_market,
@@ -677,6 +831,8 @@ def run_cup_handle_rps_backtest(
             use_cup_handle=use_cup_handle,
             cup_handle_params=cup_handle_params,
             fundamental_growth_params=fundamental_growth_params,
+            max_hits=screen_max_hits,
+            exclude_symbols=screen_exclude_symbols,
         )
         screen_result = screen_cache.get(cache_key) if screen_cache is not None else None
         if screen_result is None:
@@ -696,6 +852,8 @@ def run_cup_handle_rps_backtest(
                 cup_event_cache=cup_event_cache,
                 cup_event_cache_start_date=start_date,
                 cup_event_cache_end_date=end_date,
+                max_hits=screen_max_hits,
+                exclude_symbols=screen_exclude_symbols,
             )
             if screen_cache is not None:
                 screen_cache[cache_key] = screen_result
@@ -712,20 +870,29 @@ def run_cup_handle_rps_backtest(
             )
         else:
             hits.sort(key=lambda hit: str(hit["symbol"]))
-        available_slots = max(portfolio_cap - len(open_positions), 0)
-        open_symbols = {symbol for symbol, _ in open_positions}
-        selected_hits: list[dict[str, object]] = []
+        day_returns: list[Decimal] = []
+        day_completed = 0
+        day_selected = 0
         for hit in hits:
-            if len(selected_hits) >= available_slots:
+            if day_selected >= available_slots:
                 break
             symbol = str(hit["symbol"])
             if not allow_reentry_while_open and symbol in open_symbols:
                 continue
-            selected_hits.append(hit)
-        selected_trade_count += len(selected_hits)
-        day_returns: list[Decimal] = []
-        day_completed = 0
-        for hit in selected_hits:
+            if account_cash < resolved_position_size_amount:
+                excluded.append(
+                    {
+                        "signal_date": signal_date.isoformat(),
+                        "instrument_id": int(hit["instrument_id"]),
+                        "symbol": symbol,
+                        "reason": "cash_insufficient",
+                        "available_cash": _format_money(account_cash),
+                        "required_cash": _format_money(resolved_position_size_amount),
+                    }
+                )
+                break
+            day_selected += 1
+            selected_trade_count += 1
             trade_or_exclusion = _simulate_trade_with_cache(
                 session,
                 signal_date=signal_date,
@@ -742,14 +909,30 @@ def run_cup_handle_rps_backtest(
                 future_indicator_cache=future_indicator_cache,
             )
             if isinstance(trade_or_exclusion, CupHandleRpsTrade):
-                completed_trades.append(trade_or_exclusion)
-                day_returns.append(Decimal(trade_or_exclusion.realized_return))
-                day_completed += 1
-                open_positions.append(
-                    (trade_or_exclusion.symbol, date.fromisoformat(trade_or_exclusion.exit_date))
+                account_trade = _trade_with_account_values(
+                    trade_or_exclusion,
+                    invested_cash=resolved_position_size_amount,
                 )
+                completed_trades.append(account_trade)
+                day_returns.append(Decimal(account_trade.realized_return))
+                day_completed += 1
+                account_cash -= resolved_position_size_amount
+                exit_cash = resolved_position_size_amount * (
+                    Decimal("1") + Decimal(account_trade.realized_return)
+                )
+                open_positions.append(
+                    _OpenAccountPosition(
+                        symbol=account_trade.symbol,
+                        exit_date=date.fromisoformat(account_trade.exit_date),
+                        invested_cash=resolved_position_size_amount,
+                        exit_cash=_quantize_money(exit_cash),
+                    )
+                )
+                open_symbols.add(account_trade.symbol)
             else:
                 excluded.append(trade_or_exclusion)
+        if day_selected or settled_positions:
+            append_account_point(signal_date, "signal")
 
         average_day_return = (
             sum(day_returns, Decimal("0")) / Decimal(len(day_returns)) if day_returns else None
@@ -758,11 +941,16 @@ def run_cup_handle_rps_backtest(
             CupHandleRpsSignalDay(
                 signal_date=signal_date.isoformat(),
                 hit_count=len(hits),
-                selected_count=len(selected_hits),
+                selected_count=day_selected,
                 completed_trades=day_completed,
                 average_return=_format_ratio(average_day_return),
             )
         )
+
+    for position in sorted(list(open_positions), key=lambda item: item.exit_date):
+        account_cash += position.exit_cash
+        open_positions = [item for item in open_positions if item is not position]
+        append_account_point(position.exit_date, "final_settlement")
 
     trade_returns = [Decimal(trade.realized_return) for trade in completed_trades]
     average_trade_return = (
@@ -786,6 +974,27 @@ def run_cup_handle_rps_backtest(
     rps_exit_trigger_ratio = (
         Decimal(rps_exit_trades) / Decimal(len(completed_trades)) if completed_trades else None
     )
+    final_capital = account_cash
+    total_profit = final_capital - initial_capital
+    account_total_return = (
+        (final_capital / initial_capital) - Decimal("1")
+        if initial_capital > Decimal("0")
+        else None
+    )
+    account_annualized_return = (
+        _annualize_return(
+            account_total_return,
+            start_date=start_date,
+            end_date=account_final_date,
+        )
+        if account_total_return is not None
+        else None
+    )
+    account_yearly_returns = {
+        year: _format_ratio((account_year_latest_equity[year] / start_equity) - Decimal("1"))
+        for year, start_equity in sorted(account_year_start_equity.items())
+        if start_equity > Decimal("0") and year in account_year_latest_equity
+    }
 
     return CupHandleRpsBacktestResult(
         start_date=start_date.isoformat(),
@@ -809,6 +1018,17 @@ def run_cup_handle_rps_backtest(
         rps_exit_trades=rps_exit_trades,
         rps_exit_trigger_ratio=_format_ratio(rps_exit_trigger_ratio),
         max_consecutive_losses=_max_consecutive_losses(trade_returns),
+        initial_capital=_format_money(initial_capital) or "0.00",
+        position_size_amount=_format_money(resolved_position_size_amount) or "0.00",
+        final_capital=_format_money(final_capital) or "0.00",
+        total_profit=_format_money(total_profit) or "0.00",
+        account_total_return=_format_ratio(account_total_return),
+        account_annualized_return=_format_ratio(account_annualized_return),
+        account_max_drawdown=_format_ratio(account_max_drawdown if account_equity_curve else None),
+        account_peak_capital=_format_money(account_peak_capital) or "0.00",
+        account_final_date=account_final_date.isoformat(),
+        account_equity_curve=account_equity_curve,
+        account_yearly_returns=account_yearly_returns,
         signal_days=[signal_day.to_dict() for signal_day in signal_days if signal_day.hit_count],
         trades=[trade.to_dict() for trade in completed_trades[:max_trades_returned]],
         excluded=excluded[:max_trades_returned],
@@ -831,6 +1051,8 @@ def run_cup_handle_rps_backtest(
             "rps_exit_threshold": rps_exit_threshold,
             "portfolio_cap": portfolio_cap,
             "position_weight_pct": f"{position_weight_pct:.4f}",
+            "initial_capital": _format_money(initial_capital),
+            "position_size_amount": _format_money(resolved_position_size_amount),
             "allow_reentry_while_open": allow_reentry_while_open,
             "entry_delay_days": entry_delay_days,
             "entry_deferral_window_days": entry_deferral_window_days,

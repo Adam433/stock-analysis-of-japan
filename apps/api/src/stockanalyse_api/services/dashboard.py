@@ -497,6 +497,19 @@ def _screen_candidate_payload(
     }
 
 
+def _candidate_rps_score(
+    candidate: dict[str, object],
+    selected_windows: list[int],
+) -> Decimal | None:
+    values: list[Decimal] = []
+    for window in selected_windows:
+        raw_value = candidate.get(f"rps_{window}")
+        if raw_value is None:
+            continue
+        values.append(Decimal(str(raw_value)))
+    return max(values) if values else None
+
+
 def preload_screen_candidate_cache(
     session,
     *,
@@ -689,6 +702,8 @@ def screen_universe(
     cup_event_cache: dict[tuple[object, ...], dict[int, list[object]] | None] | None = None,
     cup_event_cache_start_date: date | None = None,
     cup_event_cache_end_date: date | None = None,
+    max_hits: int | None = None,
+    exclude_symbols: set[str] | frozenset[str] | None = None,
 ) -> dict[str, object]:
     resolved_market = normalize_market(market)
     exchanges = _market_exchanges(resolved_market)
@@ -805,9 +820,27 @@ def screen_universe(
 
     total_evaluated = int(cached_candidates["total_evaluated"])
     candidates = list(cached_candidates["candidates"])  # type: ignore[arg-type]
+    excluded_symbols = set(exclude_symbols or ())
+    if excluded_symbols:
+        candidates = [
+            candidate
+            for candidate in candidates
+            if str(candidate["symbol"]) not in excluded_symbols
+        ]
+    if use_rps:
+        candidates.sort(
+            key=lambda candidate: (
+                -(_candidate_rps_score(candidate, selected_windows) or Decimal("-1")),
+                str(candidate["symbol"]),
+            )
+        )
+    else:
+        candidates.sort(key=lambda candidate: str(candidate["symbol"]))
     candidate_instrument_ids = [
         int(candidate["instrument_id"]) for candidate in candidates
     ]
+    hit_limit = max_hits if max_hits is not None and max_hits > 0 else None
+    limited_hit_scan = hit_limit is not None
 
     cup_handle_source = "disabled"
     materialized_cup_events = None
@@ -895,6 +928,7 @@ def screen_universe(
         resolved_fundamental_params.enabled
         and candidate_instrument_ids
         and fundamental_growth_cache is not None
+        and not limited_hit_scan
     ):
         fundamental_rows_by_instrument = _load_fundamental_rows_by_instrument(
             session,
@@ -908,6 +942,7 @@ def screen_universe(
             resolved_fundamental_params.max_pe is not None
             or resolved_fundamental_params.max_pb is not None
         )
+        and not limited_hit_scan
     ):
         fundamental_market_price_by_instrument = _load_market_close_by_instrument(
             session,
@@ -915,6 +950,34 @@ def screen_universe(
             trade_date=target_date,
             cache=fundamental_growth_cache,
         )
+
+    def fundamental_rows_for(instrument_id: int) -> list[_FundamentalAnnualSnapshot] | None:
+        if instrument_id in fundamental_rows_by_instrument:
+            return fundamental_rows_by_instrument[instrument_id]
+        if fundamental_growth_cache is None:
+            return None
+        rows_by_id = _load_fundamental_rows_by_instrument(
+            session,
+            instrument_ids=[instrument_id],
+            cache=fundamental_growth_cache,
+        )
+        return rows_by_id.get(instrument_id, [])
+
+    def market_price_for(instrument_id: int) -> Decimal | None:
+        if (
+            resolved_fundamental_params.max_pe is None
+            and resolved_fundamental_params.max_pb is None
+        ):
+            return None
+        if instrument_id in fundamental_market_price_by_instrument:
+            return fundamental_market_price_by_instrument[instrument_id]
+        loaded = _load_market_close_by_instrument(
+            session,
+            instrument_ids=[instrument_id],
+            trade_date=target_date,
+            cache=fundamental_growth_cache,
+        )
+        return loaded.get(instrument_id)
 
     hits: list[ScreenHit] = []
     fundamental_status_counts: dict[str, int] = defaultdict(int)
@@ -967,21 +1030,30 @@ def screen_universe(
             cached_fundamental_meta if isinstance(cached_fundamental_meta, dict) else None
         )
         if fundamental_meta is None:
-            if instrument_id in fundamental_rows_by_instrument:
+            if not resolved_fundamental_params.enabled:
                 fundamental_meta = _evaluate_fundamental_growth_from_rows(
-                    fundamental_rows_by_instrument[instrument_id],
+                    [],
                     signal_date=target_date,
                     params=resolved_fundamental_params,
-                    market_price=fundamental_market_price_by_instrument.get(instrument_id),
                 )
             else:
-                fundamental_meta = _evaluate_fundamental_growth(
-                    session,
-                    instrument_id=instrument_id,
-                    signal_date=target_date,
-                    params=resolved_fundamental_params,
-                    market_price=fundamental_market_price_by_instrument.get(instrument_id),
-                )
+                market_price = market_price_for(instrument_id)
+                fundamental_rows = fundamental_rows_for(instrument_id)
+                if fundamental_rows is not None:
+                    fundamental_meta = _evaluate_fundamental_growth_from_rows(
+                        fundamental_rows,
+                        signal_date=target_date,
+                        params=resolved_fundamental_params,
+                        market_price=market_price,
+                    )
+                else:
+                    fundamental_meta = _evaluate_fundamental_growth(
+                        session,
+                        instrument_id=instrument_id,
+                        signal_date=target_date,
+                        params=resolved_fundamental_params,
+                        market_price=market_price,
+                    )
             if fundamental_growth_cache is not None:
                 fundamental_growth_cache[fundamental_cache_key] = fundamental_meta
         fundamental_status_counts[str(fundamental_meta["status"])] += 1
@@ -1011,6 +1083,8 @@ def screen_universe(
                 fundamental_growth_latest_year=fundamental_meta["latest_fiscal_year"],
             )
         )
+        if hit_limit is not None and len(hits) >= hit_limit:
+            break
 
     return {
         "trade_date": target_date.isoformat(),

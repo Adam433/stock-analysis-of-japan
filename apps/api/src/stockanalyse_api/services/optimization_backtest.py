@@ -39,7 +39,10 @@ DEFAULT_OPTIMIZATION_OBJECTIVE = "score"
 DEFAULT_MAX_PARAMETER_SETS = 1000
 DEFAULT_OPTIMIZATION_PARALLEL_GROUP_SIZE = 1
 DEFAULT_OPTIMIZATION_DETAIL_CACHE_TRADES = 300
-MAX_AUTO_OPTIMIZATION_WORKERS = 6
+MAX_AUTO_OPTIMIZATION_WORKERS = 3
+DEFAULT_OPTIMIZATION_MAX_TASKS_PER_CHILD = 24
+DEFAULT_WORKER_CACHE_MAX_ENTRIES = 4096
+DEFAULT_WORKER_FUNDAMENTAL_CACHE_MAX_ENTRIES = 20000
 DEFAULT_OPTIMIZATION_FUNDAMENTAL_GROWTH_PARAMS = FundamentalGrowthParams(
     enabled=True,
     min_years=3,
@@ -67,14 +70,64 @@ SUPPORTED_OPTIMIZATION_OBJECTIVES = {
 }
 SUPPORTED_SEARCH_MODES = {"grid", "random"}
 
-_WORKER_SCREEN_CACHE: dict[str, dict[str, object]] = {}
-_WORKER_SCREEN_CANDIDATE_CACHE: dict[tuple[object, ...], dict[str, object]] = {}
-_WORKER_FUNDAMENTAL_GROWTH_CACHE: dict[tuple[object, ...], object] = {}
-_WORKER_CUP_EVENT_CACHE: dict[tuple[object, ...], dict[int, list[object]] | None] = {}
-_WORKER_TRADE_CACHE: dict[tuple[object, ...], object] = {}
-_WORKER_TRADE_DATES_CACHE: dict[tuple[object, ...], list[date]] = {}
-_WORKER_FUTURE_ROWS_CACHE: dict[tuple[object, ...], object] = {}
-_WORKER_FUTURE_INDICATOR_CACHE: dict[tuple[object, ...], object] = {}
+
+def _env_int(name: str, default: int, *, minimum: int = 0) -> int:
+    raw_value = os.environ.get(name)
+    if raw_value is None or raw_value == "":
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return default
+    return max(minimum, value)
+
+
+class _BoundedDict(dict):
+    def __init__(self, *, max_entries: int) -> None:
+        super().__init__()
+        self.max_entries = max(1, max_entries)
+
+    def __setitem__(self, key, value) -> None:  # type: ignore[no-untyped-def]
+        if key not in self and len(self) >= self.max_entries:
+            self.pop(next(iter(self)))
+        super().__setitem__(key, value)
+
+
+_WORKER_CACHE_MAX_ENTRIES = _env_int(
+    "STOCKANALYSE_OPTIMIZATION_WORKER_CACHE_MAX_ENTRIES",
+    DEFAULT_WORKER_CACHE_MAX_ENTRIES,
+    minimum=128,
+)
+_WORKER_FUNDAMENTAL_CACHE_MAX_ENTRIES = _env_int(
+    "STOCKANALYSE_OPTIMIZATION_WORKER_FUNDAMENTAL_CACHE_MAX_ENTRIES",
+    DEFAULT_WORKER_FUNDAMENTAL_CACHE_MAX_ENTRIES,
+    minimum=1024,
+)
+
+_WORKER_SCREEN_CACHE: dict[str, dict[str, object]] = _BoundedDict(
+    max_entries=_WORKER_CACHE_MAX_ENTRIES,
+)
+_WORKER_SCREEN_CANDIDATE_CACHE: dict[tuple[object, ...], dict[str, object]] = _BoundedDict(
+    max_entries=_WORKER_CACHE_MAX_ENTRIES,
+)
+_WORKER_FUNDAMENTAL_GROWTH_CACHE: dict[tuple[object, ...], object] = _BoundedDict(
+    max_entries=_WORKER_FUNDAMENTAL_CACHE_MAX_ENTRIES,
+)
+_WORKER_CUP_EVENT_CACHE: dict[tuple[object, ...], dict[int, list[object]] | None] = _BoundedDict(
+    max_entries=_WORKER_CACHE_MAX_ENTRIES,
+)
+_WORKER_TRADE_CACHE: dict[tuple[object, ...], object] = _BoundedDict(
+    max_entries=_WORKER_CACHE_MAX_ENTRIES,
+)
+_WORKER_TRADE_DATES_CACHE: dict[tuple[object, ...], list[date]] = _BoundedDict(
+    max_entries=128,
+)
+_WORKER_FUTURE_ROWS_CACHE: dict[tuple[object, ...], object] = _BoundedDict(
+    max_entries=_WORKER_CACHE_MAX_ENTRIES,
+)
+_WORKER_FUTURE_INDICATOR_CACHE: dict[tuple[object, ...], object] = _BoundedDict(
+    max_entries=_WORKER_CACHE_MAX_ENTRIES,
+)
 
 
 def _json_default(value: object) -> str:
@@ -143,6 +196,23 @@ def _configured_max_workers_from_metadata(metadata: dict[str, object]) -> int | 
     return _coerce_configured_max_workers(metadata.get("max_workers", "auto"))
 
 
+def _configured_max_tasks_per_child_from_metadata(
+    metadata: dict[str, object],
+) -> int | None:
+    raw_value = metadata.get("max_tasks_per_child")
+    if raw_value in {None, "", "auto"}:
+        resolved = _env_int(
+            "STOCKANALYSE_OPTIMIZATION_MAX_TASKS_PER_CHILD",
+            DEFAULT_OPTIMIZATION_MAX_TASKS_PER_CHILD,
+            minimum=0,
+        )
+    else:
+        resolved = int(raw_value)
+        if resolved < 0:
+            raise ValueError("max_tasks_per_child must be greater than or equal to 0.")
+    return resolved if resolved > 0 else None
+
+
 def _parameter_axes(parameter_space: dict[str, object]) -> list[tuple[str, list[object]]]:
     return [
         ("use_rps", _as_list(parameter_space.get("use_rps"), default=[True])),
@@ -172,6 +242,11 @@ def _parameter_axes(parameter_space: dict[str, object]) -> list[tuple[str, list[
         (
             "position_weight_pct",
             _as_list(parameter_space.get("position_weight_pct"), default=["0.10"]),
+        ),
+        ("initial_capital", _as_list(parameter_space.get("initial_capital"), default=["100000"])),
+        (
+            "position_size_amount",
+            _as_list(parameter_space.get("position_size_amount"), default=[None]),
         ),
         (
             "allow_reentry_while_open",
@@ -325,6 +400,25 @@ def _normalize_parameter_set(parameters: dict[str, object]) -> dict[str, object]
     )
     if position_weight_pct <= Decimal("0") or position_weight_pct > Decimal("1"):
         raise ValueError("position_weight_pct must be greater than 0 and less than or equal to 1.")
+    initial_capital = _coerce_decimal(
+        parameters.get("initial_capital", "100000"),
+        field_name="initial_capital",
+    )
+    if initial_capital <= Decimal("0"):
+        raise ValueError("initial_capital must be greater than 0.")
+    position_size_amount = _coerce_optional_decimal(
+        parameters.get("position_size_amount"),
+        field_name="position_size_amount",
+    )
+    if position_size_amount is not None and position_size_amount <= Decimal("0"):
+        raise ValueError("position_size_amount must be greater than 0 when provided.")
+    resolved_position_size = (
+        position_size_amount
+        if position_size_amount is not None
+        else initial_capital * position_weight_pct
+    )
+    if resolved_position_size > initial_capital:
+        raise ValueError("position_size_amount cannot exceed initial_capital.")
     return {
         "use_rps": use_rps,
         "rps_threshold": int(parameters.get("rps_threshold", 90)) if use_rps else 0,
@@ -339,6 +433,8 @@ def _normalize_parameter_set(parameters: dict[str, object]) -> dict[str, object]
         "rps_exit_threshold": rps_exit_threshold,
         "portfolio_cap": int(parameters.get("portfolio_cap", 10)),
         "position_weight_pct": f"{position_weight_pct:.4f}",
+        "initial_capital": f"{initial_capital:.2f}",
+        "position_size_amount": f"{position_size_amount:.2f}" if position_size_amount is not None else None,
         "allow_reentry_while_open": bool(parameters.get("allow_reentry_while_open", False)),
         "entry_delay_days": int(parameters.get("entry_delay_days", 0)),
         "entry_deferral_window_days": int(parameters.get("entry_deferral_window_days", 5)),
@@ -425,11 +521,15 @@ def _isoformat_utc(value):
     return value.isoformat()
 
 
-def serialize_optimization_run(run: OptimizationRun) -> dict[str, object]:
+def serialize_optimization_run(
+    run: OptimizationRun,
+    *,
+    include_parameter_sets: bool = True,
+) -> dict[str, object]:
     parameter_space, metadata = _split_parameter_space_metadata(
         load_json(run.parameter_space_json, default={})
     )
-    return {
+    payload = {
         "id": run.id,
         "market": run.market,
         "train_start_date": run.train_start_date.isoformat(),
@@ -453,19 +553,51 @@ def serialize_optimization_run(run: OptimizationRun) -> dict[str, object]:
         "random_seed": metadata.get("random_seed"),
         "max_workers": metadata.get("max_workers", "auto"),
         "parameter_space": parameter_space,
-        "parameter_sets": load_json(run.parameter_sets_json, default=[]),
         "data_snapshot": load_json(run.data_snapshot_json, default={}),
+    }
+    parameter_sets: list[object] = []
+    if include_parameter_sets or run.status == "running":
+        loaded_parameter_sets = load_json(run.parameter_sets_json, default=[])
+        parameter_sets = loaded_parameter_sets if isinstance(loaded_parameter_sets, list) else []
+    if include_parameter_sets:
+        payload["parameter_sets"] = parameter_sets
+    if run.status == "running":
+        current_index = int(run.completed_parameter_sets or 0) + int(run.failed_parameter_sets or 0)
+        payload["current_parameter_set"] = (
+            parameter_sets[current_index]
+            if 0 <= current_index < len(parameter_sets)
+            else None
+        )
+    return payload
+
+
+def _compact_optimization_metrics(metrics: object) -> object:
+    if not isinstance(metrics, dict):
+        return metrics
+    return {
+        key: value
+        for key, value in metrics.items()
+        if key not in {"equity_curve", "yearly_returns"}
     }
 
 
-def serialize_optimization_result(result: OptimizationResult) -> dict[str, object]:
+def serialize_optimization_result(
+    result: OptimizationResult,
+    *,
+    include_metric_series: bool = True,
+) -> dict[str, object]:
+    train_metrics = load_json(result.train_metrics_json, default=None)
+    validation_metrics = load_json(result.validation_metrics_json, default=None)
+    if not include_metric_series:
+        train_metrics = _compact_optimization_metrics(train_metrics)
+        validation_metrics = _compact_optimization_metrics(validation_metrics)
     return {
         "id": result.id,
         "optimization_run_id": result.optimization_run_id,
         "parameter_hash": result.parameter_hash,
         "parameters": load_json(result.parameters_json, default={}),
-        "train_metrics": load_json(result.train_metrics_json, default=None),
-        "validation_metrics": load_json(result.validation_metrics_json, default=None),
+        "train_metrics": train_metrics,
+        "validation_metrics": validation_metrics,
         "score": f"{result.score:.6f}" if result.score is not None else None,
         "rank": result.rank,
         "status": result.status,
@@ -645,6 +777,15 @@ def _decimal_metric(metrics: dict[str, object], key: str, default: str = "0") ->
     return _coerce_decimal(value, field_name=key)
 
 
+def _optional_decimal_metric(metrics: dict[str, object] | None, key: str) -> Decimal | None:
+    if metrics is None:
+        return None
+    value = metrics.get(key)
+    if value is None:
+        return None
+    return _coerce_decimal(value, field_name=key)
+
+
 def _format_metric(value: Decimal | None) -> str | None:
     return f"{value.quantize(RATIO_PATTERN):.6f}" if value is not None else None
 
@@ -668,6 +809,44 @@ def _annualize_return(total_return: Decimal, *, start_date: object, end_date: ob
 
 
 def _portfolio_metrics_from_signal_days(result: dict[str, object]) -> dict[str, object]:
+    if result.get("account_total_return") is not None:
+        account_annualized_return = (
+            _coerce_decimal(
+                result.get("account_annualized_return") or "0",
+                field_name="account_annualized_return",
+            )
+            if result.get("account_annualized_return") is not None
+            else None
+        )
+        account_max_drawdown = (
+            _coerce_decimal(
+                result.get("account_max_drawdown") or "0",
+                field_name="account_max_drawdown",
+            )
+            if result.get("account_max_drawdown") is not None
+            else None
+        )
+        return_drawdown_ratio = (
+            account_annualized_return / abs(account_max_drawdown)
+            if account_annualized_return is not None
+            and account_max_drawdown is not None
+            and account_max_drawdown < Decimal("0")
+            else None
+        )
+        return {
+            "total_return": result.get("account_total_return"),
+            "annualized_return": result.get("account_annualized_return"),
+            "average_annualized_return": result.get("account_annualized_return"),
+            "max_drawdown": result.get("account_max_drawdown"),
+            "return_drawdown_ratio": _format_metric(return_drawdown_ratio),
+            "signal_day_return_count": len(result.get("account_equity_curve") or []),
+            "equity_curve": result.get("account_equity_curve") or [],
+            "yearly_returns": result.get("account_yearly_returns") or {},
+            "initial_capital": result.get("initial_capital"),
+            "position_size_amount": result.get("position_size_amount"),
+            "final_capital": result.get("final_capital"),
+            "total_profit": result.get("total_profit"),
+        }
     signal_days = result.get("signal_days")
     if not isinstance(signal_days, list):
         signal_days = []
@@ -845,15 +1024,17 @@ def _score_metric_pair(
 ) -> Decimal:
     if objective != "robust_annualized_return":
         return _score_metrics(validation_metrics or train_metrics, objective=objective)
-    train_annualized = _decimal_metric(train_metrics, "annualized_return")
-    validation_annualized = (
-        _decimal_metric(validation_metrics, "annualized_return")
+    train_annualized_value = _optional_decimal_metric(train_metrics, "annualized_return")
+    validation_annualized_value = (
+        _optional_decimal_metric(validation_metrics, "annualized_return")
         if validation_metrics is not None
-        else train_annualized
+        else train_annualized_value
     )
-    train_drawdown = abs(_decimal_metric(train_metrics, "max_drawdown"))
+    train_annualized = train_annualized_value or Decimal("0")
+    validation_annualized = validation_annualized_value or Decimal("0")
+    train_drawdown = abs(_optional_decimal_metric(train_metrics, "max_drawdown") or Decimal("0"))
     validation_drawdown = (
-        abs(_decimal_metric(validation_metrics, "max_drawdown"))
+        abs(_optional_decimal_metric(validation_metrics, "max_drawdown") or Decimal("0"))
         if validation_metrics is not None
         else train_drawdown
     )
@@ -865,20 +1046,46 @@ def _score_metric_pair(
     )
     consistency_floor = min(train_annualized, validation_annualized)
     average_return = (train_annualized + validation_annualized) / Decimal("2")
-    positive_gap = abs(train_annualized - validation_annualized)
-    drawdown_penalty = max(train_drawdown, validation_drawdown) * Decimal("0.15")
-    gap_penalty = positive_gap * Decimal("0.35")
-    sample_penalty = Decimal("0")
-    if min(train_completed, validation_completed) < Decimal("50"):
-        sample_penalty = Decimal("0.08")
-    elif min(train_completed, validation_completed) < Decimal("100"):
-        sample_penalty = Decimal("0.03")
+    annualized_gap = abs(train_annualized - validation_annualized)
+    largest_drawdown = max(train_drawdown, validation_drawdown)
+    drawdown_penalty = largest_drawdown * Decimal("0.08")
+    gap_penalty = annualized_gap * Decimal("0.06")
+    min_completed = min(train_completed, validation_completed)
+    if min_completed < Decimal("10"):
+        sample_penalty = Decimal("0.35")
+    elif min_completed < Decimal("30"):
+        sample_penalty = Decimal("0.22")
+    elif min_completed < Decimal("50"):
+        sample_penalty = Decimal("0.12")
+    elif min_completed < Decimal("100"):
+        sample_penalty = Decimal("0.04")
+    else:
+        sample_penalty = Decimal("0")
+    missing_penalty = Decimal("0")
+    if train_annualized_value is None:
+        missing_penalty += Decimal("0.18")
+    if validation_metrics is not None and validation_annualized_value is None:
+        missing_penalty += Decimal("0.18")
+    negative_train_penalty = abs(min(train_annualized, Decimal("0"))) * Decimal("0.25")
+    if train_annualized < Decimal("-0.03"):
+        negative_train_penalty += abs(train_annualized - Decimal("-0.03")) * Decimal("1.20")
+    risk_adjusted_bonus = Decimal("0")
+    if validation_annualized > Decimal("0"):
+        drawdown_floor = max(validation_drawdown, Decimal("0.03"))
+        risk_adjusted_bonus = min(
+            Decimal("0.18"),
+            (validation_annualized / drawdown_floor) * Decimal("0.04"),
+        )
     score = (
-        consistency_floor * Decimal("0.70")
-        + average_return * Decimal("0.30")
+        validation_annualized * Decimal("0.55")
+        + consistency_floor * Decimal("0.20")
+        + average_return * Decimal("0.15")
+        + risk_adjusted_bonus
         - gap_penalty
         - drawdown_penalty
         - sample_penalty
+        - negative_train_penalty
+        - missing_penalty
     )
     return score.quantize(RATIO_PATTERN)
 
@@ -947,6 +1154,14 @@ def _run_backtest_once(
             parameters.get("position_weight_pct", "0.10"),
             field_name="position_weight_pct",
         ),
+        initial_capital=_coerce_decimal(
+            parameters.get("initial_capital", "100000"),
+            field_name="initial_capital",
+        ),
+        position_size_amount=_coerce_optional_decimal(
+            parameters.get("position_size_amount"),
+            field_name="position_size_amount",
+        ),
         allow_reentry_while_open=bool(parameters.get("allow_reentry_while_open", False)),
         entry_delay_days=int(parameters.get("entry_delay_days", 0)),
         entry_deferral_window_days=int(parameters.get("entry_deferral_window_days", 5)),
@@ -960,6 +1175,8 @@ def _run_backtest_once(
         future_rows_cache=future_rows_cache,  # type: ignore[arg-type]
         future_indicator_cache=future_indicator_cache,  # type: ignore[arg-type]
         should_cancel=should_cancel,
+        preload_screen_candidates=False,
+        execution_limited_screen=True,
     )
     return result.to_dict()
 
@@ -1594,6 +1811,7 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
     parameter_sets = [parameters for parameters in parameter_sets if isinstance(parameters, dict)]
     _, metadata = _split_parameter_space_metadata(load_json(run.parameter_space_json, default={}))
     configured_max_workers = _configured_max_workers_from_metadata(metadata)
+    max_tasks_per_child = _configured_max_tasks_per_child_from_metadata(metadata)
     max_workers = _resolve_optimization_max_workers(
         session,
         configured_max_workers=configured_max_workers,
@@ -1691,7 +1909,10 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
             group_index += 1
             pending[executor.submit(_evaluate_parameter_set_group_worker, worker_payload(group))] = group
 
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        executor_kwargs: dict[str, object] = {"max_workers": max_workers}
+        if max_tasks_per_child is not None:
+            executor_kwargs["max_tasks_per_child"] = max_tasks_per_child
+        with ProcessPoolExecutor(**executor_kwargs) as executor:
             for _ in range(min(max_workers, len(groups))):
                 submit_next(executor)
             while pending:

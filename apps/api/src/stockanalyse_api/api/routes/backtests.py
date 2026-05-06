@@ -183,7 +183,7 @@ def create_parameter_optimization_run(payload: OptimizationRunCreateRequest) -> 
                 max_workers=payload.max_workers,
                 require_data_ready=True,
             )
-            run_payload = serialize_optimization_run(run)
+            run_payload = serialize_optimization_run(run, include_parameter_sets=False)
         if payload.execute_immediately:
             dispatch_optimization_run_execution(int(run_payload["id"]))
     except ValueError as exc:
@@ -198,7 +198,11 @@ def read_latest_parameter_optimization_run(market: str = "us") -> dict[str, obje
         with SessionLocal() as session:
             run = get_latest_optimization_run(session, market=market)
             return {
-                "optimization_run": serialize_optimization_run(run) if run is not None else None
+                "optimization_run": (
+                    serialize_optimization_run(run, include_parameter_sets=False)
+                    if run is not None
+                    else None
+                )
             }
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -210,7 +214,7 @@ def read_parameter_optimization_run(run_id: int) -> dict[str, object]:
         run = get_optimization_run(session, run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Optimization run not found.")
-        return {"optimization_run": serialize_optimization_run(run)}
+        return {"optimization_run": serialize_optimization_run(run, include_parameter_sets=False)}
 
 
 @router.get("/optimization/runs/{run_id}/results")
@@ -225,7 +229,10 @@ def read_parameter_optimization_results(
             raise HTTPException(status_code=404, detail="Optimization run not found.")
         results = list_optimization_results(session, run_id=run_id, limit=limit, offset=offset)
         return {
-            "results": [serialize_optimization_result(result) for result in results],
+            "results": [
+                serialize_optimization_result(result, include_metric_series=False)
+                for result in results
+            ],
             "total": count_optimization_results(session, run_id=run_id),
             "limit": limit,
             "offset": offset,
@@ -256,7 +263,12 @@ def cancel_parameter_optimization_run(run_id: int) -> dict[str, object]:
     try:
         with SessionLocal() as session:
             run = cancel_optimization_run(session, run_id)
-            return {"optimization_run": serialize_optimization_run(run)}
+            return {
+                "optimization_run": serialize_optimization_run(
+                    run,
+                    include_parameter_sets=False,
+                )
+            }
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
