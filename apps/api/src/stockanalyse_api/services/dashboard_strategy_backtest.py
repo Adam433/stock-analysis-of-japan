@@ -31,6 +31,15 @@ from stockanalyse_api.services.market_data_adjustments import is_complete_market
 RATIO_PATTERN = Decimal("0.000001")
 MONEY_PATTERN = Decimal("0.01")
 MAX_TRADE_LOOKAHEAD_ROWS = 5000
+DEFAULT_MARKET_FILTER_PARAMS: dict[str, object] = {
+    "enabled": False,
+    "symbol": "SPY",
+    "require_price_above_sma": True,
+    "price_sma_days": 200,
+    "require_fast_sma_above_slow_sma": False,
+    "fast_sma_days": 50,
+    "slow_sma_days": 200,
+}
 
 
 @dataclass(slots=True)
@@ -176,6 +185,130 @@ def _max_consecutive_losses(trade_returns: list[Decimal]) -> int:
     return maximum
 
 
+def _normalize_market_filter_params(params: dict[str, object] | None) -> dict[str, object]:
+    merged = dict(DEFAULT_MARKET_FILTER_PARAMS)
+    merged.update(params or {})
+    enabled = bool(merged.get("enabled", False))
+    symbol = str(merged.get("symbol") or "SPY").strip().upper()
+    if enabled and not symbol:
+        raise ValueError("market_filter_params.symbol is required when market filter is enabled.")
+    price_sma_days = int(merged.get("price_sma_days") or 200)
+    fast_sma_days = int(merged.get("fast_sma_days") or 50)
+    slow_sma_days = int(merged.get("slow_sma_days") or 200)
+    for field_name, value in {
+        "price_sma_days": price_sma_days,
+        "fast_sma_days": fast_sma_days,
+        "slow_sma_days": slow_sma_days,
+    }.items():
+        if value < 2:
+            raise ValueError(f"market_filter_params.{field_name} must be at least 2.")
+    return {
+        "enabled": enabled,
+        "symbol": symbol,
+        "require_price_above_sma": bool(merged.get("require_price_above_sma", True)),
+        "price_sma_days": price_sma_days,
+        "require_fast_sma_above_slow_sma": bool(
+            merged.get("require_fast_sma_above_slow_sma", False)
+        ),
+        "fast_sma_days": fast_sma_days,
+        "slow_sma_days": slow_sma_days,
+    }
+
+
+def _market_filter_cache_key(
+    *,
+    params: dict[str, object],
+    start_date: date,
+    end_date: date,
+) -> tuple[object, ...]:
+    return (
+        "market_filter",
+        start_date.isoformat(),
+        end_date.isoformat(),
+        params["enabled"],
+        params["symbol"],
+        params["require_price_above_sma"],
+        params["price_sma_days"],
+        params["require_fast_sma_above_slow_sma"],
+        params["fast_sma_days"],
+        params["slow_sma_days"],
+    )
+
+
+def _load_market_filter_allowed_dates(
+    session,
+    *,
+    start_date: date,
+    end_date: date,
+    params: dict[str, object],
+    market_filter_cache: dict[tuple[object, ...], set[date]] | None = None,
+) -> set[date]:
+    cache_key = _market_filter_cache_key(
+        params=params,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    cached = market_filter_cache.get(cache_key) if market_filter_cache is not None else None
+    if cached is not None:
+        return cached
+
+    symbol = str(params["symbol"])
+    rows = list(
+        session.execute(
+            select(MarketDataDaily)
+            .join(Instrument, Instrument.id == MarketDataDaily.instrument_id)
+            .where(
+                Instrument.symbol == symbol,
+                MarketDataDaily.trade_date <= end_date,
+            )
+            .order_by(MarketDataDaily.trade_date.asc())
+        ).scalars()
+    )
+    if not rows:
+        raise ValueError(f"Market filter symbol {symbol} has no market data.")
+
+    require_price_above_sma = bool(params["require_price_above_sma"])
+    price_sma_days = int(params["price_sma_days"])
+    require_fast_sma_above_slow_sma = bool(params["require_fast_sma_above_slow_sma"])
+    fast_sma_days = int(params["fast_sma_days"])
+    slow_sma_days = int(params["slow_sma_days"])
+    close_values: list[Decimal] = []
+    allowed_dates: set[date] = set()
+    for row in rows:
+        if not is_complete_market_row(row):
+            continue
+        close = adjusted_close(row)
+        if close is None:
+            continue
+        close_values.append(close)
+        passes = True
+        if require_price_above_sma:
+            if len(close_values) < price_sma_days:
+                passes = False
+            else:
+                price_sma = sum(close_values[-price_sma_days:], Decimal("0")) / Decimal(
+                    price_sma_days
+                )
+                passes = close > price_sma
+        if passes and require_fast_sma_above_slow_sma:
+            if len(close_values) < max(fast_sma_days, slow_sma_days):
+                passes = False
+            else:
+                fast_sma = sum(close_values[-fast_sma_days:], Decimal("0")) / Decimal(
+                    fast_sma_days
+                )
+                slow_sma = sum(close_values[-slow_sma_days:], Decimal("0")) / Decimal(
+                    slow_sma_days
+                )
+                passes = fast_sma > slow_sma
+        if passes and start_date <= row.trade_date <= end_date:
+            allowed_dates.add(row.trade_date)
+
+    if market_filter_cache is not None:
+        market_filter_cache[cache_key] = allowed_dates
+    return allowed_dates
+
+
 def _trade_with_account_values(
     trade: CupHandleRpsTrade,
     *,
@@ -234,14 +367,18 @@ def _load_future_rows(
     instrument_id: int,
     signal_date: date,
     limit: int,
+    max_exit_date: date | None = None,
 ) -> list[MarketDataDaily]:
+    predicates = [
+        MarketDataDaily.instrument_id == instrument_id,
+        MarketDataDaily.trade_date > signal_date,
+    ]
+    if max_exit_date is not None:
+        predicates.append(MarketDataDaily.trade_date <= max_exit_date)
     return list(
         session.execute(
             select(MarketDataDaily)
-            .where(
-                MarketDataDaily.instrument_id == instrument_id,
-                MarketDataDaily.trade_date > signal_date,
-            )
+            .where(*predicates)
             .order_by(MarketDataDaily.trade_date.asc())
             .limit(limit)
         ).scalars()
@@ -304,15 +441,19 @@ def _load_future_indicator_map(
     instrument_id: int,
     signal_date: date,
     limit: int,
+    max_exit_date: date | None = None,
 ) -> dict[date, DerivedIndicatorDaily]:
     if limit < 1:
         return {}
+    predicates = [
+        DerivedIndicatorDaily.instrument_id == instrument_id,
+        DerivedIndicatorDaily.trade_date > signal_date,
+    ]
+    if max_exit_date is not None:
+        predicates.append(DerivedIndicatorDaily.trade_date <= max_exit_date)
     rows = session.execute(
         select(DerivedIndicatorDaily)
-        .where(
-            DerivedIndicatorDaily.instrument_id == instrument_id,
-            DerivedIndicatorDaily.trade_date > signal_date,
-        )
+        .where(*predicates)
         .order_by(DerivedIndicatorDaily.trade_date.asc())
         .limit(limit)
     ).scalars()
@@ -365,6 +506,7 @@ def _simulate_trade(
     rps_exit_threshold: int | None = None,
     entry_delay_days: int = 0,
     entry_deferral_window_days: int = 5,
+    max_exit_date: date | None = None,
     future_rows_cache: dict[tuple[object, ...], list[MarketDataDaily]] | None = None,
     future_indicator_cache: dict[tuple[object, ...], dict[date, DerivedIndicatorDaily]] | None = None,
 ) -> CupHandleRpsTrade | dict[str, object]:
@@ -380,6 +522,7 @@ def _simulate_trade(
         instrument_id,
         signal_date.isoformat(),
         future_row_limit,
+        max_exit_date.isoformat() if max_exit_date is not None else None,
     )
     cached_rows = (
         future_rows_cache.get(future_rows_cache_key)
@@ -392,6 +535,7 @@ def _simulate_trade(
             instrument_id=instrument_id,
             signal_date=signal_date,
             limit=future_row_limit,
+            max_exit_date=max_exit_date,
         )
         if future_rows_cache is not None:
             future_rows_cache[future_rows_cache_key] = rows
@@ -426,6 +570,28 @@ def _simulate_trade(
 
     entry_row = rows[entry_index]
     last_mark_price = entry_price
+
+    def mark_to_latest_close(exit_reason: str) -> CupHandleRpsTrade | None:
+        for row in reversed(rows[entry_index:]):
+            candidate_close = _valid_close(row)
+            if candidate_close is None:
+                continue
+            realized_return = _quantize_ratio((candidate_close / entry_price) - Decimal("1"))
+            rps_score = _hit_rps_score(hit, selected_windows)
+            return CupHandleRpsTrade(
+                signal_date=signal_date.isoformat(),
+                instrument_id=instrument_id,
+                symbol=symbol,
+                entry_date=entry_row.trade_date.isoformat(),
+                entry_price=f"{entry_price:.6f}",
+                exit_date=row.trade_date.isoformat(),
+                exit_price=f"{candidate_close:.6f}",
+                exit_reason=exit_reason,
+                realized_return=f"{realized_return:.6f}",
+                rps_score=f"{rps_score:.2f}" if rps_score is not None else None,
+            )
+        return None
+
     indicator_by_date: dict[date, DerivedIndicatorDaily] = {}
     if rps_exit_threshold is not None:
         future_indicator_cache_key = (
@@ -433,6 +599,7 @@ def _simulate_trade(
             instrument_id,
             signal_date.isoformat(),
             len(rows),
+            max_exit_date.isoformat() if max_exit_date is not None else None,
         )
         cached_indicator_map = (
             future_indicator_cache.get(future_indicator_cache_key)
@@ -445,6 +612,7 @@ def _simulate_trade(
                 instrument_id=instrument_id,
                 signal_date=signal_date,
                 limit=len(rows),
+                max_exit_date=max_exit_date,
             )
             if future_indicator_cache is not None:
                 future_indicator_cache[future_indicator_cache_key] = indicator_by_date
@@ -489,24 +657,14 @@ def _simulate_trade(
             break
 
     if trigger_index is None:
+        if max_exit_date is not None:
+            window_mark_trade = mark_to_latest_close("window_end_mark")
+            if window_mark_trade is not None:
+                return window_mark_trade
         if holding_days is None:
-            for row in reversed(rows[entry_index:]):
-                candidate_close = _valid_close(row)
-                if candidate_close is not None:
-                    realized_return = _quantize_ratio((candidate_close / entry_price) - Decimal("1"))
-                    rps_score = _hit_rps_score(hit, selected_windows)
-                    return CupHandleRpsTrade(
-                        signal_date=signal_date.isoformat(),
-                        instrument_id=instrument_id,
-                        symbol=symbol,
-                        entry_date=entry_row.trade_date.isoformat(),
-                        entry_price=f"{entry_price:.6f}",
-                        exit_date=row.trade_date.isoformat(),
-                        exit_price=f"{candidate_close:.6f}",
-                        exit_reason="data_end_mark",
-                        realized_return=f"{realized_return:.6f}",
-                        rps_score=f"{rps_score:.2f}" if rps_score is not None else None,
-                    )
+            data_end_mark_trade = mark_to_latest_close("data_end_mark")
+            if data_end_mark_trade is not None:
+                return data_end_mark_trade
         return {
             "signal_date": signal_date.isoformat(),
             "instrument_id": instrument_id,
@@ -528,6 +686,10 @@ def _simulate_trade(
                 break
 
     if exit_row is None or exit_price is None:
+        if max_exit_date is not None:
+            window_mark_trade = mark_to_latest_close("window_end_mark")
+            if window_mark_trade is not None:
+                return window_mark_trade
         return {
             "signal_date": signal_date.isoformat(),
             "instrument_id": instrument_id,
@@ -562,6 +724,7 @@ def _trade_cache_key(
     rps_exit_threshold: int | None,
     entry_delay_days: int,
     entry_deferral_window_days: int,
+    max_exit_date: date | None,
 ) -> tuple[object, ...]:
     return (
         "trade_simulation",
@@ -578,6 +741,7 @@ def _trade_cache_key(
         rps_exit_threshold,
         entry_delay_days,
         entry_deferral_window_days,
+        max_exit_date.isoformat() if max_exit_date is not None else None,
     )
 
 
@@ -593,6 +757,7 @@ def _simulate_trade_with_cache(
     rps_exit_threshold: int | None = None,
     entry_delay_days: int = 0,
     entry_deferral_window_days: int = 5,
+    max_exit_date: date | None = None,
     trade_cache: dict[tuple[object, ...], CupHandleRpsTrade | dict[str, object]] | None = None,
     future_rows_cache: dict[tuple[object, ...], list[MarketDataDaily]] | None = None,
     future_indicator_cache: dict[tuple[object, ...], dict[date, DerivedIndicatorDaily]] | None = None,
@@ -609,6 +774,7 @@ def _simulate_trade_with_cache(
             rps_exit_threshold=rps_exit_threshold,
             entry_delay_days=entry_delay_days,
             entry_deferral_window_days=entry_deferral_window_days,
+            max_exit_date=max_exit_date,
             future_rows_cache=future_rows_cache,
             future_indicator_cache=future_indicator_cache,
         )
@@ -622,6 +788,7 @@ def _simulate_trade_with_cache(
         rps_exit_threshold=rps_exit_threshold,
         entry_delay_days=entry_delay_days,
         entry_deferral_window_days=entry_deferral_window_days,
+        max_exit_date=max_exit_date,
     )
     cached = trade_cache.get(cache_key)
     if cached is not None:
@@ -637,6 +804,7 @@ def _simulate_trade_with_cache(
         rps_exit_threshold=rps_exit_threshold,
         entry_delay_days=entry_delay_days,
         entry_deferral_window_days=entry_deferral_window_days,
+        max_exit_date=max_exit_date,
         future_rows_cache=future_rows_cache,
         future_indicator_cache=future_indicator_cache,
     )
@@ -666,6 +834,7 @@ def run_cup_handle_rps_backtest(
     initial_capital: Decimal = Decimal("100000"),
     position_size_amount: Decimal | None = None,
     allow_reentry_while_open: bool = False,
+    market_filter_params: dict[str, object] | None = None,
     entry_delay_days: int = 0,
     entry_deferral_window_days: int = 5,
     max_trades_returned: int = 300,
@@ -677,9 +846,11 @@ def run_cup_handle_rps_backtest(
     trade_dates_cache: dict[tuple[object, ...], list[date]] | None = None,
     future_rows_cache: dict[tuple[object, ...], list[MarketDataDaily]] | None = None,
     future_indicator_cache: dict[tuple[object, ...], dict[date, DerivedIndicatorDaily]] | None = None,
+    market_filter_cache: dict[tuple[object, ...], set[date]] | None = None,
     should_cancel: Callable[[], bool] | None = None,
     preload_screen_candidates: bool = True,
     execution_limited_screen: bool = False,
+    force_exit_at_end: bool = False,
 ) -> CupHandleRpsBacktestResult:
     if start_date > end_date:
         raise ValueError("start_date must be on or before end_date.")
@@ -716,6 +887,7 @@ def run_cup_handle_rps_backtest(
         raise ValueError("max_trades_returned must be greater than or equal to 0.")
 
     resolved_market = normalize_market(market)
+    normalized_market_filter_params = _normalize_market_filter_params(market_filter_params)
     trade_dates_cache_key = (
         "trade_dates",
         resolved_market,
@@ -738,6 +910,15 @@ def run_cup_handle_rps_backtest(
             trade_dates_cache[trade_dates_cache_key] = trade_dates
     else:
         trade_dates = cached_trade_dates
+    market_filter_allowed_dates: set[date] | None = None
+    if normalized_market_filter_params["enabled"]:
+        market_filter_allowed_dates = _load_market_filter_allowed_dates(
+            session,
+            start_date=start_date,
+            end_date=end_date,
+            params=normalized_market_filter_params,
+            market_filter_cache=market_filter_cache,
+        )
     if use_rps and preload_screen_candidates:
         preload_screen_candidate_cache(
             session,
@@ -815,6 +996,8 @@ def run_cup_handle_rps_backtest(
         open_positions = remaining_positions
         if settled_positions:
             append_account_point(signal_date, "settlement")
+        if market_filter_allowed_dates is not None and signal_date not in market_filter_allowed_dates:
+            continue
         available_slots = max(portfolio_cap - len(open_positions), 0)
         if execution_limited_screen and available_slots <= 0:
             continue
@@ -904,6 +1087,7 @@ def run_cup_handle_rps_backtest(
                 rps_exit_threshold=rps_exit_threshold,
                 entry_delay_days=entry_delay_days,
                 entry_deferral_window_days=entry_deferral_window_days,
+                max_exit_date=end_date if force_exit_at_end else None,
                 trade_cache=trade_cache,
                 future_rows_cache=future_rows_cache,
                 future_indicator_cache=future_indicator_cache,
@@ -951,6 +1135,8 @@ def run_cup_handle_rps_backtest(
         account_cash += position.exit_cash
         open_positions = [item for item in open_positions if item is not position]
         append_account_point(position.exit_date, "final_settlement")
+    if force_exit_at_end and account_final_date < end_date:
+        append_account_point(end_date, "window_end")
 
     trade_returns = [Decimal(trade.realized_return) for trade in completed_trades]
     average_trade_return = (
@@ -1054,8 +1240,10 @@ def run_cup_handle_rps_backtest(
             "initial_capital": _format_money(initial_capital),
             "position_size_amount": _format_money(resolved_position_size_amount),
             "allow_reentry_while_open": allow_reentry_while_open,
+            "market_filter_params": normalized_market_filter_params,
             "entry_delay_days": entry_delay_days,
             "entry_deferral_window_days": entry_deferral_window_days,
             "max_trades_returned": max_trades_returned,
+            "force_exit_at_end": force_exit_at_end,
         },
     )

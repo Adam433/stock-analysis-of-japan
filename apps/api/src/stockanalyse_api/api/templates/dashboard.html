@@ -695,6 +695,20 @@
         </div>
         <div class="field">
           <label class="label-with-hint">
+            <span>市场过滤组合</span>
+            <span class="hint" tabindex="0" data-tip="多值用逗号分隔。&#10;none=不启用；200ma=过滤标的收盘价高于 200 日均线；50_200ma=50 日均线高于 200 日均线；也可写 qqq_100ma、spy_200ma 直接指定标的。">?</span>
+          </label>
+          <input type="text" id="optimizationMarketFilterModes" value="none,spy_200ma,spy_50_200ma" title="例：none,200ma,50_200ma 或 none,qqq_100ma,qqq_150ma" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>市场过滤标的</span>
+            <span class="hint" tabindex="0" data-tip="用于判断市场环境的指数或 ETF 代码。默认 SPY；需要本地已有该标的行情数据。">?</span>
+          </label>
+          <input type="text" id="optimizationMarketFilterSymbol" value="SPY" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
             <span>持仓上限</span>
             <span class="hint" tabindex="0" data-tip="同一时刻最多持有的股票数。&#10;命中信号超过该上限会按打分顺序进入候补，等已有持仓退出再补位。">?</span>
           </label>
@@ -745,7 +759,7 @@
         <div class="field">
           <label class="label-with-hint">
             <span>并行 worker</span>
-            <span class="hint" tabindex="0" data-tip="留空表示自动按机器 CPU 选择，当前上限为 6。&#10;SQLite 下不建议拉满全部核心，通常 4–6 比较稳。">?</span>
+            <span class="hint" tabindex="0" data-tip="留空表示自动按机器 CPU 选择，当前上限为 3。&#10;当前机器建议使用 2 worker 稳定跑长期优化。">?</span>
           </label>
           <input type="number" id="optimizationMaxWorkers" min="1" max="16" placeholder="自动" />
         </div>
@@ -789,31 +803,6 @@
           </label>
           <input type="text" id="optimizationComboCount" value="—" readonly />
         </div>
-      </div>
-      <div class="card-title-row" style="margin-top: 14px;">
-        <h2>启用条件</h2>
-        <span class="mini-badge">归因开关</span>
-      </div>
-      <div class="row-hint-wrap">
-        <label class="row">
-          <input type="checkbox" id="optimizationUseFundamental" checked disabled />
-          <span>财务必选</span>
-        </label>
-        <span class="hint" tabindex="0" data-tip="参数优化始终包含财务过滤；可调整财务要求强弱，但不做无财务策略。">?</span>
-      </div>
-      <div class="row-hint-wrap">
-        <label class="row">
-          <input type="checkbox" id="optimizationUseRps" checked />
-          <span>RPS</span>
-        </label>
-        <span class="hint" tabindex="0" data-tip="关闭后不使用 RPS 入场过滤，也不会使用 RPS 退出阈值。候选排序改为按代码排序。">?</span>
-      </div>
-      <div class="row-hint-wrap">
-        <label class="row">
-          <input type="checkbox" id="optimizationUseCupHandle" checked />
-          <span>K线形态</span>
-        </label>
-        <span class="hint" tabindex="0" data-tip="关闭后不使用欧奈尔杯柄形态过滤，用于比较只靠 RPS 和财务的候选池表现。">?</span>
       </div>
       <div class="card-title-row" style="margin-top: 14px;">
         <h2>财务质量参数网格</h2>
@@ -1019,6 +1008,38 @@
           <label>形态回看窗口</label>
           <input type="text" id="optimizationCupLookbacks" value="750" />
         </div>
+      </div>
+      <div class="card-title-row" style="margin-top: 14px;">
+        <h2>启用条件</h2>
+        <span class="mini-badge">归因开关</span>
+      </div>
+      <div class="row-hint-wrap">
+        <label class="row">
+          <input type="checkbox" id="optimizationUseFundamental" checked disabled />
+          <span>财务必选</span>
+        </label>
+        <span class="hint" tabindex="0" data-tip="参数优化始终包含财务过滤；可调整财务要求强弱，但不做无财务策略。">?</span>
+      </div>
+      <div class="row-hint-wrap">
+        <label class="row">
+          <input type="checkbox" id="optimizationUseRps" checked />
+          <span>RPS</span>
+        </label>
+        <span class="hint" tabindex="0" data-tip="关闭后不使用 RPS 入场过滤，也不会使用 RPS 退出阈值。候选排序改为按代码排序。">?</span>
+      </div>
+      <div class="row-hint-wrap">
+        <label class="row">
+          <input type="checkbox" id="optimizationUseCupHandle" checked />
+          <span>K线形态</span>
+        </label>
+        <span class="hint" tabindex="0" data-tip="关闭后不使用欧奈尔杯柄形态过滤，用于比较只靠 RPS 和财务的候选池表现。">?</span>
+      </div>
+      <div class="row-hint-wrap">
+        <label class="row">
+          <input type="checkbox" id="optimizationUseMarketFilter" checked />
+          <span>市场环境</span>
+        </label>
+        <span class="hint" tabindex="0" data-tip="启用后按“市场过滤组合”生成 none / SPY>200MA / SPY>200MA且50MA>200MA 的配对实验；关闭后只使用 none。">?</span>
       </div>
       <div class="button-row">
         <button class="primary" id="runOptimization">创建并运行</button>
@@ -1773,6 +1794,15 @@
     return values.length ? Array.from(new Set(values)) : fallback.map(Boolean);
   }
 
+  function parseTextList(id, fallback) {
+    const raw = document.getElementById(id).value.trim();
+    const source = raw ? raw.split(/[,，\s]+/) : fallback;
+    const values = source
+      .map((item) => String(item).trim())
+      .filter(Boolean);
+    return values.length ? Array.from(new Set(values)) : fallback;
+  }
+
   function isValidOptimizationFundamentalParams(params) {
     return (
       Number(params.min_years) >= 2 &&
@@ -1932,6 +1962,78 @@
     );
   }
 
+  function resolveMarketFilterSymbol(prefix, fallback) {
+    if (!prefix) return fallback;
+    const normalized = String(prefix).trim().toLowerCase();
+    if (['above', 'price', 'close'].includes(normalized)) return fallback;
+    return normalized.toUpperCase();
+  }
+
+  function getOptimizationMarketFilterParamSets() {
+    const useMarketFilter = document.getElementById('optimizationUseMarketFilter').checked;
+    const symbol = (document.getElementById('optimizationMarketFilterSymbol').value || 'SPY').trim().toUpperCase();
+    if (!useMarketFilter) {
+      return [{ enabled: false, symbol }];
+    }
+    const modes = parseTextList('optimizationMarketFilterModes', ['none'])
+      .map((mode) => mode.toLowerCase());
+    const rows = modes.map((mode) => {
+      if (['none', 'off', 'false', 'disabled', '无', '关闭'].includes(mode)) {
+        return { enabled: false, symbol };
+      }
+      if (['price_above_sma', 'above_sma'].includes(mode)) {
+        return {
+          enabled: true,
+          symbol,
+          require_price_above_sma: true,
+          price_sma_days: 200,
+          require_fast_sma_above_slow_sma: false,
+          fast_sma_days: 50,
+          slow_sma_days: 200,
+        };
+      }
+      if (['sma_cross', 'fast_slow_sma'].includes(mode)) {
+        return {
+          enabled: true,
+          symbol,
+          require_price_above_sma: true,
+          price_sma_days: 200,
+          require_fast_sma_above_slow_sma: true,
+          fast_sma_days: 50,
+          slow_sma_days: 200,
+        };
+      }
+      const crossMatch = mode.match(/^(?:(?<prefix>[a-z.]+)[_-])?(?<fast>\d{2,3})(?:ma)?[_-](?<slow>\d{2,3})ma$/);
+      if (crossMatch && crossMatch.groups) {
+        const modeSymbol = resolveMarketFilterSymbol(crossMatch.groups.prefix, symbol);
+        return {
+          enabled: true,
+          symbol: modeSymbol,
+          require_price_above_sma: true,
+          price_sma_days: Number(crossMatch.groups.slow),
+          require_fast_sma_above_slow_sma: true,
+          fast_sma_days: Number(crossMatch.groups.fast),
+          slow_sma_days: Number(crossMatch.groups.slow),
+        };
+      }
+      const priceMatch = mode.match(/^(?:(?<prefix>[a-z.]+)(?:[_-]|>))?(?<days>\d{2,3})ma$/);
+      if (priceMatch && priceMatch.groups) {
+        const modeSymbol = resolveMarketFilterSymbol(priceMatch.groups.prefix, symbol);
+        return {
+          enabled: true,
+          symbol: modeSymbol,
+          require_price_above_sma: true,
+          price_sma_days: Number(priceMatch.groups.days),
+          require_fast_sma_above_slow_sma: false,
+          fast_sma_days: 50,
+          slow_sma_days: 200,
+        };
+      }
+      return null;
+    }).filter(Boolean);
+    return dedupeParameterObjects(rows.length ? rows : [{ enabled: false, symbol }]);
+  }
+
   function getOptimizationParameterSpace() {
     const useRps = document.getElementById('optimizationUseRps').checked;
     const useCupHandle = document.getElementById('optimizationUseCupHandle').checked;
@@ -1954,6 +2056,7 @@
       initial_capital: [readFloat('optimizationInitialCapital', 100000).toFixed(2)],
       position_size_amount: [readOptionalFloat('optimizationPositionSizeAmount')],
       allow_reentry_while_open: [false],
+      market_filter_params: getOptimizationMarketFilterParamSets(),
       entry_delay_days: parseNumberList('optimizationEntryDelays', ['0'], true),
       entry_deferral_window_days: [readInt('optimizationEntryWindow', 5)],
     };
@@ -1988,6 +2091,7 @@
       parameterSpace.initial_capital,
       parameterSpace.position_size_amount,
       parameterSpace.allow_reentry_while_open,
+      parameterSpace.market_filter_params,
       parameterSpace.entry_delay_days,
       parameterSpace.entry_deferral_window_days,
     ].map((values) => Array.isArray(values) && values.length ? values : [null]);
@@ -2189,6 +2293,7 @@
     document.getElementById('optimizationResultsEmpty').style.display = results.length ? 'none' : 'block';
     for (const result of results) {
       const params = result.parameters || {};
+      const trainMetrics = result.train_metrics || {};
       const metrics = result.validation_metrics || result.train_metrics || {};
       const windows = Array.isArray(params.selected_rps_windows)
         ? params.selected_rps_windows.join('+')
@@ -2217,7 +2322,8 @@
         <td>
           年化 ${formatRatioPct(metrics.annualized_return)} · 回撤 ${formatRatioPct(metrics.max_drawdown)}
           <div class="metric-muted">交易 ${fmt(metrics.completed_trades)} · 胜率 ${formatRatioPct(metrics.win_rate)} · 均值 ${formatRatioPct(metrics.average_trade_return)}</div>
-          <div class="metric-muted">总收益 ${formatRatioPct(metrics.total_return)} · 终值 ${formatMoney(metrics.final_capital)} · 收益/回撤 ${metrics.return_drawdown_ratio || '—'}</div>
+          <div class="metric-muted">验证总收益 ${formatRatioPct(metrics.total_return)} · 验证终值 ${formatMoney(metrics.final_capital)} · 收益/回撤 ${metrics.return_drawdown_ratio || '—'}</div>
+          <div class="metric-muted">训练总收益 ${formatRatioPct(trainMetrics.total_return)} · 训练终值 ${formatMoney(trainMetrics.final_capital)} · 训练盈亏 ${formatMoney(trainMetrics.total_profit)}</div>
           <div class="metric-muted">止损 ${formatRatioPct(metrics.stop_loss_trigger_ratio)} · RPS退 ${formatRatioPct(metrics.rps_exit_trigger_ratio)}</div>
           <div class="metric-muted">平均年化 ${formatRatioPct(metrics.average_annualized_return)} · 连亏 ${fmt(metrics.max_consecutive_losses)}</div>
           <div class="metric-muted">${optimizationRankSummary(result)}</div>
@@ -2317,6 +2423,7 @@
   function optimizationFilterSummary(parameters) {
     const cup = parameters.cup_handle_params || {};
     const fundamentals = parameters.fundamental_growth_params || {};
+    const marketFilter = parameters.market_filter_params || {};
     const parts = [];
     parts.push(parameters.use_rps === false ? 'RPS关闭' : 'RPS启用');
     if (parameters.use_cup_handle === false) {
@@ -2355,6 +2462,18 @@
         parts.push(`经营现金流增长 ${fundamentals.min_operating_cash_flow_growth_count}次`);
       }
     }
+    if (marketFilter.enabled) {
+      const symbol = marketFilter.symbol || 'SPY';
+      if (marketFilter.require_fast_sma_above_slow_sma) {
+        parts.push(`${symbol}>${marketFilter.price_sma_days || 200}MA且${marketFilter.fast_sma_days || 50}MA>${marketFilter.slow_sma_days || 200}MA`);
+      } else if (marketFilter.require_price_above_sma) {
+        parts.push(`${symbol}>${marketFilter.price_sma_days || 200}MA`);
+      } else {
+        parts.push(`${symbol}市场过滤`);
+      }
+    } else {
+      parts.push('市场过滤关闭');
+    }
     return parts.join(' · ');
   }
 
@@ -2375,6 +2494,8 @@
     }
     const params = result.parameters || {};
     const metrics = optimizationMetricSource(result);
+    const trainMetrics = result.train_metrics || {};
+    const validationMetrics = result.validation_metrics || {};
     document.getElementById('optimizationResultPanelTitle').textContent =
       `优化结果 #${result.rank || result.id}`;
     document.getElementById('optimizationResultPanelBadge').textContent =
@@ -2383,6 +2504,8 @@
       summaryItem('参数', optimizationParamSummary(params)),
       summaryItem('筛选', optimizationFilterSummary(params)),
       summaryItem('收益', `年化 ${formatRatioPct(metrics.annualized_return)} · 总 ${formatRatioPct(metrics.total_return)}`),
+      summaryItem('训练资金', `终值 ${formatMoney(trainMetrics.final_capital)} · 盈亏 ${formatMoney(trainMetrics.total_profit)}`),
+      summaryItem('验证资金', `终值 ${formatMoney(validationMetrics.final_capital)} · 盈亏 ${formatMoney(validationMetrics.total_profit)}`),
       summaryItem('风险', `回撤 ${formatRatioPct(metrics.max_drawdown)} · 止损 ${formatRatioPct(metrics.stop_loss_trigger_ratio)}`),
       summaryItem('交易', `${fmt(metrics.completed_trades)} 笔 · 胜率 ${formatRatioPct(metrics.win_rate)}`),
       summaryItem('排名', optimizationRankSummary(result)),
@@ -2508,7 +2631,11 @@
       : '—';
     const rpsText = parameters.use_rps === false ? 'RPS关闭' : `RPS ${parameters.rps_threshold || '—'}`;
     const cupText = parameters.use_cup_handle === false ? 'K线关闭' : 'K线启用';
-    return `${rpsText} · ${windows} · ${cupText}`;
+    const marketFilter = parameters.market_filter_params || {};
+    const marketText = marketFilter.enabled
+      ? `${marketFilter.symbol || 'SPY'}${marketFilter.require_fast_sma_above_slow_sma ? '趋势过滤' : '>200MA'}`
+      : '市场关闭';
+    return `${rpsText} · ${windows} · ${cupText} · ${marketText}`;
   }
 
   function formatYearlyReturns(yearlyReturns) {
@@ -2873,10 +3000,19 @@
     setInputValue('optimizationPositionWeight', parameters.position_weight_pct);
     setInputValue('optimizationInitialCapital', parameters.initial_capital);
     setNullableInputValue('optimizationPositionSizeAmount', parameters.position_size_amount);
+    const marketFilter = parameters.market_filter_params || {};
+    setInputValue('optimizationMarketFilterSymbol', marketFilter.symbol || 'SPY');
+    setInputValue(
+      'optimizationMarketFilterModes',
+      marketFilter.enabled
+        ? (marketFilter.require_fast_sma_above_slow_sma ? 'spy_50_200ma' : 'spy_200ma')
+        : 'none'
+    );
     setInputValue('optimizationEntryDelays', parameters.entry_delay_days);
     setInputValue('optimizationEntryWindow', parameters.entry_deferral_window_days);
     setCheckboxValue('optimizationUseRps', parameters.use_rps !== false);
     setCheckboxValue('optimizationUseCupHandle', parameters.use_cup_handle !== false);
+    setCheckboxValue('optimizationUseMarketFilter', marketFilter.enabled === true);
     setCheckboxValue('optimizationUseFundamental', true);
     setInputValue('optimizationFundamentalYears', fundamentals.min_years);
     setInputValue('optimizationFundamentalGrowthCounts', fundamentals.min_growth_count || fundamentals.effective_min_growth_count);
@@ -3136,6 +3272,8 @@
     'optimizationHoldingDays',
     'optimizationStopLosses',
     'optimizationRpsExits',
+    'optimizationMarketFilterModes',
+    'optimizationMarketFilterSymbol',
     'optimizationPortfolioCap',
     'optimizationPositionWeight',
     'optimizationInitialCapital',
@@ -3150,6 +3288,7 @@
     'optimizationUseFundamental',
     'optimizationUseRps',
     'optimizationUseCupHandle',
+    'optimizationUseMarketFilter',
     'optimizationFundamentalYears',
     'optimizationFundamentalGrowthCounts',
     'optimizationFundamentalMinYoyPcts',

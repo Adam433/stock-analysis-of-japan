@@ -425,6 +425,8 @@ def dashboard_optimization_result_detail(result_id: int) -> HTMLResponse:
     const result = detail.optimization_result || {};
     const params = detail.parameters || {};
     const metrics = (result.validation_metrics || result.train_metrics || {});
+    const trainMetrics = result.train_metrics || {};
+    const validationMetrics = result.validation_metrics || {};
     document.getElementById('subtitle').textContent =
       `结果 #${result.id} · 任务 #${result.optimization_run_id} · 排名 ${result.rank ?? '—'}`;
     document.getElementById('summaryGrid').innerHTML = [
@@ -433,7 +435,8 @@ def dashboard_optimization_result_detail(result_id: int) -> HTMLResponse:
       stat('交易', `${metrics.completed_trades ?? '—'} 笔 · 胜率 ${pct(metrics.win_rate)}`),
       stat('收益/风险', `总 ${pct(metrics.total_return)} · 回撤 ${pct(metrics.max_drawdown)}`),
       stat('资金', `初始 ${money(params.initial_capital || metrics.initial_capital)} · 每笔 ${money(params.position_size_amount || metrics.position_size_amount)}`),
-      stat('终值', `${money(metrics.final_capital)} · 盈亏 ${money(metrics.total_profit)}`),
+      stat('训练终值', `${money(trainMetrics.final_capital)} · 盈亏 ${money(trainMetrics.total_profit)}`),
+      stat('验证终值', `${money(validationMetrics.final_capital)} · 盈亏 ${money(validationMetrics.total_profit)}`),
     ].join('');
   }
 

@@ -22,23 +22,31 @@ from stockanalyse_api.domain.backtests.models import (
     OptimizationResultDetailCache,
     OptimizationRun,
 )
+from stockanalyse_api.domain.instruments.models import Instrument
+from stockanalyse_api.domain.market_data.models import MarketDataDaily
 from stockanalyse_api.services.dashboard import (
     DEFAULT_CUP_HANDLE_PARAMS,
     DEFAULT_FUNDAMENTAL_GROWTH_PARAMS,
     CupHandleParams,
     FundamentalGrowthParams,
+    _market_exchanges,
     get_overview,
     normalize_market,
 )
 from stockanalyse_api.services.dashboard_strategy_backtest import (
     BacktestCancelledError,
+    DEFAULT_MARKET_FILTER_PARAMS,
+    _normalize_market_filter_params,
     run_cup_handle_rps_backtest,
 )
+from stockanalyse_api.services.market_data_adjustments import adjusted_close
+from stockanalyse_api.services.market_data_adjustments import is_complete_market_row
 
 DEFAULT_OPTIMIZATION_OBJECTIVE = "score"
 DEFAULT_MAX_PARAMETER_SETS = 1000
 DEFAULT_OPTIMIZATION_PARALLEL_GROUP_SIZE = 1
 DEFAULT_OPTIMIZATION_DETAIL_CACHE_TRADES = 300
+DEFAULT_BENCHMARK_SYMBOLS = ("SPY", "QQQ")
 MAX_AUTO_OPTIMIZATION_WORKERS = 3
 DEFAULT_OPTIMIZATION_MAX_TASKS_PER_CHILD = 24
 DEFAULT_WORKER_CACHE_MAX_ENTRIES = 4096
@@ -127,6 +135,12 @@ _WORKER_FUTURE_ROWS_CACHE: dict[tuple[object, ...], object] = _BoundedDict(
 )
 _WORKER_FUTURE_INDICATOR_CACHE: dict[tuple[object, ...], object] = _BoundedDict(
     max_entries=_WORKER_CACHE_MAX_ENTRIES,
+)
+_WORKER_MARKET_FILTER_CACHE: dict[tuple[object, ...], set[date]] = _BoundedDict(
+    max_entries=128,
+)
+_WORKER_BENCHMARK_CACHE: dict[tuple[object, ...], dict[str, object]] = _BoundedDict(
+    max_entries=128,
 )
 
 
@@ -251,6 +265,13 @@ def _parameter_axes(parameter_space: dict[str, object]) -> list[tuple[str, list[
         (
             "allow_reentry_while_open",
             _as_list(parameter_space.get("allow_reentry_while_open"), default=[False]),
+        ),
+        (
+            "market_filter_params",
+            _as_list(
+                parameter_space.get("market_filter_params"),
+                default=[DEFAULT_MARKET_FILTER_PARAMS],
+            ),
         ),
         ("entry_delay_days", _as_list(parameter_space.get("entry_delay_days"), default=[0])),
         (
@@ -419,6 +440,11 @@ def _normalize_parameter_set(parameters: dict[str, object]) -> dict[str, object]
     )
     if resolved_position_size > initial_capital:
         raise ValueError("position_size_amount cannot exceed initial_capital.")
+    market_filter_params = _normalize_market_filter_params(
+        parameters.get("market_filter_params")
+        if isinstance(parameters.get("market_filter_params"), dict)
+        else {}
+    )
     return {
         "use_rps": use_rps,
         "rps_threshold": int(parameters.get("rps_threshold", 90)) if use_rps else 0,
@@ -436,6 +462,7 @@ def _normalize_parameter_set(parameters: dict[str, object]) -> dict[str, object]
         "initial_capital": f"{initial_capital:.2f}",
         "position_size_amount": f"{position_size_amount:.2f}" if position_size_amount is not None else None,
         "allow_reentry_while_open": bool(parameters.get("allow_reentry_while_open", False)),
+        "market_filter_params": market_filter_params,
         "entry_delay_days": int(parameters.get("entry_delay_days", 0)),
         "entry_deferral_window_days": int(parameters.get("entry_deferral_window_days", 5)),
     }
@@ -808,6 +835,153 @@ def _annualize_return(total_return: Decimal, *, start_date: object, end_date: ob
     return Decimal(str(annualized)).quantize(RATIO_PATTERN)
 
 
+def _max_drawdown_from_equity(equity_values: list[Decimal]) -> Decimal | None:
+    if not equity_values:
+        return None
+    peak = equity_values[0]
+    max_drawdown = Decimal("0")
+    for equity in equity_values:
+        if equity > peak:
+            peak = equity
+        if peak <= Decimal("0"):
+            continue
+        drawdown = (equity / peak) - Decimal("1")
+        if drawdown < max_drawdown:
+            max_drawdown = drawdown
+    return max_drawdown
+
+
+def _benchmark_cache_key(
+    *,
+    market: str,
+    start_date: date,
+    end_date: date,
+    symbols: tuple[str, ...],
+) -> tuple[object, ...]:
+    return (
+        "benchmark_metrics",
+        normalize_market(market),
+        start_date.isoformat(),
+        end_date.isoformat(),
+        tuple(symbol.upper() for symbol in symbols),
+    )
+
+
+def _load_benchmark_metrics(
+    session,
+    *,
+    market: str,
+    start_date: date,
+    end_date: date,
+    symbols: tuple[str, ...] = DEFAULT_BENCHMARK_SYMBOLS,
+    benchmark_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
+) -> dict[str, object]:
+    cache_key = _benchmark_cache_key(
+        market=market,
+        start_date=start_date,
+        end_date=end_date,
+        symbols=symbols,
+    )
+    cached = benchmark_cache.get(cache_key) if benchmark_cache is not None else None
+    if cached is not None:
+        return cached
+
+    resolved_market = normalize_market(market)
+    exchanges = _market_exchanges(resolved_market)
+    benchmarks: dict[str, object] = {}
+    for symbol in symbols:
+        rows = list(
+            session.execute(
+                select(MarketDataDaily)
+                .join(Instrument, Instrument.id == MarketDataDaily.instrument_id)
+                .where(
+                    Instrument.symbol == symbol.upper(),
+                    Instrument.exchange.in_(exchanges),
+                    MarketDataDaily.trade_date >= start_date,
+                    MarketDataDaily.trade_date <= end_date,
+                )
+                .order_by(MarketDataDaily.trade_date.asc())
+            ).scalars()
+        )
+        price_points: list[tuple[date, Decimal]] = []
+        for row in rows:
+            if not is_complete_market_row(row):
+                continue
+            close = adjusted_close(row)
+            if close is None or close <= Decimal("0"):
+                continue
+            price_points.append((row.trade_date, close))
+        if len(price_points) < 2:
+            continue
+
+        first_date, first_price = price_points[0]
+        last_date, last_price = price_points[-1]
+        total_return = (last_price / first_price) - Decimal("1")
+        annualized_return = _annualize_return(
+            total_return,
+            start_date=first_date.isoformat(),
+            end_date=last_date.isoformat(),
+        )
+        equity_values = [price / first_price for _, price in price_points]
+        max_drawdown = _max_drawdown_from_equity(equity_values)
+        return_drawdown_ratio = (
+            annualized_return / abs(max_drawdown)
+            if annualized_return is not None
+            and max_drawdown is not None
+            and max_drawdown < Decimal("0")
+            else None
+        )
+        benchmarks[symbol.upper()] = {
+            "symbol": symbol.upper(),
+            "start_date": first_date.isoformat(),
+            "end_date": last_date.isoformat(),
+            "data_points": len(price_points),
+            "total_return": _format_metric(total_return),
+            "annualized_return": _format_metric(annualized_return),
+            "max_drawdown": _format_metric(max_drawdown),
+            "return_drawdown_ratio": _format_metric(return_drawdown_ratio),
+        }
+
+    if benchmark_cache is not None:
+        benchmark_cache[cache_key] = benchmarks
+    return benchmarks
+
+
+def _benchmark_relative_metrics(
+    metrics: dict[str, object],
+    benchmarks: dict[str, object],
+) -> dict[str, object]:
+    strategy_total_return = _optional_decimal_metric(metrics, "total_return")
+    strategy_annualized_return = _optional_decimal_metric(metrics, "annualized_return")
+    strategy_max_drawdown = _optional_decimal_metric(metrics, "max_drawdown")
+    relative: dict[str, object] = {}
+    for symbol, benchmark in benchmarks.items():
+        if not isinstance(benchmark, dict):
+            continue
+        benchmark_total_return = _optional_decimal_metric(benchmark, "total_return")
+        benchmark_annualized_return = _optional_decimal_metric(benchmark, "annualized_return")
+        benchmark_max_drawdown = _optional_decimal_metric(benchmark, "max_drawdown")
+        relative[symbol] = {
+            "excess_total_return": _format_metric(
+                strategy_total_return - benchmark_total_return
+                if strategy_total_return is not None and benchmark_total_return is not None
+                else None
+            ),
+            "excess_annualized_return": _format_metric(
+                strategy_annualized_return - benchmark_annualized_return
+                if strategy_annualized_return is not None
+                and benchmark_annualized_return is not None
+                else None
+            ),
+            "max_drawdown_improvement": _format_metric(
+                strategy_max_drawdown - benchmark_max_drawdown
+                if strategy_max_drawdown is not None and benchmark_max_drawdown is not None
+                else None
+            ),
+        }
+    return relative
+
+
 def _portfolio_metrics_from_signal_days(result: dict[str, object]) -> dict[str, object]:
     if result.get("account_total_return") is not None:
         account_annualized_return = (
@@ -925,7 +1099,11 @@ def _portfolio_metrics_from_signal_days(result: dict[str, object]) -> dict[str, 
     }
 
 
-def _extract_metrics(result: dict[str, object]) -> dict[str, object]:
+def _extract_metrics(
+    result: dict[str, object],
+    *,
+    benchmark_metrics: dict[str, object] | None = None,
+) -> dict[str, object]:
     completed = int(result.get("completed_trades", 0) or 0)
     average_return = _decimal_metric(result, "average_trade_return")
     win_rate = _decimal_metric(result, "win_rate")
@@ -956,6 +1134,9 @@ def _extract_metrics(result: dict[str, object]) -> dict[str, object]:
         "sample_penalty": f"{sample_penalty:.6f}",
     }
     metrics.update(_portfolio_metrics_from_signal_days(result))
+    if benchmark_metrics:
+        metrics["benchmarks"] = benchmark_metrics
+        metrics["benchmark_relative"] = _benchmark_relative_metrics(metrics, benchmark_metrics)
     return metrics
 
 
@@ -1016,6 +1197,23 @@ def _score_metrics(
     raise ValueError(f"Unsupported optimization objective: {objective}.")
 
 
+def _robust_sample_penalty(
+    *,
+    train_completed: Decimal,
+    validation_completed: Decimal,
+) -> Decimal:
+    min_completed = min(train_completed, validation_completed)
+    if min_completed < Decimal("5"):
+        return Decimal("0.25")
+    if min_completed < Decimal("10"):
+        return Decimal("0.12")
+    if min_completed < Decimal("20"):
+        return Decimal("0.06")
+    if min_completed < Decimal("40"):
+        return Decimal("0.02")
+    return Decimal("0")
+
+
 def _score_metric_pair(
     train_metrics: dict[str, object],
     validation_metrics: dict[str, object] | None,
@@ -1050,17 +1248,10 @@ def _score_metric_pair(
     largest_drawdown = max(train_drawdown, validation_drawdown)
     drawdown_penalty = largest_drawdown * Decimal("0.08")
     gap_penalty = annualized_gap * Decimal("0.06")
-    min_completed = min(train_completed, validation_completed)
-    if min_completed < Decimal("10"):
-        sample_penalty = Decimal("0.35")
-    elif min_completed < Decimal("30"):
-        sample_penalty = Decimal("0.22")
-    elif min_completed < Decimal("50"):
-        sample_penalty = Decimal("0.12")
-    elif min_completed < Decimal("100"):
-        sample_penalty = Decimal("0.04")
-    else:
-        sample_penalty = Decimal("0")
+    sample_penalty = _robust_sample_penalty(
+        train_completed=train_completed,
+        validation_completed=validation_completed,
+    )
     missing_penalty = Decimal("0")
     if train_annualized_value is None:
         missing_penalty += Decimal("0.18")
@@ -1122,6 +1313,7 @@ def _run_backtest_once(
     trade_dates_cache: dict[tuple[object, ...], list[date]] | None = None,
     future_rows_cache: dict[tuple[object, ...], object] | None = None,
     future_indicator_cache: dict[tuple[object, ...], object] | None = None,
+    market_filter_cache: dict[tuple[object, ...], set[date]] | None = None,
     should_cancel=None,
 ) -> dict[str, object]:
     result = run_cup_handle_rps_backtest(
@@ -1163,6 +1355,11 @@ def _run_backtest_once(
             field_name="position_size_amount",
         ),
         allow_reentry_while_open=bool(parameters.get("allow_reentry_while_open", False)),
+        market_filter_params=(
+            parameters.get("market_filter_params")
+            if isinstance(parameters.get("market_filter_params"), dict)
+            else DEFAULT_MARKET_FILTER_PARAMS
+        ),
         entry_delay_days=int(parameters.get("entry_delay_days", 0)),
         entry_deferral_window_days=int(parameters.get("entry_deferral_window_days", 5)),
         max_trades_returned=max_trades_returned,
@@ -1174,9 +1371,11 @@ def _run_backtest_once(
         trade_dates_cache=trade_dates_cache,
         future_rows_cache=future_rows_cache,  # type: ignore[arg-type]
         future_indicator_cache=future_indicator_cache,  # type: ignore[arg-type]
+        market_filter_cache=market_filter_cache,
         should_cancel=should_cancel,
         preload_screen_candidates=False,
         execution_limited_screen=True,
+        force_exit_at_end=True,
     )
     return result.to_dict()
 
@@ -1199,6 +1398,8 @@ def _evaluate_parameter_set(
     trade_dates_cache: dict[tuple[object, ...], list[date]] | None = None,
     future_rows_cache: dict[tuple[object, ...], object] | None = None,
     future_indicator_cache: dict[tuple[object, ...], object] | None = None,
+    market_filter_cache: dict[tuple[object, ...], set[date]] | None = None,
+    benchmark_cache: dict[tuple[object, ...], dict[str, object]] | None = None,
     should_cancel=None,
 ) -> dict[str, object]:
     try:
@@ -1217,12 +1418,22 @@ def _evaluate_parameter_set(
             trade_dates_cache=trade_dates_cache,
             future_rows_cache=future_rows_cache,
             future_indicator_cache=future_indicator_cache,
+            market_filter_cache=market_filter_cache,
             should_cancel=should_cancel,
         )
-        train_metrics = _extract_metrics(train_result)
+        train_benchmarks = _load_benchmark_metrics(
+            session,
+            market=market,
+            start_date=start_date,
+            end_date=end_date,
+            benchmark_cache=benchmark_cache,
+        )
+        train_metrics = _extract_metrics(
+            train_result,
+            benchmark_metrics=train_benchmarks,
+        )
         validation_result = None
         validation_metrics = None
-        score_source = train_metrics
         if validation_start_date is not None and validation_end_date is not None:
             validation_result = _run_backtest_once(
                 session,
@@ -1239,10 +1450,20 @@ def _evaluate_parameter_set(
                 trade_dates_cache=trade_dates_cache,
                 future_rows_cache=future_rows_cache,
                 future_indicator_cache=future_indicator_cache,
+                market_filter_cache=market_filter_cache,
                 should_cancel=should_cancel,
             )
-            validation_metrics = _extract_metrics(validation_result)
-            score_source = validation_metrics
+            validation_benchmarks = _load_benchmark_metrics(
+                session,
+                market=market,
+                start_date=validation_start_date,
+                end_date=validation_end_date,
+                benchmark_cache=benchmark_cache,
+            )
+            validation_metrics = _extract_metrics(
+                validation_result,
+                benchmark_metrics=validation_benchmarks,
+            )
         _attach_average_annualized_return(train_metrics, validation_metrics)
         score = _score_metric_pair(
             train_metrics,
@@ -1309,6 +1530,8 @@ def _evaluate_parameter_set_group_worker(payload: dict[str, object]) -> list[dic
                     trade_dates_cache=_WORKER_TRADE_DATES_CACHE,
                     future_rows_cache=_WORKER_FUTURE_ROWS_CACHE,
                     future_indicator_cache=_WORKER_FUTURE_INDICATOR_CACHE,
+                    market_filter_cache=_WORKER_MARKET_FILTER_CACHE,
+                    benchmark_cache=_WORKER_BENCHMARK_CACHE,
                     should_cancel=None,
                 )
             )
@@ -1471,6 +1694,7 @@ def _exit_reason_label(reason: object) -> str:
         "take_profit": "固定止盈触发",
         "holding_period_elapsed": "持有期结束",
         "data_end_mark": "数据末尾按收盘价估值",
+        "window_end_mark": "窗口结束按收盘价估值",
     }
     return labels.get(str(reason), str(reason or "未知"))
 
@@ -1625,6 +1849,7 @@ def build_optimization_result_detail(
             trade_dates_cache: dict[tuple[object, ...], list[date]] = {}
             future_rows_cache: dict[tuple[object, ...], object] = {}
             future_indicator_cache: dict[tuple[object, ...], object] = {}
+            market_filter_cache: dict[tuple[object, ...], set[date]] = {}
             train_result = _run_backtest_once(
                 session,
                 start_date=run.train_start_date,
@@ -1640,6 +1865,7 @@ def build_optimization_result_detail(
                 trade_dates_cache=trade_dates_cache,
                 future_rows_cache=future_rows_cache,
                 future_indicator_cache=future_indicator_cache,
+                market_filter_cache=market_filter_cache,
             )
             validation_result = None
             if run.validation_start_date is not None and run.validation_end_date is not None:
@@ -1658,6 +1884,7 @@ def build_optimization_result_detail(
                     trade_dates_cache=trade_dates_cache,
                     future_rows_cache=future_rows_cache,
                     future_indicator_cache=future_indicator_cache,
+                    market_filter_cache=market_filter_cache,
                 )
         _store_detail_cache(
             session,
@@ -1825,6 +2052,8 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
     trade_dates_cache: dict[tuple[object, ...], list[date]] = {}
     future_rows_cache: dict[tuple[object, ...], object] = {}
     future_indicator_cache: dict[tuple[object, ...], object] = {}
+    market_filter_cache: dict[tuple[object, ...], set[date]] = {}
+    benchmark_cache: dict[tuple[object, ...], dict[str, object]] = {}
 
     cancel_state = {"checked_at": 0.0, "cached": False}
 
@@ -1871,6 +2100,8 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
                     trade_dates_cache=trade_dates_cache,
                     future_rows_cache=future_rows_cache,
                     future_indicator_cache=future_indicator_cache,
+                    market_filter_cache=market_filter_cache,
+                    benchmark_cache=benchmark_cache,
                     should_cancel=should_cancel,
                 )
                 _persist_evaluation_result(session, run=run, evaluation=evaluation)
