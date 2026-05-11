@@ -33,6 +33,7 @@ from stockanalyse_api.services.optimization_backtest import (
     cancel_optimization_run,
     count_optimization_results,
     create_optimization_run,
+    create_optimization_rerun_from_result,
     delete_optimization_result,
     delete_optimization_run,
     dispatch_optimization_run_execution,
@@ -41,6 +42,15 @@ from stockanalyse_api.services.optimization_backtest import (
     list_optimization_results,
     serialize_optimization_result,
     serialize_optimization_run,
+)
+from stockanalyse_api.services.genetic_optimizer import (
+    get_ga_run,
+    list_ga_events,
+    list_ga_individuals,
+    list_ga_runs,
+    serialize_ga_event,
+    serialize_ga_individual,
+    serialize_ga_run,
 )
 
 router = APIRouter(prefix="/backtests", tags=["backtests"])
@@ -76,6 +86,13 @@ class OptimizationRunCreateRequest(BaseModel):
     random_seed: int | None = None
     max_workers: int | None = None
     execute_immediately: bool = True
+
+
+class OptimizationResultRerunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    execute_immediately: bool = True
+    max_workers: int | None = 1
 
 
 def _require_portfolio_return_completed_run(session, run_id: int):
@@ -222,6 +239,7 @@ def read_parameter_optimization_results(
     run_id: int,
     limit: int = 100,
     offset: int = 0,
+    summary_only: bool = False,
 ) -> dict[str, object]:
     with SessionLocal() as session:
         run = get_optimization_run(session, run_id)
@@ -230,7 +248,11 @@ def read_parameter_optimization_results(
         results = list_optimization_results(session, run_id=run_id, limit=limit, offset=offset)
         return {
             "results": [
-                serialize_optimization_result(result, include_metric_series=False)
+                serialize_optimization_result(
+                    result,
+                    include_metric_series=False,
+                    metrics_summary_only=summary_only,
+                )
                 for result in results
             ],
             "total": count_optimization_results(session, run_id=run_id),
@@ -256,6 +278,102 @@ def read_parameter_optimization_result_detail(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/optimization/results/{result_id}/rerun")
+def rerun_parameter_optimization_result(
+    result_id: int,
+    payload: OptimizationResultRerunRequest | None = None,
+) -> dict[str, object]:
+    resolved_payload = payload or OptimizationResultRerunRequest()
+    try:
+        with SessionLocal() as session:
+            run = create_optimization_rerun_from_result(
+                session,
+                result_id=result_id,
+                max_workers=resolved_payload.max_workers,
+                require_data_ready=True,
+            )
+            run_payload = serialize_optimization_run(run, include_parameter_sets=False)
+        if resolved_payload.execute_immediately:
+            dispatch_optimization_run_execution(int(run_payload["id"]))
+        return {"optimization_run": run_payload}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/ga/runs")
+def read_ga_runs(market: str = "us", limit: int = 50) -> dict[str, object]:
+    with SessionLocal() as session:
+        runs = list_ga_runs(session, market=market, limit=limit)
+        return {"ga_runs": [serialize_ga_run(run) for run in runs]}
+
+
+@router.get("/ga/runs/latest")
+def read_latest_ga_run(market: str = "us") -> dict[str, object]:
+    with SessionLocal() as session:
+        runs = list_ga_runs(session, market=market, limit=1)
+        run = runs[0] if runs else None
+        return {"ga_run": serialize_ga_run(run) if run is not None else None}
+
+
+@router.get("/ga/runs/{run_id}")
+def read_ga_run(run_id: int) -> dict[str, object]:
+    with SessionLocal() as session:
+        run = get_ga_run(session, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="GA run not found.")
+        return {"ga_run": serialize_ga_run(run)}
+
+
+@router.get("/ga/runs/{run_id}/individuals")
+def read_ga_individuals(
+    run_id: int,
+    limit: int = 100,
+    offset: int = 0,
+    include_evaluation: bool = False,
+) -> dict[str, object]:
+    with SessionLocal() as session:
+        run = get_ga_run(session, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="GA run not found.")
+        individuals = list_ga_individuals(
+            session,
+            run_id=run_id,
+            limit=limit,
+            offset=offset,
+        )
+        return {
+            "individuals": [
+                serialize_ga_individual(
+                    individual,
+                    include_evaluation=include_evaluation,
+                )
+                for individual in individuals
+            ],
+            "limit": limit,
+            "offset": offset,
+        }
+
+
+@router.get("/ga/runs/{run_id}/events")
+def read_ga_events(
+    run_id: int,
+    limit: int = 200,
+    offset: int = 0,
+) -> dict[str, object]:
+    with SessionLocal() as session:
+        run = get_ga_run(session, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="GA run not found.")
+        events = list_ga_events(session, run_id=run_id, limit=limit, offset=offset)
+        return {
+            "events": [serialize_ga_event(event) for event in events],
+            "limit": limit,
+            "offset": offset,
+        }
 
 
 @router.post("/optimization/runs/{run_id}/cancel")

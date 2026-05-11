@@ -709,6 +709,20 @@
         </div>
         <div class="field">
           <label class="label-with-hint">
+            <span>相对强势组合</span>
+            <span class="hint" tabindex="0" data-tip="用于要求股票在指定交易日窗口内跑赢 SPY/QQQ。&#10;例：none,spy_120d,spy_250d；none 用作对照。">?</span>
+          </label>
+          <input type="text" id="optimizationRelativeStrengthModes" value="none,spy_120d,spy_250d" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>相对强势超额下限</span>
+            <span class="hint" tabindex="0" data-tip="股票窗口收益 - 基准窗口收益 的最低要求。&#10;0 表示只要求跑赢基准；0.05 表示至少多涨 5%。">?</span>
+          </label>
+          <input type="text" id="optimizationRelativeStrengthMinExcess" value="0" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
             <span>持仓上限</span>
             <span class="hint" tabindex="0" data-tip="同一时刻最多持有的股票数。&#10;命中信号超过该上限会按打分顺序进入候补，等已有持仓退出再补位。">?</span>
           </label>
@@ -787,6 +801,7 @@
           </label>
           <select id="optimizationObjective">
             <option value="score">综合得分</option>
+            <option value="spy_alpha" selected>SPY Alpha</option>
             <option value="average_annualized_return">平均年化收益</option>
             <option value="robust_annualized_return">稳健年化收益</option>
             <option value="annualized_return">最高年化收益</option>
@@ -1041,6 +1056,13 @@
         </label>
         <span class="hint" tabindex="0" data-tip="启用后按“市场过滤组合”生成 none / SPY>200MA / SPY>200MA且50MA>200MA 的配对实验；关闭后只使用 none。">?</span>
       </div>
+      <div class="row-hint-wrap">
+        <label class="row">
+          <input type="checkbox" id="optimizationUseRelativeStrength" checked />
+          <span>相对SPY强势</span>
+        </label>
+        <span class="hint" tabindex="0" data-tip="启用后要求候选股票在指定窗口跑赢 SPY/QQQ；用于把 Alpha 条件放进买入过滤。">?</span>
+      </div>
       <div class="button-row">
         <button class="primary" id="runOptimization">创建并运行</button>
         <button class="secondary" id="cancelOptimization">取消任务</button>
@@ -1153,10 +1175,12 @@
     selectedOptimizationResult: null,
     selectedOptimizationResultIds: new Set(),
     strategyPresets: [],
+    appliedStrategyParameters: null,
   };
   const MARKET_LABELS = { jp: '日本', us: '美股' };
   const OPTIMIZATION_OBJECTIVE_LABELS = {
     score: '综合得分',
+    spy_alpha: 'SPY Alpha',
     average_annualized_return: '平均年化收益',
     robust_annualized_return: '稳健年化收益',
     annualized_return: '最高年化收益',
@@ -1690,6 +1714,7 @@
       return;
     }
     const criteria = getCriteria();
+    const appliedParameters = state.appliedStrategyParameters || {};
     btn.disabled = true;
     btn.textContent = '回测中…';
     document.getElementById('backtestStatus').textContent = '正在逐日筛选并模拟持有收益…';
@@ -1713,6 +1738,8 @@
         initial_capital: readFloat('backtestInitialCapital', 100000),
         position_size_amount: readOptionalFloat('backtestPositionSizeAmount'),
         allow_reentry_while_open: false,
+        relative_strength_params: appliedParameters.relative_strength_params || { enabled: false, symbol: 'SPY' },
+        cash_fallback_params: { enabled: false, symbol: 'SPY' },
         entry_delay_days: readInt('backtestEntryDelay', 0),
         entry_deferral_window_days: readInt('backtestEntryWindow', 5),
         max_trades_returned: 300,
@@ -2034,6 +2061,41 @@
     return dedupeParameterObjects(rows.length ? rows : [{ enabled: false, symbol }]);
   }
 
+  function getOptimizationRelativeStrengthParamSets() {
+    const useRelativeStrength = document.getElementById('optimizationUseRelativeStrength').checked;
+    const minExcessValues = parseNumberList('optimizationRelativeStrengthMinExcess', ['0'], false);
+    if (!useRelativeStrength) {
+      return [{ enabled: false, symbol: 'SPY' }];
+    }
+    const modes = parseTextList('optimizationRelativeStrengthModes', ['none'])
+      .map((mode) => mode.toLowerCase());
+    const rows = [];
+    for (const mode of modes) {
+      if (['none', 'off', 'false', 'disabled', '无', '关闭'].includes(mode)) {
+        rows.push({ enabled: false, symbol: 'SPY' });
+        continue;
+      }
+      const match = mode.match(/^(?:(?<symbol>[a-z.]+)[_-])?(?<days>\d{2,3})d?$/);
+      if (!match || !match.groups) continue;
+      const symbol = String(match.groups.symbol || 'spy').toUpperCase();
+      const lookbackDays = Number(match.groups.days);
+      if (!Number.isFinite(lookbackDays) || lookbackDays < 2) continue;
+      for (const minExcess of minExcessValues) {
+        rows.push({
+          enabled: true,
+          symbol,
+          lookback_days: lookbackDays,
+          min_excess_return_pct: Number(minExcess).toFixed(4),
+        });
+      }
+    }
+    return dedupeParameterObjects(rows.length ? rows : [{ enabled: false, symbol: 'SPY' }]);
+  }
+
+  function getOptimizationCashFallbackParamSets() {
+    return [{ enabled: false, symbol: 'SPY' }];
+  }
+
   function getOptimizationParameterSpace() {
     const useRps = document.getElementById('optimizationUseRps').checked;
     const useCupHandle = document.getElementById('optimizationUseCupHandle').checked;
@@ -2057,6 +2119,8 @@
       position_size_amount: [readOptionalFloat('optimizationPositionSizeAmount')],
       allow_reentry_while_open: [false],
       market_filter_params: getOptimizationMarketFilterParamSets(),
+      relative_strength_params: getOptimizationRelativeStrengthParamSets(),
+      cash_fallback_params: getOptimizationCashFallbackParamSets(),
       entry_delay_days: parseNumberList('optimizationEntryDelays', ['0'], true),
       entry_deferral_window_days: [readInt('optimizationEntryWindow', 5)],
     };
@@ -2092,6 +2156,8 @@
       parameterSpace.position_size_amount,
       parameterSpace.allow_reentry_while_open,
       parameterSpace.market_filter_params,
+      parameterSpace.relative_strength_params,
+      parameterSpace.cash_fallback_params,
       parameterSpace.entry_delay_days,
       parameterSpace.entry_deferral_window_days,
     ].map((values) => Array.isArray(values) && values.length ? values : [null]);
@@ -2325,6 +2391,7 @@
           <div class="metric-muted">验证总收益 ${formatRatioPct(metrics.total_return)} · 验证终值 ${formatMoney(metrics.final_capital)} · 收益/回撤 ${metrics.return_drawdown_ratio || '—'}</div>
           <div class="metric-muted">训练总收益 ${formatRatioPct(trainMetrics.total_return)} · 训练终值 ${formatMoney(trainMetrics.final_capital)} · 训练盈亏 ${formatMoney(trainMetrics.total_profit)}</div>
           <div class="metric-muted">止损 ${formatRatioPct(metrics.stop_loss_trigger_ratio)} · RPS退 ${formatRatioPct(metrics.rps_exit_trigger_ratio)}</div>
+          <div class="metric-muted">单笔超SPY ${formatRatioPct(metrics.spy_average_trade_excess_return)} · 跑赢SPY ${formatRatioPct(metrics.spy_excess_trade_win_rate)}</div>
           <div class="metric-muted">平均年化 ${formatRatioPct(metrics.average_annualized_return)} · 连亏 ${fmt(metrics.max_consecutive_losses)}</div>
           <div class="metric-muted">${optimizationRankSummary(result)}</div>
         </td>
@@ -2508,6 +2575,7 @@
       summaryItem('验证资金', `终值 ${formatMoney(validationMetrics.final_capital)} · 盈亏 ${formatMoney(validationMetrics.total_profit)}`),
       summaryItem('风险', `回撤 ${formatRatioPct(metrics.max_drawdown)} · 止损 ${formatRatioPct(metrics.stop_loss_trigger_ratio)}`),
       summaryItem('交易', `${fmt(metrics.completed_trades)} 笔 · 胜率 ${formatRatioPct(metrics.win_rate)}`),
+      summaryItem('SPY Alpha', `单笔超额 ${formatRatioPct(metrics.spy_average_trade_excess_return)} · 跑赢率 ${formatRatioPct(metrics.spy_excess_trade_win_rate)}`),
       summaryItem('排名', optimizationRankSummary(result)),
     ].join('');
     const completed = result.status === 'completed';
@@ -2635,7 +2703,11 @@
     const marketText = marketFilter.enabled
       ? `${marketFilter.symbol || 'SPY'}${marketFilter.require_fast_sma_above_slow_sma ? '趋势过滤' : '>200MA'}`
       : '市场关闭';
-    return `${rpsText} · ${windows} · ${cupText} · ${marketText}`;
+    const relativeStrength = parameters.relative_strength_params || {};
+    const relativeText = relativeStrength.enabled
+      ? `RS>${relativeStrength.symbol || 'SPY'} ${relativeStrength.lookback_days || '—'}d`
+      : 'RS关闭';
+    return `${rpsText} · ${windows} · ${cupText} · ${marketText} · ${relativeText}`;
   }
 
   function formatYearlyReturns(yearlyReturns) {
@@ -2713,7 +2785,7 @@
       tr.innerHTML = `
         <td>#${result.rank || result.id}<div class="metric-muted">${result.score || '—'}</div><div class="metric-muted">${optimizationRankSummary(result)}</div></td>
         <td>${optimizationParamSummary(result.parameters || {})}<div class="metric-muted">持有 ${formatHoldingDays((result.parameters || {}).holding_days)} · 延迟 ${(result.parameters || {}).entry_delay_days || 0} · 止损 ${(result.parameters || {}).stop_loss_pct || '—'} · RPS退 ${(result.parameters || {}).rps_exit_threshold || '—'}</div></td>
-        <td>总 ${formatRatioPct(metrics.total_return)}<div class="metric-muted">年化 ${formatRatioPct(metrics.annualized_return)} · 平均年化 ${formatRatioPct(metrics.average_annualized_return)}</div></td>
+        <td>总 ${formatRatioPct(metrics.total_return)}<div class="metric-muted">年化 ${formatRatioPct(metrics.annualized_return)} · 平均年化 ${formatRatioPct(metrics.average_annualized_return)}</div><div class="metric-muted">单笔超SPY ${formatRatioPct(metrics.spy_average_trade_excess_return)}</div></td>
         <td>回撤 ${formatRatioPct(metrics.max_drawdown)}<div class="metric-muted">止损 ${formatRatioPct(metrics.stop_loss_trigger_ratio)} · RPS退 ${formatRatioPct(metrics.rps_exit_trigger_ratio)}</div></td>
         <td>${formatYearlyReturns(metrics.yearly_returns)}</td>
       `;
@@ -2893,6 +2965,7 @@
 
   function applyStrategyParameters(parameters) {
     if (!parameters) return;
+    state.appliedStrategyParameters = parameters;
     setCheckboxValue('useRps', parameters.use_rps !== false);
     setCheckboxValue('useCupHandle', parameters.use_cup_handle !== false);
     setInputValue('rpsThreshold', parameters.rps_threshold);
@@ -3008,6 +3081,15 @@
         ? (marketFilter.require_fast_sma_above_slow_sma ? 'spy_50_200ma' : 'spy_200ma')
         : 'none'
     );
+    const relativeStrength = parameters.relative_strength_params || {};
+    setCheckboxValue('optimizationUseRelativeStrength', relativeStrength.enabled === true);
+    setInputValue(
+      'optimizationRelativeStrengthModes',
+      relativeStrength.enabled
+        ? `${(relativeStrength.symbol || 'SPY').toLowerCase()}_${relativeStrength.lookback_days || 120}d`
+        : 'none'
+    );
+    setInputValue('optimizationRelativeStrengthMinExcess', relativeStrength.min_excess_return_pct || '0');
     setInputValue('optimizationEntryDelays', parameters.entry_delay_days);
     setInputValue('optimizationEntryWindow', parameters.entry_deferral_window_days);
     setCheckboxValue('optimizationUseRps', parameters.use_rps !== false);
@@ -3274,6 +3356,8 @@
     'optimizationRpsExits',
     'optimizationMarketFilterModes',
     'optimizationMarketFilterSymbol',
+    'optimizationRelativeStrengthModes',
+    'optimizationRelativeStrengthMinExcess',
     'optimizationPortfolioCap',
     'optimizationPositionWeight',
     'optimizationInitialCapital',
@@ -3289,6 +3373,7 @@
     'optimizationUseRps',
     'optimizationUseCupHandle',
     'optimizationUseMarketFilter',
+    'optimizationUseRelativeStrength',
     'optimizationFundamentalYears',
     'optimizationFundamentalGrowthCounts',
     'optimizationFundamentalMinYoyPcts',

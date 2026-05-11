@@ -28,10 +28,10 @@ describe("apiBaseUrl", () => {
     const result = await resolveApiBaseUrl();
 
     expect(result).toBe("http://127.0.0.1:8000");
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "http://localhost:8000/health/market-data", {
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "http://localhost:8000/health/ready", {
       cache: "no-store",
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "http://127.0.0.1:8000/health/market-data", {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "http://127.0.0.1:8000/health/ready", {
       cache: "no-store",
     });
   });

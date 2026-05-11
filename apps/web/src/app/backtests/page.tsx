@@ -165,6 +165,8 @@ export default async function BacktestsPage({
         <Link href="/watchlist">观察列表</Link>
         <span>/</span>
         <span>回测</span>
+        <span>/</span>
+        <Link href="/experiments">实验</Link>
       </nav>
       <WorkflowTrustBanner workflowLabel="回测工作流" health={health} error={healthError} />
       {legacyRunCount ? (

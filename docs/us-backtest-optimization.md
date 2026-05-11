@@ -19,9 +19,10 @@
 - 支持网格搜索和带随机种子的随机搜索；随机搜索用于在大参数空间里抽样执行。
 - 支持固定止损和 RPS 跌破阈值退出；触发价使用复权收盘价，卖出价使用触发后的下一个有效复权开盘价。止盈不使用固定百分比，后续按 RPS 走弱和业绩变差扩展。
 - 优化回测默认组合口径为初始资金 100000、单票权重 10%、最多 10 只持仓；也可以显式设置每笔投入金额。不允许同票在持仓中重复开仓，暂不设置冷却期。
-- 单次回测和参数优化都会模拟资金账户：开仓时扣除每笔投入，平仓时按实际收益率回款，结果输出初始资金、每笔投入、最终资金、总盈亏和账户收益率。
+- 单次回测和参数优化都会模拟资金账户：开仓时扣除每笔投入，持仓期间按信号日最近有效复权收盘价 mark-to-market，平仓时按实际收益率回款，结果输出初始资金、每笔投入、最终资金、总盈亏、账户收益率和持仓市值。
 - 参数优化按严格窗口口径评估：训练期/验证期结束日以后不再读取未来 K 线；未触发退出的持仓按窗口内最后一个有效复权收盘价估值，退出原因记录为 `window_end_mark`。
 - 参数优化结果会附带 SPY/QQQ 同期基准总收益、年化收益、最大回撤和相对指标，用于判断策略是否只是跟随市场 Beta。
+- Alpha 方向以“SPY 主仓 + 小仓位卫星策略”为评估口径：`relative_strength_params` 要求候选股票在指定窗口跑赢 SPY/QQQ；空闲现金不再默认转入 SPY，因为实际组合里 SPY 已作为底仓单独存在。
 - 持久化优化任务、每个参数组合的结果、评分和排名。
 - 支持查询任务状态、结果排行榜、取消运行中任务。
 - 支持把任意参数组合保存为策略预设，并激活为当前市场的预设。
@@ -199,12 +200,14 @@ POST /backtests/optimization/runs
 - `validation_start_date`
 - `validation_end_date`
 - `parameter_space`
-- `objective`: 排序目标，支持 `score`、`average_annualized_return`、`robust_annualized_return`、`annualized_return`、`max_drawdown`、`return_drawdown_ratio`、`win_rate`、`total_return`
+- `objective`: 排序目标，支持 `score`、`average_annualized_return`、`robust_annualized_return`、`annualized_return`、`max_drawdown`、`return_drawdown_ratio`、`win_rate`、`total_return`、`spy_alpha`
 - `search_mode`: `grid` 或 `random`；随机搜索会从完整参数空间中抽样，避免大网格一次性全跑
 - `random_seed`: 随机搜索种子，用于复现实验
 - `max_parameter_sets`
 - `max_workers`: 可选；留空或 `null` 表示按机器 CPU 自动选择，多进程并行评估参数集
 - `execute_immediately`
+
+其中 `spy_alpha` 是后续 Alpha 实验的主排序目标：优先看验证期每笔实际交易相对同持有期 SPY 的平均超额收益，再用训练期一致性、账户回撤和样本数量做惩罚。
 
 查询任务：
 
@@ -256,7 +259,7 @@ Dashboard 的“美股参数优化”卡片提供第一版可操作流程：
 - 支持编辑第一版小网格参数：RPS/K线形态启用开关、RPS 阈值、RPS 窗口组合、财务质量门槛、持有天数、止损比例、RPS 退出阈值、持仓上限、单票权重、进场等待窗口。财务在参数优化中必选，只能调弱或调强，不能关闭。
 - 支持编辑买点延迟日；回测会在信号后延迟指定交易日，再在等待窗口内使用首个有效开盘价进场。
 - 支持逐项编辑杯柄参数优化轴，覆盖周期、杯深、把手、杯底、前置上涨和突破放量参数。
-- 支持选择排序目标：综合得分、平均年化收益、稳健年化收益、最高年化收益、最低回撤、最高收益回撤比、最高胜率、最高总收益。
+- 支持选择排序目标：综合得分、平均年化收益、稳健年化收益、SPY Alpha、最高年化收益、最低回撤、最高收益回撤比、最高胜率、最高总收益。
 - `robust_annualized_return` 以验证期年化收益为主，同时使用训练期收益、训练/验证差距、最大回撤、样本数和明显负训练期作为稳健性约束；用于让评分与样本外最终资金保持同向，同时降低训练期失效参数排到前面的概率。
 - 支持网格搜索和可复现随机搜索；随机搜索时“最大组合数”表示抽样数量。
 - 前端会预估参数组合数量，并用 `最大组合数` 阻止过大的网格直接启动。
@@ -270,6 +273,8 @@ Dashboard 的“美股参数优化”卡片提供第一版可操作流程：
 - 策略预设列表支持应用、设为默认、复制、改名和删除；默认预设会在 Dashboard 加载当前市场时自动应用。
 
 ## 评分逻辑
+
+`spy_alpha` 是当前建议优先使用的目标函数。它把 SPY 当成卫星仓的机会成本，优先比较每笔实际交易在同持有期内相对 SPY 的超额收益，而不是要求策略账户里的闲置现金也跟随 SPY。这样更符合“主仓默认持有 SPY，额外拿一部分小仓位做增强”的实际用法。账户年化收益、回撤和样本数仍作为约束，避免只靠极少数交易排到前面。
 
 `score` 目标是基础综合分。若提供验证区间，则优先使用验证区间指标评分：
 
@@ -293,14 +298,25 @@ score =
 - 少于 50 笔完成交易：惩罚 0.08
 - 50 笔及以上：无惩罚
 
-资金账户模拟启用后，总收益、年化收益、最大回撤、收益回撤比、权益曲线和年度收益优先来自账户资金曲线；旧结果或缺少账户字段时才回退到信号日平均收益序列。止损、RPS 退出触发比例和最大连续亏损次数来自完整交易序列，不受 Dashboard 返回交易条数限制。参数优化使用严格窗口估值后，账户曲线会在窗口结束日补一个 `window_end` 点；没有交易的窗口会按完整日历区间得到 0% 年化，而不是缺失年化。
+资金账户模拟启用后，总收益、年化收益、最大回撤、收益回撤比、权益曲线和年度收益优先来自账户资金曲线；持仓未平仓期间也会用最近有效复权收盘价重估，所以最大回撤不再只在平仓日体现。旧结果或缺少账户字段时才回退到信号日平均收益序列。止损、RPS 退出触发比例和最大连续亏损次数来自完整交易序列，不受 Dashboard 返回交易条数限制。参数优化使用严格窗口估值后，账户曲线会在窗口结束日补一个 `window_end` 点；没有交易的窗口会按完整日历区间得到 0% 年化，而不是缺失年化。
 
 基准指标不直接参与当前评分，但每条结果都会保存：
 
-- `benchmarks.SPY` / `benchmarks.QQQ`：同期总收益、年化收益、最大回撤、收益回撤比和实际基准数据起止日期。
+- `benchmark_status`：`complete` 表示 SPY/QQQ 都有足够行情，`partial` 表示部分可用，`missing` 表示基准缺失或数据不足。
+- `benchmarks.SPY` / `benchmarks.QQQ`：同期总收益、年化收益、最大回撤、收益回撤比、数据状态、请求日期和实际基准数据起止日期。
 - `benchmark_relative.*.excess_total_return`：策略总收益减基准总收益。
 - `benchmark_relative.*.excess_annualized_return`：策略年化收益减基准年化收益。
 - `benchmark_relative.*.max_drawdown_improvement`：策略最大回撤减基准最大回撤；正数表示策略回撤更浅。
+- `spy_excess_total_return` / `spy_excess_annualized_return` / `spy_max_drawdown_improvement`：策略账户相对同期 SPY 的辅助指标，用于观察整体资金曲线是否明显落后基准。
+- `spy_average_trade_benchmark_return`：每笔实际交易同持有期 SPY 的平均收益。
+- `spy_average_trade_excess_return`：每笔实际交易收益减同持有期 SPY 收益后的平均超额收益，是当前 `spy_alpha` 的主指标。
+- `spy_excess_trade_win_rate`：实际交易跑赢同持有期 SPY 的比例。
+
+Alpha 参数建议：
+
+- `relative_strength_params.enabled=true`，`symbol=SPY`，`lookback_days=120/250`，`min_excess_return_pct=0`：要求候选股票过去 120 或 250 个交易日跑赢 SPY。
+- 空闲现金保持现金口径，不再放进 SPY 估值；SPY 底仓应在真实组合层单独持有，参数优化只评价卫星策略是否能贡献增量 alpha。
+- 初期实验应保留 `relative_strength_params.enabled=false` 的对照，确认新增 alpha 约束是否真正改善跨窗口结果。
 
 `robust_annualized_return` 目标是当前建议用于训练/验证拆分实验的排名口径：
 

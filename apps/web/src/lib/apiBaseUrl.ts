@@ -2,6 +2,7 @@ const DEFAULT_API_BASE_URLS = [
   "http://localhost:8000",
   "http://127.0.0.1:8000",
 ] as const;
+const API_READY_PATH = "/health/ready";
 
 function normalizeApiBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, "");
@@ -26,7 +27,7 @@ export async function resolveApiBaseUrl(): Promise<string> {
 
   for (const candidate of candidates) {
     try {
-      const response = await fetch(`${candidate}/health/market-data`, {
+      const response = await fetch(`${candidate}${API_READY_PATH}`, {
         cache: "no-store",
       });
 

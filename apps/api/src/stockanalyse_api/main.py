@@ -82,7 +82,7 @@ app = create_app()
 
 def main() -> None:
     """Expose the ASGI application for local verification."""
-    print("stockanalyse-api app is ready at /health/market-data")
+    print("stockanalyse-api app is ready at /health/ready")
 
 
 if __name__ == "__main__":

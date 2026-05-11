@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from stockanalyse_api.domain.backtests.models import StrategyPreset
 from stockanalyse_api.services.dashboard import normalize_market
-from stockanalyse_api.services.optimization_backtest import dump_json, load_json, stable_parameter_hash
+from stockanalyse_api.services.strategy_parameters import dump_json, load_json, stable_parameter_hash
 
 
 def serialize_strategy_preset(preset: StrategyPreset) -> dict[str, object]:

@@ -441,6 +441,35 @@ def _screen_candidate_cache_key(
     )
 
 
+def _screen_broad_candidate_cache_key(
+    *,
+    market: str,
+    trade_date: date,
+) -> tuple[object, ...]:
+    return (
+        "screen_broad_candidates",
+        market,
+        trade_date.isoformat(),
+    )
+
+
+def _broad_candidate_cache_date_count(
+    candidate_cache: dict[tuple[object, ...], dict[str, object]],
+    *,
+    market: str,
+) -> int:
+    return sum(
+        1
+        for key in candidate_cache
+        if (
+            isinstance(key, tuple)
+            and len(key) >= 2
+            and key[0] == "screen_broad_candidates"
+            and key[1] == market
+        )
+    )
+
+
 def _rps_pass_expression(
     *,
     threshold: Decimal,
@@ -497,6 +526,52 @@ def _screen_candidate_payload(
     }
 
 
+def _candidate_with_rps_evaluation(
+    candidate: dict[str, object],
+    *,
+    use_rps: bool,
+    threshold_decimal: Decimal,
+    selected_windows: list[int],
+    min_rps_windows_passing: int,
+) -> dict[str, object]:
+    return _screen_candidate_payload(
+        instrument_id=int(candidate["instrument_id"]),
+        symbol=str(candidate["symbol"]),
+        exchange=str(candidate["exchange"]),
+        name=candidate.get("name"),  # type: ignore[arg-type]
+        rps_50=candidate.get("rps_50"),
+        rps_120=candidate.get("rps_120"),
+        rps_250=candidate.get("rps_250"),
+        use_rps=use_rps,
+        threshold_decimal=threshold_decimal,
+        selected_windows=selected_windows,
+        min_rps_windows_passing=min_rps_windows_passing,
+    )
+
+
+def _filter_broad_screen_candidates(
+    candidates: list[dict[str, object]],
+    *,
+    use_rps: bool,
+    threshold_decimal: Decimal,
+    selected_windows: list[int],
+    min_rps_windows_passing: int,
+) -> list[dict[str, object]]:
+    filtered: list[dict[str, object]] = []
+    for candidate in candidates:
+        evaluated = _candidate_with_rps_evaluation(
+            candidate,
+            use_rps=use_rps,
+            threshold_decimal=threshold_decimal,
+            selected_windows=selected_windows,
+            min_rps_windows_passing=min_rps_windows_passing,
+        )
+        if use_rps and not evaluated["rps_passed"]:
+            continue
+        filtered.append(evaluated)
+    return filtered
+
+
 def _candidate_rps_score(
     candidate: dict[str, object],
     selected_windows: list[int],
@@ -520,6 +595,8 @@ def preload_screen_candidate_cache(
     selected_rps_windows: list[int],
     min_rps_windows_passing: int = 1,
     candidate_cache: dict[tuple[object, ...], dict[str, object]] | None,
+    prefer_broad_candidate_cache: bool = False,
+    max_broad_candidate_cache_dates: int | None = None,
 ) -> None:
     if candidate_cache is None or not trade_dates:
         return
@@ -530,6 +607,16 @@ def preload_screen_candidate_cache(
         selected_windows,
     )
     if use_rps and not selected_windows:
+        return
+
+    if prefer_broad_candidate_cache:
+        _preload_broad_screen_candidate_cache(
+            session,
+            market=resolved_market,
+            trade_dates=trade_dates,
+            candidate_cache=candidate_cache,
+            max_broad_candidate_cache_dates=max_broad_candidate_cache_dates,
+        )
         return
 
     missing_dates = [
@@ -628,6 +715,83 @@ def preload_screen_candidate_cache(
         }
 
 
+def _preload_broad_screen_candidate_cache(
+    session,
+    *,
+    market: str,
+    trade_dates: list[date],
+    candidate_cache: dict[tuple[object, ...], dict[str, object]] | None,
+    max_broad_candidate_cache_dates: int | None = None,
+) -> None:
+    if candidate_cache is None or not trade_dates:
+        return
+    missing_dates = [
+        trade_date
+        for trade_date in trade_dates
+        if _screen_broad_candidate_cache_key(market=market, trade_date=trade_date)
+        not in candidate_cache
+    ]
+    if not missing_dates:
+        return
+    if max_broad_candidate_cache_dates is not None:
+        remaining = max_broad_candidate_cache_dates - _broad_candidate_cache_date_count(
+            candidate_cache,
+            market=market,
+        )
+        if remaining <= 0:
+            return
+        missing_dates = missing_dates[:remaining]
+
+    exchanges = _market_exchanges(market)
+    start_date = min(missing_dates)
+    end_date = max(missing_dates)
+    rows = session.execute(
+        select(
+            DerivedIndicatorDaily.trade_date,
+            DerivedIndicatorDaily.instrument_id,
+            DerivedIndicatorDaily.rps_50,
+            DerivedIndicatorDaily.rps_120,
+            DerivedIndicatorDaily.rps_250,
+            Instrument.symbol,
+            Instrument.exchange,
+            Instrument.name,
+        )
+        .join(Instrument, Instrument.id == DerivedIndicatorDaily.instrument_id)
+        .where(
+            DerivedIndicatorDaily.trade_date >= start_date,
+            DerivedIndicatorDaily.trade_date <= end_date,
+            Instrument.exchange.in_(exchanges),
+        )
+        .order_by(DerivedIndicatorDaily.trade_date.asc(), Instrument.symbol.asc())
+    )
+    candidates_by_date: dict[date, list[dict[str, object]]] = defaultdict(list)
+    for row in rows:
+        candidates_by_date[row.trade_date].append(
+            _screen_candidate_payload(
+                instrument_id=row.instrument_id,
+                symbol=row.symbol,
+                exchange=row.exchange,
+                name=row.name,
+                rps_50=row.rps_50,
+                rps_120=row.rps_120,
+                rps_250=row.rps_250,
+                use_rps=False,
+                threshold_decimal=Decimal("0"),
+                selected_windows=[],
+                min_rps_windows_passing=1,
+            )
+        )
+
+    for trade_date in missing_dates:
+        candidates = candidates_by_date.get(trade_date, [])
+        candidate_cache[
+            _screen_broad_candidate_cache_key(market=market, trade_date=trade_date)
+        ] = {
+            "total_evaluated": len(candidates),
+            "candidates": candidates,
+        }
+
+
 def _normalize_fundamental_growth_params(
     params: FundamentalGrowthParams | None = None,
 ) -> FundamentalGrowthParams:
@@ -704,6 +868,8 @@ def screen_universe(
     cup_event_cache_end_date: date | None = None,
     max_hits: int | None = None,
     exclude_symbols: set[str] | frozenset[str] | None = None,
+    prefer_broad_candidate_cache: bool = False,
+    max_broad_candidate_cache_dates: int | None = None,
 ) -> dict[str, object]:
     resolved_market = normalize_market(market)
     exchanges = _market_exchanges(resolved_market)
@@ -762,9 +928,38 @@ def screen_universe(
         selected_windows=selected_windows,
         min_rps_windows_passing=resolved_min_rps_passing,
     )
-    cached_candidates = (
-        candidate_cache.get(candidate_cache_key) if candidate_cache is not None else None
-    )
+    cached_candidates = None
+    threshold_decimal = Decimal(rps_threshold)
+    if candidate_cache is not None and prefer_broad_candidate_cache:
+        broad_candidate_cache_key = _screen_broad_candidate_cache_key(
+            market=resolved_market,
+            trade_date=target_date,
+        )
+        broad_candidates = candidate_cache.get(broad_candidate_cache_key)
+        if broad_candidates is None:
+            _preload_broad_screen_candidate_cache(
+                session,
+                market=resolved_market,
+                trade_dates=[target_date],
+                candidate_cache=candidate_cache,
+                max_broad_candidate_cache_dates=max_broad_candidate_cache_dates,
+            )
+            broad_candidates = candidate_cache.get(broad_candidate_cache_key)
+        if broad_candidates is not None:
+            cached_candidates = {
+                "total_evaluated": broad_candidates["total_evaluated"],
+                "candidates": _filter_broad_screen_candidates(
+                    list(broad_candidates["candidates"]),  # type: ignore[arg-type]
+                    use_rps=use_rps,
+                    threshold_decimal=threshold_decimal,
+                    selected_windows=selected_windows,
+                    min_rps_windows_passing=resolved_min_rps_passing,
+                ),
+            }
+    if cached_candidates is None:
+        cached_candidates = (
+            candidate_cache.get(candidate_cache_key) if candidate_cache is not None else None
+        )
     if cached_candidates is None:
         base_filters = (
             DerivedIndicatorDaily.trade_date == target_date,
@@ -782,7 +977,6 @@ def screen_universe(
             .order_by(Instrument.symbol.asc())
         )
 
-        threshold_decimal = Decimal(rps_threshold)
         if use_rps:
             query = query.where(
                 _rps_pass_expression(

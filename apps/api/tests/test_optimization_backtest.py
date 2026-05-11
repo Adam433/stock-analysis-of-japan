@@ -21,26 +21,36 @@ from stockanalyse_api.domain.backtests.models import (
     OptimizationResultDetailCache,
     StrategyPreset,
 )
+from stockanalyse_api.domain.instruments.models import Instrument
+from stockanalyse_api.domain.market_data.models import MarketDataDaily
 from stockanalyse_api.services.dashboard import DEFAULT_CUP_HANDLE_PARAMS
 from stockanalyse_api.services.dashboard_strategy_backtest import (
     _simulate_trade,
     run_cup_handle_rps_backtest,
 )
 from stockanalyse_api.services.optimization_backtest import (
+    BACKTEST_SEMANTICS_VERSION,
     _attach_average_annualized_return,
     _extract_metrics,
+    _load_benchmark_metrics,
     _parallel_parameter_groups,
     _score_metric_pair,
     _score_metrics,
     build_optimization_result_detail,
     build_parameter_sets,
     create_optimization_run,
+    create_optimization_rerun_from_result,
     dump_json,
+    evaluate_strategy_parameter_set,
     execute_optimization_run,
     list_optimization_results,
     serialize_optimization_result,
     serialize_optimization_run,
     stable_parameter_hash,
+)
+from stockanalyse_api.services.strategy_parameters import (
+    STRATEGY_PARAMETER_SCHEMA_VERSION,
+    normalize_strategy_parameter_set,
 )
 from stockanalyse_api.services.strategy_presets import (
     activate_strategy_preset,
@@ -148,6 +158,78 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(len(parameter_sets), 2)
         self.assertEqual({item["rps_threshold"] for item in parameter_sets}, {85, 90})
         self.assertEqual(parameter_sets[0]["selected_rps_windows"], [50, 120])
+
+    def test_normalized_strategy_parameters_include_schema_version(self) -> None:
+        normalized = normalize_strategy_parameter_set({"rps_threshold": 90})
+
+        self.assertEqual(
+            normalized["strategy_schema_version"],
+            STRATEGY_PARAMETER_SCHEMA_VERSION,
+        )
+
+    def test_public_strategy_evaluator_normalizes_parameters(self) -> None:
+        with self.session_factory() as session:
+            with patch(
+                "stockanalyse_api.services.optimization_backtest._evaluate_parameter_set",
+                return_value={
+                    "parameters": {},
+                    "train_metrics": {"benchmark_status": "missing"},
+                    "validation_metrics": None,
+                    "train_result": {},
+                    "validation_result": None,
+                    "score": Decimal("0"),
+                    "status": "completed",
+                    "failure_reason": None,
+                },
+            ) as mocked_evaluator:
+                evaluation = evaluate_strategy_parameter_set(
+                    session,
+                    start_date=date(2025, 1, 1),
+                    end_date=date(2025, 12, 31),
+                    market="us",
+                    objective="score",
+                    parameters={"rps_threshold": "90"},
+                )
+
+        self.assertEqual(evaluation["status"], "completed")
+        normalized_parameters = mocked_evaluator.call_args.kwargs["parameters"]
+        self.assertEqual(
+            normalized_parameters["strategy_schema_version"],
+            STRATEGY_PARAMETER_SCHEMA_VERSION,
+        )
+        self.assertEqual(normalized_parameters["rps_threshold"], 90)
+
+    def test_public_strategy_evaluator_can_require_spy_benchmark(self) -> None:
+        with self.session_factory() as session:
+            with patch(
+                "stockanalyse_api.services.optimization_backtest._evaluate_parameter_set",
+                return_value={
+                    "parameters": normalize_strategy_parameter_set({"rps_threshold": 90}),
+                    "train_metrics": {
+                        "benchmark_status": "missing",
+                        "benchmarks": {"SPY": {"status": "insufficient_data"}},
+                    },
+                    "validation_metrics": None,
+                    "train_result": {},
+                    "validation_result": None,
+                    "score": Decimal("-1"),
+                    "status": "completed",
+                    "failure_reason": None,
+                },
+            ):
+                evaluation = evaluate_strategy_parameter_set(
+                    session,
+                    start_date=date(2025, 1, 1),
+                    end_date=date(2025, 12, 31),
+                    market="us",
+                    objective="spy_alpha",
+                    parameters={"rps_threshold": 90},
+                    require_complete_benchmark=True,
+                )
+
+        self.assertEqual(evaluation["status"], "failed")
+        self.assertIsNone(evaluation["score"])
+        self.assertIn("BenchmarkDataUnavailable", evaluation["failure_reason"])
 
     def test_build_parameter_sets_requires_fundamentals_by_default(self) -> None:
         parameter_sets = build_parameter_sets({"rps_threshold": [90]})
@@ -327,6 +409,31 @@ class OptimizationBacktestTests(unittest.TestCase):
             parameter_sets[1]["market_filter_params"]["require_fast_sma_above_slow_sma"]
         )
 
+    def test_build_parameter_sets_normalizes_alpha_parameters(self) -> None:
+        parameter_sets = build_parameter_sets(
+            {
+                "relative_strength_params": [
+                    {
+                        "enabled": True,
+                        "symbol": "spy",
+                        "lookback_days": 120,
+                        "min_excess_return_pct": "0.05",
+                    }
+                ],
+                "cash_fallback_params": [{"enabled": True, "symbol": "qqq"}],
+            }
+        )
+
+        self.assertTrue(parameter_sets[0]["relative_strength_params"]["enabled"])
+        self.assertEqual(parameter_sets[0]["relative_strength_params"]["symbol"], "SPY")
+        self.assertEqual(parameter_sets[0]["relative_strength_params"]["lookback_days"], 120)
+        self.assertEqual(
+            parameter_sets[0]["relative_strength_params"]["min_excess_return_pct"],
+            "0.0500",
+        )
+        self.assertTrue(parameter_sets[0]["cash_fallback_params"]["enabled"])
+        self.assertEqual(parameter_sets[0]["cash_fallback_params"]["symbol"], "QQQ")
+
     def test_create_optimization_run_persists_random_search_metadata(self) -> None:
         with self.session_factory() as session:
             run = create_optimization_run(
@@ -402,6 +509,93 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(results[0].rank, 1)
         self.assertEqual(serialize_optimization_result(results[0])["parameters"]["rps_threshold"], 90)
         self.assertEqual(completed.best_result_id, results[0].id)
+
+    def test_serialize_optimization_result_can_return_summary_metrics(self) -> None:
+        with self.session_factory() as session:
+            run = create_optimization_run(
+                session,
+                market="us",
+                train_start_date=date(2025, 1, 1),
+                train_end_date=date(2025, 12, 31),
+                parameter_space={"rps_threshold": [85]},
+                require_data_ready=False,
+            )
+            result = OptimizationResult(
+                optimization_run_id=run.id,
+                parameter_hash="summary-metrics",
+                parameters_json=dump_json({"rps_threshold": 85}),
+                train_metrics_json=dump_json(
+                    {
+                        "total_return": "0.120000",
+                        "max_drawdown": "-0.080000",
+                        "spy_average_trade_excess_return": "0.010000",
+                        "benchmarks": {"SPY": {"total_return": "0.090000"}},
+                        "equity_curve": [{"date": "2025-01-02", "equity": "100000"}],
+                    }
+                ),
+                validation_metrics_json=None,
+                score=Decimal("0.123456"),
+                status="completed",
+            )
+            session.add(result)
+            session.commit()
+            session.refresh(result)
+
+            payload = serialize_optimization_result(
+                result,
+                include_metric_series=False,
+                metrics_summary_only=True,
+            )
+
+        self.assertEqual(
+            payload["train_metrics"],
+            {
+                "total_return": "0.120000",
+                "max_drawdown": "-0.080000",
+                "spy_average_trade_excess_return": "0.010000",
+            },
+        )
+
+    def test_create_optimization_rerun_from_result_preserves_single_parameter_set(self) -> None:
+        def fake_backtest(*args, **kwargs):
+            return _BacktestResult(
+                completed_trades=60,
+                average_trade_return="0.080000",
+                win_rate="0.600000",
+                worst_trade_return="-0.060000",
+            )
+
+        with self.session_factory() as session:
+            run = create_optimization_run(
+                session,
+                market="us",
+                train_start_date=date(2025, 1, 1),
+                train_end_date=date(2025, 12, 31),
+                parameter_space={
+                    "rps_threshold": [80],
+                    "selected_rps_windows": [[120, 250]],
+                    "market_filter_params": [{"enabled": True, "symbol": "SPY"}],
+                },
+                require_data_ready=False,
+            )
+            with patch(
+                "stockanalyse_api.services.optimization_backtest.run_cup_handle_rps_backtest",
+                side_effect=fake_backtest,
+            ):
+                execute_optimization_run(session, run.id)
+            source_result = list_optimization_results(session, run_id=run.id)[0]
+
+            rerun = create_optimization_rerun_from_result(
+                session,
+                result_id=source_result.id,
+                max_workers=1,
+                require_data_ready=False,
+            )
+            payload = serialize_optimization_run(rerun, include_parameter_sets=True)
+
+        self.assertEqual(rerun.total_parameter_sets, 1)
+        self.assertEqual(payload["parameter_sets"][0]["selected_rps_windows"], [120, 250])
+        self.assertEqual(payload["parameter_sets"][0]["market_filter_params"]["symbol"], "SPY")
 
     def test_execute_optimization_run_parallel_persists_worker_results(self) -> None:
         class FakeProcessPoolExecutor:
@@ -776,6 +970,11 @@ class OptimizationBacktestTests(unittest.TestCase):
                 "completed_trades": 20,
                 "average_trade_return": "0.020000",
                 "win_rate": "0.600000",
+                "spy_trade_benchmark_count": 20,
+                "spy_average_trade_benchmark_return": "0.010000",
+                "spy_average_trade_excess_return": "0.015000",
+                "spy_median_trade_excess_return": "0.012000",
+                "spy_excess_trade_win_rate": "0.650000",
                 "worst_trade_return": "-0.080000",
                 "account_total_return": "0.150000",
                 "account_annualized_return": "0.120000",
@@ -805,6 +1004,119 @@ class OptimizationBacktestTests(unittest.TestCase):
             metrics["benchmark_relative"]["SPY"]["max_drawdown_improvement"],
             "0.120000",
         )
+        self.assertEqual(metrics["spy_excess_total_return"], "0.050000")
+        self.assertEqual(metrics["spy_excess_annualized_return"], "0.040000")
+        self.assertEqual(metrics["spy_max_drawdown_improvement"], "0.120000")
+        self.assertEqual(metrics["spy_trade_benchmark_count"], 20)
+        self.assertEqual(metrics["spy_average_trade_excess_return"], "0.015000")
+        self.assertEqual(metrics["spy_excess_trade_win_rate"], "0.650000")
+
+    def test_spy_alpha_score_prefers_benchmark_outperformance(self) -> None:
+        underperformer = {
+            "completed_trades": 20,
+            "spy_trade_benchmark_count": 20,
+            "spy_average_trade_excess_return": "-0.010000",
+            "spy_excess_trade_win_rate": "0.450000",
+            "annualized_return": "0.120000",
+            "max_drawdown": "-0.080000",
+        }
+        outperformer = dict(underperformer)
+        outperformer["spy_average_trade_excess_return"] = "0.030000"
+        outperformer["spy_excess_trade_win_rate"] = "0.650000"
+
+        self.assertGreater(
+            _score_metrics(outperformer, objective="spy_alpha"),
+            _score_metrics(underperformer, objective="spy_alpha"),
+        )
+
+    def test_load_benchmark_metrics_uses_adjusted_close_and_drawdown(self) -> None:
+        with self.session_factory() as session:
+            spy = Instrument(
+                symbol="SPY",
+                exchange="US",
+                name="SPDR S&P 500 ETF",
+                currency="USD",
+            )
+            session.add(spy)
+            session.flush()
+            session.add_all(
+                [
+                    MarketDataDaily(
+                        instrument_id=spy.id,
+                        trade_date=date(2025, 1, 2),
+                        open=Decimal("100"),
+                        high=Decimal("100"),
+                        low=Decimal("100"),
+                        close=Decimal("100"),
+                        adj_close=Decimal("100"),
+                        volume=1000,
+                    ),
+                    MarketDataDaily(
+                        instrument_id=spy.id,
+                        trade_date=date(2025, 1, 3),
+                        open=Decimal("80"),
+                        high=Decimal("80"),
+                        low=Decimal("80"),
+                        close=Decimal("80"),
+                        adj_close=Decimal("80"),
+                        volume=1000,
+                    ),
+                    MarketDataDaily(
+                        instrument_id=spy.id,
+                        trade_date=date(2025, 1, 6),
+                        open=Decimal("120"),
+                        high=Decimal("120"),
+                        low=Decimal("120"),
+                        close=Decimal("120"),
+                        adj_close=Decimal("120"),
+                        volume=1000,
+                    ),
+                ]
+            )
+            session.commit()
+
+            metrics = _load_benchmark_metrics(
+                session,
+                market="us",
+                start_date=date(2025, 1, 1),
+                end_date=date(2025, 1, 31),
+                symbols=("SPY",),
+            )
+
+        self.assertEqual(metrics["SPY"]["data_points"], 3)
+        self.assertEqual(metrics["SPY"]["status"], "ok")
+        self.assertEqual(metrics["SPY"]["total_return"], "0.200000")
+        self.assertEqual(metrics["SPY"]["max_drawdown"], "-0.200000")
+
+    def test_missing_benchmark_metrics_are_explicit(self) -> None:
+        with self.session_factory() as session:
+            benchmarks = _load_benchmark_metrics(
+                session,
+                market="us",
+                start_date=date(2025, 1, 1),
+                end_date=date(2025, 1, 31),
+                symbols=("SPY",),
+            )
+        metrics = _extract_metrics(
+            {
+                "start_date": "2025-01-01",
+                "end_date": "2025-01-31",
+                "completed_trades": 20,
+                "average_trade_return": "0.020000",
+                "win_rate": "0.600000",
+                "worst_trade_return": "-0.080000",
+                "account_total_return": "0.050000",
+                "account_annualized_return": "0.100000",
+                "account_max_drawdown": "-0.030000",
+                "account_equity_curve": [],
+                "account_yearly_returns": {},
+            },
+            benchmark_metrics=benchmarks,
+        )
+
+        self.assertEqual(benchmarks["SPY"]["status"], "insufficient_data")
+        self.assertEqual(metrics["benchmark_status"], "missing")
+        self.assertIsNone(metrics["benchmark_relative"]["SPY"]["excess_total_return"])
 
     def test_score_penalizes_stop_loss_ratio_and_loss_streak(self) -> None:
         base_metrics = {
@@ -1262,6 +1574,305 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(metrics["total_return"], "0.010000")
         self.assertEqual(metrics["final_capital"], "101000.00")
 
+    def test_backtest_marks_open_positions_to_market_for_drawdown(self) -> None:
+        screen_payload = {
+            "hits": [
+                {
+                    "instrument_id": 1,
+                    "symbol": "AAPL",
+                    "rps_50": "95",
+                    "rps_120": "90",
+                    "rps_250": "88",
+                }
+            ],
+            "total_evaluated": 10,
+        }
+        rows = [
+            _market_row(date(2025, 1, 2), "100"),
+            _market_row(date(2025, 1, 3), "80"),
+            _market_row(date(2025, 1, 6), "120"),
+        ]
+
+        with (
+            patch(
+                "stockanalyse_api.services.dashboard_strategy_backtest._load_trade_dates",
+                return_value=[date(2025, 1, 1), date(2025, 1, 3)],
+            ),
+            patch(
+                "stockanalyse_api.services.dashboard_strategy_backtest.screen_universe",
+                side_effect=[screen_payload, {"hits": [], "total_evaluated": 10}],
+            ),
+            patch(
+                "stockanalyse_api.services.dashboard_strategy_backtest._load_future_rows",
+                return_value=rows,
+            ),
+            patch(
+                "stockanalyse_api.services.dashboard_strategy_backtest._load_mark_price_series",
+                return_value=(
+                    [date(2025, 1, 2), date(2025, 1, 3), date(2025, 1, 6)],
+                    [Decimal("100"), Decimal("80"), Decimal("120")],
+                ),
+            ),
+        ):
+            result = run_cup_handle_rps_backtest(
+                object(),
+                start_date=date(2025, 1, 1),
+                end_date=date(2025, 1, 31),
+                rps_threshold=90,
+                selected_rps_windows=[50, 120],
+                min_rps_windows_passing=1,
+                use_cup_handle=False,
+                cup_handle_params=DEFAULT_CUP_HANDLE_PARAMS,
+                market="us",
+                holding_days=2,
+                stop_loss_pct=Decimal("-0.50"),
+                portfolio_cap=1,
+                initial_capital=Decimal("100000"),
+                position_size_amount=Decimal("10000"),
+                entry_deferral_window_days=1,
+                execution_limited_screen=True,
+            )
+
+        payload = result.to_dict()
+        mark_points = [
+            point for point in payload["account_equity_curve"] if point["event"] == "mark"
+        ]
+        self.assertEqual(mark_points[0]["capital"], "98000.00")
+        self.assertEqual(mark_points[0]["invested_market_value"], "8000.00")
+        self.assertEqual(payload["account_max_drawdown"], "-0.020000")
+        self.assertEqual(payload["final_capital"], "102000.00")
+
+    def test_backtest_filters_hits_by_relative_strength_to_spy(self) -> None:
+        with self.session_factory() as session:
+            aapl = Instrument(symbol="AAPL", exchange="US", name="Apple", currency="USD")
+            msft = Instrument(symbol="MSFT", exchange="US", name="Microsoft", currency="USD")
+            spy = Instrument(symbol="SPY", exchange="US", name="SPY", currency="USD")
+            session.add_all([aapl, msft, spy])
+            session.flush()
+            session.add_all(
+                [
+                    MarketDataDaily(
+                        instrument_id=aapl.id,
+                        trade_date=date(2025, 1, 1),
+                        open=Decimal("100"),
+                        high=Decimal("100"),
+                        low=Decimal("100"),
+                        close=Decimal("100"),
+                        adj_close=Decimal("100"),
+                        volume=1000,
+                    ),
+                    MarketDataDaily(
+                        instrument_id=aapl.id,
+                        trade_date=date(2025, 1, 2),
+                        open=Decimal("110"),
+                        high=Decimal("110"),
+                        low=Decimal("110"),
+                        close=Decimal("110"),
+                        adj_close=Decimal("110"),
+                        volume=1000,
+                    ),
+                    MarketDataDaily(
+                        instrument_id=aapl.id,
+                        trade_date=date(2025, 1, 3),
+                        open=Decimal("120"),
+                        high=Decimal("120"),
+                        low=Decimal("120"),
+                        close=Decimal("120"),
+                        adj_close=Decimal("120"),
+                        volume=1000,
+                    ),
+                    MarketDataDaily(
+                        instrument_id=msft.id,
+                        trade_date=date(2025, 1, 1),
+                        open=Decimal("100"),
+                        high=Decimal("100"),
+                        low=Decimal("100"),
+                        close=Decimal("100"),
+                        adj_close=Decimal("100"),
+                        volume=1000,
+                    ),
+                    MarketDataDaily(
+                        instrument_id=msft.id,
+                        trade_date=date(2025, 1, 2),
+                        open=Decimal("102"),
+                        high=Decimal("102"),
+                        low=Decimal("102"),
+                        close=Decimal("102"),
+                        adj_close=Decimal("102"),
+                        volume=1000,
+                    ),
+                    MarketDataDaily(
+                        instrument_id=msft.id,
+                        trade_date=date(2025, 1, 3),
+                        open=Decimal("105"),
+                        high=Decimal("105"),
+                        low=Decimal("105"),
+                        close=Decimal("105"),
+                        adj_close=Decimal("105"),
+                        volume=1000,
+                    ),
+                    MarketDataDaily(
+                        instrument_id=spy.id,
+                        trade_date=date(2025, 1, 1),
+                        open=Decimal("100"),
+                        high=Decimal("100"),
+                        low=Decimal("100"),
+                        close=Decimal("100"),
+                        adj_close=Decimal("100"),
+                        volume=1000,
+                    ),
+                    MarketDataDaily(
+                        instrument_id=spy.id,
+                        trade_date=date(2025, 1, 2),
+                        open=Decimal("105"),
+                        high=Decimal("105"),
+                        low=Decimal("105"),
+                        close=Decimal("105"),
+                        adj_close=Decimal("105"),
+                        volume=1000,
+                    ),
+                    MarketDataDaily(
+                        instrument_id=spy.id,
+                        trade_date=date(2025, 1, 3),
+                        open=Decimal("110"),
+                        high=Decimal("110"),
+                        low=Decimal("110"),
+                        close=Decimal("110"),
+                        adj_close=Decimal("110"),
+                        volume=1000,
+                    ),
+                ]
+            )
+            session.commit()
+            screen_payload = {
+                "hits": [
+                    {"instrument_id": aapl.id, "symbol": "AAPL", "rps_50": "95"},
+                    {"instrument_id": msft.id, "symbol": "MSFT", "rps_50": "94"},
+                ],
+                "total_evaluated": 2,
+            }
+            with (
+                patch(
+                    "stockanalyse_api.services.dashboard_strategy_backtest._load_trade_dates",
+                    return_value=[date(2025, 1, 3)],
+                ),
+                patch(
+                    "stockanalyse_api.services.dashboard_strategy_backtest.screen_universe",
+                    return_value=screen_payload,
+                ),
+                patch(
+                    "stockanalyse_api.services.dashboard_strategy_backtest._load_future_rows",
+                    return_value=[
+                        _market_row(date(2025, 1, 3), "120"),
+                        _market_row(date(2025, 1, 6), "132"),
+                    ],
+                ),
+            ):
+                result = run_cup_handle_rps_backtest(
+                    session,
+                    start_date=date(2025, 1, 1),
+                    end_date=date(2025, 1, 31),
+                    rps_threshold=90,
+                    selected_rps_windows=[50],
+                    min_rps_windows_passing=1,
+                    use_cup_handle=False,
+                    cup_handle_params=DEFAULT_CUP_HANDLE_PARAMS,
+                    market="us",
+                    holding_days=1,
+                    stop_loss_pct=Decimal("-0.50"),
+                    portfolio_cap=2,
+                    initial_capital=Decimal("100000"),
+                    position_size_amount=Decimal("10000"),
+                    entry_deferral_window_days=1,
+                    relative_strength_params={
+                        "enabled": True,
+                        "symbol": "SPY",
+                        "lookback_days": 2,
+                        "min_excess_return_pct": "0",
+                    },
+                )
+
+        payload = result.to_dict()
+        self.assertEqual(payload["selected_trades"], 1)
+        self.assertEqual(payload["trades"][0]["symbol"], "AAPL")
+        self.assertEqual(payload["signal_days"][0]["hit_count"], 1)
+        self.assertEqual(payload["spy_trade_benchmark_count"], 1)
+        self.assertEqual(payload["spy_average_trade_excess_return"], "0.100000")
+        self.assertEqual(payload["spy_excess_trade_win_rate"], "1.000000")
+
+    def test_cash_fallback_marks_idle_cash_to_spy(self) -> None:
+        with self.session_factory() as session:
+            spy = Instrument(symbol="SPY", exchange="US", name="SPY", currency="USD")
+            session.add(spy)
+            session.flush()
+            session.add_all(
+                [
+                    MarketDataDaily(
+                        instrument_id=spy.id,
+                        trade_date=date(2025, 1, 1),
+                        open=Decimal("100"),
+                        high=Decimal("100"),
+                        low=Decimal("100"),
+                        close=Decimal("100"),
+                        adj_close=Decimal("100"),
+                        volume=1000,
+                    ),
+                    MarketDataDaily(
+                        instrument_id=spy.id,
+                        trade_date=date(2025, 1, 2),
+                        open=Decimal("110"),
+                        high=Decimal("110"),
+                        low=Decimal("110"),
+                        close=Decimal("110"),
+                        adj_close=Decimal("110"),
+                        volume=1000,
+                    ),
+                    MarketDataDaily(
+                        instrument_id=spy.id,
+                        trade_date=date(2025, 1, 3),
+                        open=Decimal("120"),
+                        high=Decimal("120"),
+                        low=Decimal("120"),
+                        close=Decimal("120"),
+                        adj_close=Decimal("120"),
+                        volume=1000,
+                    ),
+                ]
+            )
+            session.commit()
+            with (
+                patch(
+                    "stockanalyse_api.services.dashboard_strategy_backtest._load_trade_dates",
+                    return_value=[date(2025, 1, 1), date(2025, 1, 2), date(2025, 1, 3)],
+                ),
+                patch(
+                    "stockanalyse_api.services.dashboard_strategy_backtest.screen_universe",
+                    return_value={"hits": [], "total_evaluated": 10},
+                ),
+            ):
+                result = run_cup_handle_rps_backtest(
+                    session,
+                    start_date=date(2025, 1, 1),
+                    end_date=date(2025, 1, 31),
+                    rps_threshold=90,
+                    selected_rps_windows=[50],
+                    min_rps_windows_passing=1,
+                    use_cup_handle=False,
+                    cup_handle_params=DEFAULT_CUP_HANDLE_PARAMS,
+                    market="us",
+                    holding_days=1,
+                    stop_loss_pct=Decimal("-0.50"),
+                    portfolio_cap=1,
+                    initial_capital=Decimal("100000"),
+                    position_size_amount=Decimal("10000"),
+                    cash_fallback_params={"enabled": True, "symbol": "SPY"},
+                )
+
+        payload = result.to_dict()
+        self.assertEqual(payload["final_capital"], "120000.00")
+        self.assertEqual(payload["account_total_return"], "0.200000")
+        self.assertEqual(payload["account_equity_curve"][-1]["cash_fallback_symbol"], "SPY")
+
     def test_simulate_trade_respects_entry_delay_days(self) -> None:
         rows = [
             _market_row(date(2025, 1, 2), "100"),
@@ -1461,6 +2072,31 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(trade.exit_price, "105.000000")
         self.assertEqual(trade.realized_return, "0.050000")
 
+    def test_simulate_trade_allows_partial_entry_window_before_window_end(self) -> None:
+        rows = [_market_row(date(2025, 1, 3), "100")]
+
+        with patch(
+            "stockanalyse_api.services.dashboard_strategy_backtest._load_future_rows",
+            return_value=rows,
+        ):
+            trade = _simulate_trade(
+                None,
+                signal_date=date(2025, 1, 2),
+                hit={"instrument_id": 1, "symbol": "AAPL", "rps_50": "95"},
+                selected_windows=[50],
+                holding_days=10,
+                stop_loss_pct=Decimal("-0.08"),
+                entry_delay_days=0,
+                entry_deferral_window_days=5,
+                max_exit_date=date(2025, 1, 3),
+            )
+
+        self.assertNotIsInstance(trade, dict)
+        assert not isinstance(trade, dict)
+        self.assertEqual(trade.entry_date, "2025-01-03")
+        self.assertEqual(trade.exit_reason, "window_end_mark")
+        self.assertEqual(trade.realized_return, "0.000000")
+
     def test_simulate_trade_exits_when_rps_falls_below_threshold(self) -> None:
         rows = [
             _market_row(date(2025, 1, 2), "100"),
@@ -1600,8 +2236,18 @@ class OptimizationBacktestTests(unittest.TestCase):
                 optimization_run_id=run.id,
                 parameter_hash=stable_parameter_hash(parameters),
                 parameters_json=dump_json(parameters),
-                train_metrics_json=dump_json({"completed_trades": 1}),
-                validation_metrics_json=dump_json({"completed_trades": 1}),
+                train_metrics_json=dump_json(
+                    {
+                        "completed_trades": 1,
+                        "backtest_semantics_version": BACKTEST_SEMANTICS_VERSION,
+                    }
+                ),
+                validation_metrics_json=dump_json(
+                    {
+                        "completed_trades": 1,
+                        "backtest_semantics_version": BACKTEST_SEMANTICS_VERSION,
+                    }
+                ),
                 score=Decimal("0.1"),
                 rank=1,
                 status="completed",
@@ -1646,10 +2292,18 @@ class OptimizationBacktestTests(unittest.TestCase):
                 parameter_hash=stable_parameter_hash(parameters),
                 parameters_json=dump_json(parameters),
                 train_metrics_json=dump_json(
-                    {"completed_trades": 0, "annualized_return": "0.000000"}
+                    {
+                        "completed_trades": 0,
+                        "annualized_return": "0.000000",
+                        "backtest_semantics_version": BACKTEST_SEMANTICS_VERSION,
+                    }
                 ),
                 validation_metrics_json=dump_json(
-                    {"completed_trades": 0, "annualized_return": "0.000000"}
+                    {
+                        "completed_trades": 0,
+                        "annualized_return": "0.000000",
+                        "backtest_semantics_version": BACKTEST_SEMANTICS_VERSION,
+                    }
                 ),
                 score=Decimal("-0.2"),
                 rank=1,
@@ -1734,6 +2388,130 @@ class OptimizationBacktestTests(unittest.TestCase):
         mocked_backtest.assert_not_called()
         self.assertEqual(detail["train"]["trades"][0]["symbol"], "AAPL")
         self.assertEqual(detail["train"]["trades"][0]["exit_reason_label"], "固定止损触发")
+
+    def test_optimization_result_detail_ignores_legacy_cache_for_current_metrics(self) -> None:
+        def fake_backtest(*args, **kwargs):
+            return SimpleNamespace(
+                to_dict=lambda: {
+                    "start_date": kwargs["start_date"].isoformat(),
+                    "end_date": kwargs["end_date"].isoformat(),
+                    "completed_trades": 1,
+                    "trades": [
+                        {
+                            "signal_date": kwargs["start_date"].isoformat(),
+                            "instrument_id": 1,
+                            "symbol": "AAPL",
+                            "entry_date": "2026-03-03",
+                            "entry_price": "100.000000",
+                            "exit_date": "2026-03-10",
+                            "exit_price": "108.000000",
+                            "exit_reason": "holding_period_elapsed",
+                            "realized_return": "0.080000",
+                            "rps_score": "88.00",
+                        }
+                    ],
+                }
+            )
+
+        with self.session_factory() as session:
+            run = create_optimization_run(
+                session,
+                market="us",
+                train_start_date=date(2026, 3, 2),
+                train_end_date=date(2026, 3, 13),
+                parameter_space={"rps_threshold": [80], "use_cup_handle": [False]},
+                require_data_ready=False,
+            )
+            parameters = build_parameter_sets(
+                {"rps_threshold": [80], "use_cup_handle": [False]}
+            )[0]
+            result = OptimizationResult(
+                optimization_run_id=run.id,
+                parameter_hash=stable_parameter_hash(parameters),
+                parameters_json=dump_json(parameters),
+                train_metrics_json=dump_json(
+                    {
+                        "completed_trades": 1,
+                        "backtest_semantics_version": BACKTEST_SEMANTICS_VERSION,
+                    }
+                ),
+                validation_metrics_json=None,
+                score=Decimal("0.1"),
+                rank=1,
+                status="completed",
+            )
+            session.add(result)
+            session.commit()
+            result_id = result.id
+            session.add(
+                OptimizationResultDetailCache(
+                    optimization_result_id=result_id,
+                    max_trades_returned=1000,
+                    train_result_json=dump_json(
+                        {
+                            "completed_trades": 1,
+                            "trades": [
+                                {
+                                    "signal_date": "2026-03-02",
+                                    "symbol": "MSFT",
+                                    "exit_reason": "stop_loss",
+                                }
+                            ],
+                        }
+                    ),
+                    validation_result_json=None,
+                    generated_at=datetime.now(UTC),
+                )
+            )
+            session.commit()
+
+            with patch(
+                "stockanalyse_api.services.optimization_backtest.run_cup_handle_rps_backtest",
+                side_effect=fake_backtest,
+            ) as mocked_backtest:
+                detail = build_optimization_result_detail(session, result_id=result_id)
+
+        mocked_backtest.assert_called_once()
+        self.assertEqual(detail["train"]["trades"][0]["symbol"], "AAPL")
+
+    def test_optimization_result_detail_does_not_rerun_legacy_metrics_without_cache(self) -> None:
+        with self.session_factory() as session:
+            run = create_optimization_run(
+                session,
+                market="us",
+                train_start_date=date(2026, 3, 2),
+                train_end_date=date(2026, 3, 13),
+                parameter_space={"rps_threshold": [80], "use_cup_handle": [False]},
+                require_data_ready=False,
+            )
+            parameters = build_parameter_sets(
+                {"rps_threshold": [80], "use_cup_handle": [False]}
+            )[0]
+            result = OptimizationResult(
+                optimization_run_id=run.id,
+                parameter_hash=stable_parameter_hash(parameters),
+                parameters_json=dump_json(parameters),
+                train_metrics_json=dump_json({"completed_trades": 1}),
+                validation_metrics_json=None,
+                score=Decimal("0.1"),
+                rank=1,
+                status="completed",
+            )
+            session.add(result)
+            session.commit()
+            result_id = result.id
+
+            with patch(
+                "stockanalyse_api.services.optimization_backtest.run_cup_handle_rps_backtest"
+            ) as mocked_backtest:
+                detail = build_optimization_result_detail(session, result_id=result_id)
+
+        mocked_backtest.assert_not_called()
+        self.assertEqual(detail["train"]["trades"], [])
+        self.assertEqual(
+            detail["train"]["summary"]["detail_unavailable_reason"],
+            "legacy_semantics_not_recomputed",
+        )
 
     def test_strategy_presets_can_be_saved_listed_and_activated(self) -> None:
         first_params = {"rps_threshold": 85}

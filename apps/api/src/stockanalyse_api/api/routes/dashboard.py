@@ -258,6 +258,8 @@ class CupHandleRpsBacktestRequest(BaseModel):
     initial_capital: float = Field(default=100000, gt=0, le=1_000_000_000)
     position_size_amount: float | None = Field(default=None, gt=0, le=1_000_000_000)
     allow_reentry_while_open: bool = False
+    relative_strength_params: dict[str, object] | None = None
+    cash_fallback_params: dict[str, object] | None = None
     entry_delay_days: int = Field(default=0, ge=0, le=60)
     entry_deferral_window_days: int = Field(default=5, ge=1, le=60)
     max_trades_returned: int = Field(default=300, ge=0, le=2000)
@@ -618,6 +620,8 @@ def post_cup_handle_rps_backtest(payload: CupHandleRpsBacktestRequest) -> dict[s
                     else None
                 ),
                 allow_reentry_while_open=payload.allow_reentry_while_open,
+                relative_strength_params=payload.relative_strength_params,
+                cash_fallback_params=payload.cash_fallback_params,
                 entry_delay_days=payload.entry_delay_days,
                 entry_deferral_window_days=payload.entry_deferral_window_days,
                 max_trades_returned=payload.max_trades_returned,

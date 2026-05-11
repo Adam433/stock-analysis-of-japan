@@ -79,6 +79,8 @@ export default async function HomePage() {
         <Link href="/watchlist">观察列表</Link>
         <span>/</span>
         <Link href="/backtests">回测</Link>
+        <span>/</span>
+        <Link href="/experiments">实验</Link>
       </nav>
       <section className="hero-panel">
         <div className="hero-copy">

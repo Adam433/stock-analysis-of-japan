@@ -26,6 +26,14 @@ OPTIMIZATION_RUN_STATUS_VALUES = (
 )
 OPTIMIZATION_RESULT_STATUS_VALUES = ("completed", "failed")
 CUP_HANDLE_MATERIALIZATION_STATUS_VALUES = ("running", "completed", "failed")
+GA_RUN_STATUS_VALUES = (
+    "running",
+    "completed",
+    "failed",
+    "cancel_requested",
+    "cancelled",
+)
+GA_INDIVIDUAL_STATUS_VALUES = ("pending", "completed", "failed")
 PORTFOLIO_RETURN_PROVENANCE_CONSTRAINT = (
     "(backtest_lifecycle = 'legacy_condition_hit') OR "
     "(backtest_lifecycle = 'portfolio_return' AND source_screen_run_id IS NOT NULL AND rps_definition_version IS NULL)"
@@ -191,6 +199,109 @@ class StrategyPreset(TimestampMixin, Base):
         nullable=True,
         index=True,
     )
+
+
+class GaRun(TimestampMixin, Base):
+    __tablename__ = "ga_runs"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN {GA_RUN_STATUS_VALUES}",
+            name="ga_runs_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    market: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    train_start_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    train_end_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    validation_start_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    validation_end_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    holdout_start_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    holdout_end_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    objective: Mapped[str] = mapped_column(String(64), nullable=False, default="spy_alpha", server_default="spy_alpha")
+    strategy_schema_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    population_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_generations: Mapped[int] = mapped_column(Integer, nullable=False)
+    random_seed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gene_space_json: Mapped[str] = mapped_column(Text, nullable=False)
+    fitness_config_json: Mapped[str] = mapped_column(Text, nullable=False)
+    initial_population_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="running", server_default="running")
+    total_generations: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    completed_generations: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    total_individuals: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    completed_individuals: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    failed_individuals: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    best_individual_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            "ga_individuals.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_ga_runs_best_individual_id_ga_individuals",
+        ),
+        nullable=True,
+        index=True,
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class GaIndividual(TimestampMixin, Base):
+    __tablename__ = "ga_individuals"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN {GA_INDIVIDUAL_STATUS_VALUES}",
+            name="ga_individuals_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ga_run_id: Mapped[int] = mapped_column(
+        ForeignKey("ga_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    individual_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    parameter_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    parameters_json: Mapped[str] = mapped_column(Text, nullable=False)
+    fitness: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True, index=True)
+    metrics_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evaluation_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_optimization_result_id: Mapped[int | None] = mapped_column(
+        ForeignKey("optimization_results.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    parent_a_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ga_individuals.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    parent_b_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ga_individuals.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    mutation_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", server_default="pending")
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class GaEvent(TimestampMixin, Base):
+    __tablename__ = "ga_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ga_run_id: Mapped[int] = mapped_column(
+        ForeignKey("ga_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    generation: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    event_json: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class CupHandleMaterializationRun(TimestampMixin, Base):

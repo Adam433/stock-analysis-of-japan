@@ -626,6 +626,30 @@ textarea:focus-visible {
   text-underline-offset: 0.14em;
 }
 
+.inline-actions,
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.inline-action {
+  border: 1px solid rgba(14, 90, 82, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 8px 12px;
+}
+
+.inline-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .result-link--disabled {
   color: var(--muted);
   text-decoration-style: dashed;

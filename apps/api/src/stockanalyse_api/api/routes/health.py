@@ -8,6 +8,11 @@ from stockanalyse_api.services.health import get_market_data_health
 router = APIRouter(prefix="/health", tags=["health"])
 
 
+@router.get("/ready")
+def read_health_ready() -> dict[str, str]:
+    return {"status": "ok"}
+
+
 @router.get("/market-data")
 def read_market_data_health() -> dict[str, object]:
     with SessionLocal() as session:

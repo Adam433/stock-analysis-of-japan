@@ -111,6 +111,93 @@ class DashboardFundamentalGrowthTests(unittest.TestCase):
         self.assertEqual(result["hits"][0]["fundamental_growth_status"], "passed")
         self.assertEqual(result["hits"][0]["fundamental_growth_count"], 2)
 
+    def test_screen_can_reuse_broad_candidate_cache_across_rps_thresholds(self) -> None:
+        signal_date = date(2024, 8, 1)
+        with self.session_factory() as session:
+            leader = Instrument(symbol="AAA", exchange="TSE", name="Leader")
+            mid = Instrument(symbol="BBB", exchange="TSE", name="Mid")
+            laggard = Instrument(symbol="CCC", exchange="TSE", name="Laggard")
+            session.add_all([leader, mid, laggard])
+            session.flush()
+            session.add_all(
+                [
+                    DerivedIndicatorDaily(
+                        instrument_id=leader.id,
+                        trade_date=signal_date,
+                        rps_50=Decimal("95"),
+                        rps_120=Decimal("94"),
+                        rps_250=Decimal("90"),
+                    ),
+                    DerivedIndicatorDaily(
+                        instrument_id=mid.id,
+                        trade_date=signal_date,
+                        rps_50=Decimal("75"),
+                        rps_120=Decimal("72"),
+                        rps_250=Decimal("68"),
+                    ),
+                    DerivedIndicatorDaily(
+                        instrument_id=laggard.id,
+                        trade_date=signal_date,
+                        rps_50=Decimal("60"),
+                        rps_120=Decimal("55"),
+                        rps_250=Decimal("50"),
+                    ),
+                ]
+            )
+            session.commit()
+            candidate_cache: dict[tuple[object, ...], dict[str, object]] = {}
+
+            loose = screen_universe(
+                session,
+                use_rps=True,
+                rps_threshold=70,
+                selected_rps_windows=[50, 120],
+                min_rps_windows_passing=1,
+                use_cup_handle=False,
+                fundamental_growth_params=FundamentalGrowthParams(enabled=False),
+                trade_date=signal_date,
+                candidate_cache=candidate_cache,
+                prefer_broad_candidate_cache=True,
+            )
+            strict = screen_universe(
+                session,
+                use_rps=True,
+                rps_threshold=90,
+                selected_rps_windows=[50, 120],
+                min_rps_windows_passing=2,
+                use_cup_handle=False,
+                fundamental_growth_params=FundamentalGrowthParams(enabled=False),
+                trade_date=signal_date,
+                candidate_cache=candidate_cache,
+                prefer_broad_candidate_cache=True,
+            )
+            limited_cache: dict[tuple[object, ...], dict[str, object]] = {}
+            limited = screen_universe(
+                session,
+                use_rps=True,
+                rps_threshold=70,
+                selected_rps_windows=[50, 120],
+                min_rps_windows_passing=1,
+                use_cup_handle=False,
+                fundamental_growth_params=FundamentalGrowthParams(enabled=False),
+                trade_date=signal_date,
+                candidate_cache=limited_cache,
+                prefer_broad_candidate_cache=True,
+                max_broad_candidate_cache_dates=0,
+            )
+
+        self.assertEqual([hit["symbol"] for hit in loose["hits"]], ["AAA", "BBB"])
+        self.assertEqual([hit["symbol"] for hit in strict["hits"]], ["AAA"])
+        self.assertEqual([hit["symbol"] for hit in limited["hits"]], ["AAA", "BBB"])
+        self.assertEqual(
+            len([key for key in candidate_cache if key[0] == "screen_broad_candidates"]),
+            1,
+        )
+        self.assertEqual(
+            len([key for key in limited_cache if key[0] == "screen_broad_candidates"]),
+            0,
+        )
+
     def test_fundamental_growth_uses_reporting_lag_to_avoid_future_data(self) -> None:
         with self.session_factory() as session:
             instrument = Instrument(symbol="7203.T", exchange="TSE", name="Leader")
