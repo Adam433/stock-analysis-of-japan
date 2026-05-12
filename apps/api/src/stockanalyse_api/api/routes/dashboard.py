@@ -35,6 +35,9 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 _INDEX_HTML_PATH = Path(__file__).resolve().parent.parent / "templates" / "dashboard.html"
 _CHART_HTML_PATH = Path(__file__).resolve().parent.parent / "templates" / "chart_view.html"
+_GA_INDIVIDUAL_DETAIL_HTML_PATH = (
+    Path(__file__).resolve().parent.parent / "templates" / "ga_individual_detail.html"
+)
 
 
 class CupHandleParamsRequest(BaseModel):
@@ -278,6 +281,15 @@ def dashboard_chart_view() -> HTMLResponse:
     return HTMLResponse(content=html, headers={"Cache-Control": "no-store"})
 
 
+@router.get("/ga-individuals/{individual_id}", response_class=HTMLResponse, include_in_schema=False)
+def dashboard_ga_individual_detail(individual_id: int) -> HTMLResponse:
+    html = _GA_INDIVIDUAL_DETAIL_HTML_PATH.read_text(encoding="utf-8")
+    return HTMLResponse(
+        content=html.replace("__INDIVIDUAL_ID__", str(individual_id)),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.get("/optimization-results/{result_id}", response_class=HTMLResponse, include_in_schema=False)
 def dashboard_optimization_result_detail(result_id: int) -> HTMLResponse:
     html = """
@@ -368,7 +380,6 @@ def dashboard_optimization_result_detail(result_id: int) -> HTMLResponse:
             <th>卖出原因</th>
             <th>收益</th>
             <th>资金</th>
-            <th>RPS</th>
           </tr>
         </thead>
         <tbody id="tradeBody"></tbody>
@@ -447,6 +458,44 @@ def dashboard_optimization_result_detail(result_id: int) -> HTMLResponse:
     return section && Array.isArray(section.trades) ? section.trades : [];
   }
 
+  function entryReason(trade) {
+    if (trade.entry_reason) return trade.entry_reason;
+    const params = detail.parameters || {};
+    const parts = [];
+    if (params.use_rps === false) {
+      parts.push('未启用 RPS 过滤');
+    } else {
+      const date = trade.rps_score_date || trade.signal_date || '—';
+      parts.push(`${date} RPS ${trade.rps_score ?? '—'}`);
+    }
+    parts.push(params.use_cup_handle === false
+      ? '未启用杯柄过滤'
+      : `杯柄突破日 ${trade.cup_handle_breakout_date || '—'}`);
+    if ((params.fundamental_growth_params || {}).enabled) {
+      parts.push(`财务增长 ${trade.fundamental_growth_summary || '最近净利润同比 —'}`);
+    }
+    return parts.join('；');
+  }
+
+  function exitReason(trade) {
+    if (trade.exit_reason_label) return trade.exit_reason_label;
+    const labels = {
+      stop_loss: '固定止损触发',
+      rps_exit: 'RPS 跌破退出阈值',
+      take_profit: '固定止盈触发',
+      holding_period_elapsed: '持有期结束',
+      data_end_mark: '数据末尾按收盘价估值',
+      window_end_mark: '窗口结束按收盘价估值',
+    };
+    let label = labels[trade.exit_reason] || trade.exit_reason || '—';
+    if (trade.exit_reason === 'rps_exit' && trade.exit_rps_score) {
+      const threshold = trade.rps_exit_threshold ? ` < ${trade.rps_exit_threshold}` : '';
+      const date = trade.exit_rps_score_date ? `${trade.exit_rps_score_date} ` : '';
+      label = `${label}：${date}RPS ${trade.exit_rps_score}${threshold}`;
+    }
+    return label;
+  }
+
   function renderTrades() {
     const trades = activeTrades();
     const body = document.getElementById('tradeBody');
@@ -460,13 +509,12 @@ def dashboard_optimization_result_detail(result_id: int) -> HTMLResponse:
           <td>${escapeHtml(trade.signal_date)}</td>
           <td>${escapeHtml(trade.entry_date)}</td>
           <td>${escapeHtml(trade.entry_price)}</td>
-          <td class="reason">${escapeHtml(trade.entry_reason)}</td>
+          <td class="reason">${escapeHtml(entryReason(trade))}</td>
           <td>${escapeHtml(trade.exit_date)}</td>
           <td>${escapeHtml(trade.exit_price)}</td>
-          <td class="reason">${escapeHtml(trade.exit_reason_label || trade.exit_reason)}</td>
+          <td class="reason">${escapeHtml(exitReason(trade))}</td>
           <td class="${returnClass}">${pct(trade.realized_return)}</td>
           <td>${money(trade.realized_profit)}<div class="muted">${money(trade.invested_cash)} → ${money(trade.exit_cash)}</div></td>
-          <td>${escapeHtml(trade.rps_score)}</td>
         </tr>
       `;
     }).join('');

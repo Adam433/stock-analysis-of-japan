@@ -689,9 +689,9 @@
         <div class="field">
           <label class="label-with-hint">
             <span>RPS 退出阈值</span>
-            <span class="hint" tabindex="0" data-tip="持仓中 RPS 跌破该阈值即退出；多个值用逗号分隔。&#10;留空表示不基于 RPS 退出。&#10;例：80,85">?</span>
+            <span class="hint" tabindex="0" data-tip="持仓中 RPS 跌破该阈值即退出；多个值用逗号分隔。&#10;留空表示不基于 RPS 退出。&#10;退出阈值必须低于买入 RPS 阈值。&#10;例：65,70,75">?</span>
           </label>
-          <input type="text" id="optimizationRpsExits" value="80" title="多值用逗号分隔，留空不启用 RPS 退出" />
+          <input type="text" id="optimizationRpsExits" value="70,75" title="多值用逗号分隔，留空不启用 RPS 退出，且必须低于买入 RPS 阈值" />
         </div>
         <div class="field">
           <label class="label-with-hint">
@@ -1065,13 +1065,26 @@
       </div>
       <div class="button-row">
         <button class="primary" id="runOptimization">创建并运行</button>
+        <button class="secondary" id="resumeOptimizationRun">继续任务</button>
         <button class="secondary" id="cancelOptimization">取消任务</button>
+        <button class="secondary" id="refreshOptimizationRuns">刷新历史</button>
         <button class="secondary" id="deleteOptimizationRun">删除任务</button>
       </div>
       <div id="optimizationStatus" class="status-box">尚未运行</div>
       <div class="progress-track" aria-hidden="true">
         <div class="progress-fill" id="optimizationProgress"></div>
       </div>
+      <div class="table-wrap" style="margin-top: 10px;">
+        <table>
+          <thead>
+            <tr>
+              <th>历史任务</th><th>状态</th><th>进度</th><th>区间</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="optimizationRunsBody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="optimizationRunsEmpty">尚无历史优化任务</div>
       <div class="table-wrap" style="margin-top: 10px;">
         <table>
           <thead>
@@ -1117,6 +1130,127 @@
           </table>
         </div>
       </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title-row">
+        <h2 class="label-with-hint">
+          <span>GA 策略搜索</span>
+          <span class="hint" tabindex="0" data-tip="用遗传算法搜索低频美股策略参数。&#10;每个个体是一套完整策略参数，会在多个滚动窗口中回测，并按目标函数排序。">?</span>
+        </h2>
+        <span class="mini-badge" id="gaPhase">未运行</span>
+      </div>
+      <div class="field-grid">
+        <div class="field">
+          <label class="label-with-hint">
+            <span>训练开始</span>
+            <span class="hint" tabindex="0" data-tip="GA Run 的总体训练起点。&#10;当前预设主要使用下方内置的滚动窗口复验；此日期用于记录任务区间和未来扩展。">?</span>
+          </label>
+          <input type="date" id="gaTrainStartDate" title="GA Run 的总体训练起点；当前滚动窗口预设不完全依赖该值。" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>训练结束</span>
+            <span class="hint" tabindex="0" data-tip="GA Run 的总体训练终点。&#10;当前滚动窗口预设会把最新一个验证窗口的结束日设为这个日期。">?</span>
+          </label>
+          <input type="date" id="gaTrainEndDate" title="总体训练终点；也作为当前滚动窗口中最新验证段的结束日期。" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>Holdout 开始</span>
+            <span class="hint" tabindex="0" data-tip="最终留出验证区间的开始日。&#10;GA 搜索完成后，会用最佳个体在这段留出区间上再做一次独立检验。">?</span>
+          </label>
+          <input type="date" id="gaHoldoutStartDate" title="最终留出验证区间开始日，不参与进化搜索评分。" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>Holdout 结束</span>
+            <span class="hint" tabindex="0" data-tip="最终留出验证区间的结束日。&#10;用于检查最佳策略是否只是在训练/滚动验证窗口中过拟合。">?</span>
+          </label>
+          <input type="date" id="gaHoldoutEndDate" title="最终留出验证区间结束日，用于搜索完成后的独立检验。" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>种群数量</span>
+            <span class="hint" tabindex="0" data-tip="每一代评估多少套策略参数。&#10;越大探索更广，但耗时和内存占用也更高。当前机器建议小批量运行。">?</span>
+          </label>
+          <input type="number" id="gaPopulationSize" min="2" max="100" value="12" title="每代评估的策略个体数量；越大越慢。" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>代数</span>
+            <span class="hint" tabindex="0" data-tip="GA 最多进化多少代。&#10;代数越多越可能找到更优组合，但总评估次数约等于 种群数量 × 代数。">?</span>
+          </label>
+          <input type="number" id="gaMaxGenerations" min="1" max="200" value="18" title="最大进化代数；总评估量约为种群数量乘以代数。" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>随机种子</span>
+            <span class="hint" tabindex="0" data-tip="控制初始随机候选和突变的随机序列。&#10;同样的种子便于复现实验；换种子可以探索不同搜索路径。">?</span>
+          </label>
+          <input type="number" id="gaRandomSeed" min="0" max="99999999" value="20260512" title="用于复现实验或切换搜索路径的随机种子。" />
+        </div>
+        <div class="field">
+          <label class="label-with-hint">
+            <span>目标函数</span>
+            <span class="hint" tabindex="0" data-tip="决定 GA 按什么标准选择更好的个体。&#10;SPY Alpha 关注相对 SPY 的超额收益；综合得分同时考虑收益、回撤、样本数和稳定性；平均年化收益更偏向收益最大化。">?</span>
+          </label>
+          <select id="gaObjective" title="GA 的适应度目标，决定候选策略的排序方式。">
+            <option value="spy_alpha" selected title="优先寻找相对 SPY 有超额收益的策略。">SPY Alpha</option>
+            <option value="score" title="综合收益、回撤、交易样本和跨窗口稳定性。">综合得分</option>
+            <option value="average_annualized_return" title="更偏向提高年化收益，风险约束较弱。">平均年化收益</option>
+          </select>
+        </div>
+      </div>
+      <div class="button-row">
+        <button class="primary" id="runGaSearch" title="按当前页面参数创建新的 GA run，并立即在后台启动搜索。">启动 GA</button>
+        <button class="secondary" id="refreshGaSearch" title="重新读取最新 GA run、个体列表和代际摘要，不创建新任务。">刷新 GA</button>
+        <button class="secondary" id="resumeGaSearch" title="从当前 GA run 已完成的个体继续执行，适合电脑重启或任务中断后使用。">恢复 GA</button>
+        <button class="secondary" id="cancelGaSearch" title="请求停止当前运行中的 GA；已经完成的个体结果会保留。">取消 GA</button>
+      </div>
+      <div id="gaStatus" class="status-box">尚未运行</div>
+      <div class="progress-track" aria-hidden="true">
+        <div class="progress-fill" id="gaProgress"></div>
+      </div>
+      <div class="stat-grid" id="gaStats" style="margin-top: 10px;">
+        <div class="stat"><div class="label">最新 Run</div><div class="value" id="gaRunId">—</div><div class="sub" id="gaRunWindow">—</div></div>
+        <div class="stat"><div class="label">个体进度</div><div class="value" id="gaIndividualsProgress">—</div><div class="sub" id="gaGenerationProgress">—</div></div>
+        <div class="stat"><div class="label">当前最佳</div><div class="value" id="gaBestFitness">—</div><div class="sub" id="gaBestIndividual">—</div></div>
+        <div class="stat"><div class="label">失败</div><div class="value" id="gaFailedIndividuals">—</div><div class="sub" id="gaTiming">—</div></div>
+      </div>
+      <div class="table-wrap" style="margin-top: 10px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Run</th><th>状态</th><th>进度</th><th>目标</th><th>窗口</th>
+            </tr>
+          </thead>
+          <tbody id="gaRunsBody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="gaRunsEmpty">尚无 GA run</div>
+      <div class="table-wrap" style="margin-top: 10px;">
+        <table>
+          <thead>
+            <tr>
+              <th>个体</th><th>Fitness</th><th>参数</th><th>跨窗口</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="gaIndividualsBody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="gaIndividualsEmpty">尚无 GA 个体</div>
+      <div class="table-wrap" style="margin-top: 10px;">
+        <table>
+          <thead>
+            <tr>
+              <th>代</th><th>最佳</th><th>平均</th><th>耗时/缓存</th>
+            </tr>
+          </thead>
+          <tbody id="gaEventsBody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="gaEventsEmpty">尚无代际摘要</div>
     </div>
 
     <div class="card">
@@ -1168,12 +1302,19 @@
     optimizationPollTimer: null,
     optimizationTicker: null,
     optimizationCancelRequestedAt: null,
+    optimizationRuns: [],
     optimizationResults: [],
     optimizationResultsOffset: 0,
     optimizationResultsLimit: 30,
     optimizationResultsTotal: 0,
     selectedOptimizationResult: null,
     selectedOptimizationResultIds: new Set(),
+    gaRunId: null,
+    currentGaRun: null,
+    gaPollTimer: null,
+    gaRuns: [],
+    gaIndividuals: [],
+    gaEvents: [],
     strategyPresets: [],
     appliedStrategyParameters: null,
   };
@@ -1352,6 +1493,7 @@
         : `${MARKET_LABELS[state.market]} · 尚无数据`;
       seedBacktestDates(o.latest_trade_date);
       seedOptimizationDates(o.latest_trade_date);
+      seedGaDates(o.latest_trade_date);
       updateOptimizationPreview();
     } catch (err) {
       showToast('加载概览失败: ' + err.message);
@@ -1388,6 +1530,23 @@
     const defaultTrainStart = shiftYears(latest, -5);
     if (!trainEnd.value) trainEnd.value = toIsoDate(latest);
     if (!trainStart.value) trainStart.value = toIsoDate(defaultTrainStart);
+  }
+
+  function seedGaDates(latestTradeDate) {
+    if (!latestTradeDate) return;
+    const latest = new Date(latestTradeDate + 'T00:00:00');
+    const trainStart = document.getElementById('gaTrainStartDate');
+    const trainEnd = document.getElementById('gaTrainEndDate');
+    const holdoutStart = document.getElementById('gaHoldoutStartDate');
+    const holdoutEnd = document.getElementById('gaHoldoutEndDate');
+    if (!trainStart.value) trainStart.value = '2021-01-01';
+    if (!trainEnd.value) trainEnd.value = toIsoDate(latest);
+    if (!holdoutEnd.value) holdoutEnd.value = toIsoDate(latest);
+    if (!holdoutStart.value) {
+      const start = new Date(latest);
+      start.setMonth(start.getMonth() - 2);
+      holdoutStart.value = toIsoDate(start);
+    }
   }
 
   function fmt(value) {
@@ -1692,12 +1851,19 @@
     const body = document.getElementById('backtestTradesBody');
     body.innerHTML = '';
     for (const trade of result.trades.slice(0, 30)) {
+      let exitReason = trade.exit_reason || '—';
+      if (trade.exit_reason === 'rps_exit' && trade.exit_rps_score) {
+        const thresholdValue = trade.rps_exit_threshold ?? (result.parameters || {}).rps_exit_threshold;
+        const threshold = thresholdValue ? ` < ${thresholdValue}` : '';
+        const date = trade.exit_rps_score_date ? `${trade.exit_rps_score_date} ` : '';
+        exitReason = `RPS退出：${date}RPS ${trade.exit_rps_score}${threshold}`;
+      }
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>${escapeHtml(trade.signal_date)}</td>
-        <td><strong>${escapeHtml(trade.symbol)}</strong><div style="color:var(--muted);font-size:11px">RPS ${escapeHtml(trade.rps_score) || '—'}</div></td>
+        <td><strong>${escapeHtml(trade.symbol)}</strong><div style="color:var(--muted);font-size:11px">信号日RPS ${escapeHtml(trade.rps_score) || '—'} · ${escapeHtml(trade.rps_score_date || trade.signal_date || '—')}</div></td>
         <td>${escapeHtml(trade.entry_date)}<div style="color:var(--muted);font-size:11px">${escapeHtml(trade.entry_price)}</div></td>
-        <td>${escapeHtml(trade.exit_date)}<div style="color:var(--muted);font-size:11px">${escapeHtml(trade.exit_reason)}</div></td>
+        <td>${escapeHtml(trade.exit_date)}<div style="color:var(--muted);font-size:11px">${escapeHtml(exitReason)}</div></td>
         <td>${formatRatioPct(trade.realized_return)}</td>
         <td>${formatMoney(trade.realized_profit)}<div style="color:var(--muted);font-size:11px">${formatMoney(trade.invested_cash)} → ${formatMoney(trade.exit_cash)}</div></td>
       `;
@@ -1783,8 +1949,13 @@
     if (!raw) return [null];
     const values = raw
       .split(/[,，\s]+/)
-      .map((item) => integerOnly ? parseInt(item, 10) : parseFloat(item))
-      .filter((value) => Number.isFinite(value));
+      .map((item) => {
+        const normalized = String(item).trim().toLowerCase();
+        if (['null', 'none', '不限', '空', '无'].includes(normalized)) return null;
+        const value = integerOnly ? parseInt(item, 10) : parseFloat(item);
+        return Number.isFinite(value) ? value : undefined;
+      })
+      .filter((value) => value !== undefined);
     return values.length ? dedupeParsedValues(values) : [null];
   }
 
@@ -2188,18 +2359,35 @@
     }
   }
 
-  function updateOptimizationPhase(status) {
-    const el = document.getElementById('optimizationPhase');
-    el.classList.toggle('running', status === 'running' || status === 'cancel_requested');
-    el.classList.toggle('failed', status === 'failed');
-    const labels = {
+  function optimizationStatusLabel(status) {
+    return {
       running: '运行中',
       completed: '完成',
       failed: '失败',
       cancel_requested: '取消中',
       cancelled: '已取消',
-    };
-    el.textContent = labels[status] || '未运行';
+    }[status] || status || '未运行';
+  }
+
+  function optimizationRunProgress(run) {
+    const total = Number(run?.total_parameter_sets || 0);
+    const completed = Number(run?.completed_parameter_sets || 0);
+    const failed = Number(run?.failed_parameter_sets || 0);
+    const done = completed + failed;
+    return { total, completed, failed, done, pct: total ? Math.min(100, Math.round((done / total) * 100)) : 0 };
+  }
+
+  function canResumeOptimizationRun(run) {
+    if (!run || !['cancelled', 'failed'].includes(run.status)) return false;
+    const progress = optimizationRunProgress(run);
+    return progress.total === 0 || progress.done < progress.total;
+  }
+
+  function updateOptimizationPhase(status) {
+    const el = document.getElementById('optimizationPhase');
+    el.classList.toggle('running', status === 'running' || status === 'cancel_requested');
+    el.classList.toggle('failed', status === 'failed');
+    el.textContent = optimizationStatusLabel(status);
   }
 
   function formatDuration(seconds) {
@@ -2288,6 +2476,12 @@
     }
     state.optimizationRunId = run.id;
     state.currentOptimizationRun = run;
+    const runIndex = state.optimizationRuns.findIndex((item) => item.id === run.id);
+    if (runIndex >= 0) {
+      state.optimizationRuns[runIndex] = run;
+    } else {
+      state.optimizationRuns = [run, ...state.optimizationRuns].slice(0, 20);
+    }
     updateOptimizationPhase(run.status);
     if (run.status === 'running') {
       startOptimizationTicker();
@@ -2295,11 +2489,7 @@
       window.clearInterval(state.optimizationTicker);
       state.optimizationTicker = null;
     }
-    const total = Number(run.total_parameter_sets || 0);
-    const completed = Number(run.completed_parameter_sets || 0);
-    const failed = Number(run.failed_parameter_sets || 0);
-    const done = completed + failed;
-    const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    const { total, completed, failed, done, pct } = optimizationRunProgress(run);
     document.getElementById('optimizationProgress').style.width = pct + '%';
     const best = run.best_result_id ? ` · 当前最佳 #${run.best_result_id}` : '';
     const error = run.error_message ? ` · ${run.error_message}` : '';
@@ -2315,14 +2505,7 @@
       timingParts.push(`预计剩余 ${formatDuration(timing.etaSec)}`);
     }
     const timingText = timingParts.length ? ` · ${timingParts.join(' · ')}` : '';
-    const statusLabelMap = {
-      running: '运行中',
-      cancel_requested: '取消中',
-      cancelled: '已取消',
-      completed: '完成',
-      failed: '失败',
-    };
-    const statusLabel = statusLabelMap[run.status] || run.status;
+    const statusLabel = optimizationStatusLabel(run.status);
     let currentSetLine = '';
     if (run.status === 'running' && total > 0) {
       const idx = Math.min(done + 1, total);
@@ -2340,6 +2523,61 @@
       ? '取消中…'
       : (running ? '运行中…' : '创建并运行');
     document.getElementById('cancelOptimization').disabled = run.status !== 'running';
+    document.getElementById('resumeOptimizationRun').disabled = !canResumeOptimizationRun(run);
+    renderOptimizationRuns(state.optimizationRuns);
+  }
+
+  function renderOptimizationRuns(runs) {
+    state.optimizationRuns = runs || [];
+    const body = document.getElementById('optimizationRunsBody');
+    if (!body) return;
+    body.innerHTML = '';
+    document.getElementById('optimizationRunsEmpty').style.display = state.optimizationRuns.length ? 'none' : 'block';
+    for (const run of state.optimizationRuns) {
+      const progress = optimizationRunProgress(run);
+      const modeText = run.search_mode === 'random' ? '随机' : '网格';
+      const objective = OPTIMIZATION_OBJECTIVE_LABELS[run.objective] || run.objective;
+      const running = run.status === 'running' || run.status === 'cancel_requested';
+      const tr = document.createElement('tr');
+      tr.classList.toggle('selected', state.optimizationRunId === run.id);
+      tr.innerHTML = `
+        <td>#${run.id}<div class="metric-muted">${modeText} · ${objective} · worker ${run.max_workers || 'auto'}</div></td>
+        <td>${optimizationStatusLabel(run.status)}${run.error_message ? `<div class="metric-muted">${escapeHtml(run.error_message)}</div>` : ''}</td>
+        <td>${fmt(progress.done)} / ${fmt(progress.total)} (${progress.pct}%)<div class="metric-muted">失败 ${fmt(progress.failed)}</div></td>
+        <td>${run.train_start_date} → ${run.train_end_date}<div class="metric-muted">验证 ${run.validation_start_date || '—'} → ${run.validation_end_date || '—'}</div></td>
+        <td>
+          <button class="inline-action" data-select-optimization-run="${run.id}">查看</button>
+          <button class="inline-action" data-apply-optimization-run="${run.id}">套用参数</button>
+          <button class="inline-action" data-rerun-optimization-run="${run.id}" ${running ? 'disabled' : ''}>复制重跑</button>
+          <button class="inline-action" data-resume-optimization-run="${run.id}" ${canResumeOptimizationRun(run) ? '' : 'disabled'}>继续</button>
+        </td>
+      `;
+      body.appendChild(tr);
+    }
+    body.querySelectorAll('[data-select-optimization-run]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        selectOptimizationRun(parseInt(button.dataset.selectOptimizationRun, 10));
+      });
+    });
+    body.querySelectorAll('[data-apply-optimization-run]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        applyOptimizationRunToForm(parseInt(button.dataset.applyOptimizationRun, 10));
+      });
+    });
+    body.querySelectorAll('[data-rerun-optimization-run]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        rerunOptimizationRun(parseInt(button.dataset.rerunOptimizationRun, 10));
+      });
+    });
+    body.querySelectorAll('[data-resume-optimization-run]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        resumeOptimizationRun(parseInt(button.dataset.resumeOptimizationRun, 10));
+      });
+    });
   }
 
   function renderOptimizationResults(results) {
@@ -2670,6 +2908,7 @@
       document.getElementById('runOptimization').disabled = false;
       document.getElementById('runOptimization').textContent = '创建并运行';
       document.getElementById('cancelOptimization').disabled = true;
+      document.getElementById('resumeOptimizationRun').disabled = true;
       await loadLatestOptimizationRun();
     } catch (err) {
       showToast('删除失败: ' + err.message);
@@ -2823,6 +3062,8 @@
       await loadOptimizationResults(runId);
       if (run.status === 'running' || run.status === 'cancel_requested') {
         state.optimizationPollTimer = window.setTimeout(() => pollOptimizationRun(runId), 3000);
+      } else {
+        await loadOptimizationRuns();
       }
     } catch (err) {
       showToast('查询优化任务失败: ' + err.message);
@@ -2831,10 +3072,41 @@
     }
   }
 
+  async function loadOptimizationRuns() {
+    try {
+      const data = await api('GET', `/backtests/optimization/runs?market=${state.market}&limit=20`);
+      const runs = data.optimization_runs || [];
+      renderOptimizationRuns(runs);
+      return runs;
+    } catch (err) {
+      showToast('加载优化历史失败: ' + err.message);
+      return [];
+    }
+  }
+
+  async function selectOptimizationRun(runId) {
+    if (!runId) return;
+    window.clearTimeout(state.optimizationPollTimer);
+    try {
+      let run = state.optimizationRuns.find((item) => item.id === runId);
+      if (!run) {
+        const data = await api('GET', `/backtests/optimization/runs/${runId}`);
+        run = data.optimization_run;
+      }
+      renderOptimizationRun(run);
+      await loadOptimizationResults(run.id, { offset: 0 });
+      if (run.status === 'running' || run.status === 'cancel_requested') {
+        state.optimizationPollTimer = window.setTimeout(() => pollOptimizationRun(run.id), 3000);
+      }
+    } catch (err) {
+      showToast('打开优化任务失败: ' + err.message);
+    }
+  }
+
   async function loadLatestOptimizationRun() {
     try {
-      const data = await api('GET', `/backtests/optimization/runs/latest?market=${state.market}`);
-      const run = data.optimization_run;
+      const runs = await loadOptimizationRuns();
+      const run = runs.find((item) => item.status === 'running' || item.status === 'cancel_requested') || runs[0];
       if (!run) return;
       renderOptimizationRun(run);
       await loadOptimizationResults(run.id);
@@ -2844,6 +3116,368 @@
       }
     } catch (err) {
       console.warn('load latest optimization run failed', err);
+    }
+  }
+
+  function gaStatusLabel(status) {
+    return {
+      running: '运行中',
+      cancel_requested: '取消中',
+      cancelled: '已取消',
+      completed: '完成',
+      failed: '失败',
+    }[status] || status || '未运行';
+  }
+
+  function updateGaPhase(status) {
+    const el = document.getElementById('gaPhase');
+    el.classList.toggle('running', status === 'running' || status === 'cancel_requested');
+    el.classList.toggle('failed', status === 'failed');
+    el.textContent = gaStatusLabel(status);
+  }
+
+  function gaProgress(run) {
+    const total = Number(run?.total_individuals || 0);
+    const done = Number(run?.completed_individuals || 0) + Number(run?.failed_individuals || 0);
+    return { total, done, pct: total ? Math.min(100, Math.round((done / total) * 100)) : 0 };
+  }
+
+  function computeGaTiming(run) {
+    if (!run || !run.started_at) return { elapsedSec: null, etaSec: null };
+    const start = parseUtcTimestamp(run.started_at);
+    if (start === null) return { elapsedSec: null, etaSec: null };
+    const endMs = run.completed_at ? (parseUtcTimestamp(run.completed_at) || Date.now()) : Date.now();
+    const elapsedSec = Math.max(0, (endMs - start) / 1000);
+    const progress = gaProgress(run);
+    const etaSec = progress.total && progress.done && run.status === 'running'
+      ? Math.max(0, (elapsedSec / progress.done) * progress.total - elapsedSec)
+      : null;
+    return { elapsedSec, etaSec };
+  }
+
+  function gaParamSummary(params) {
+    if (!params) return '—';
+    const windows = Array.isArray(params.selected_rps_windows) ? params.selected_rps_windows.join('+') : '—';
+    const marketFilter = params.market_filter_params || {};
+    const relativeStrength = params.relative_strength_params || {};
+    const fundamentals = params.fundamental_growth_params || {};
+    const parts = [
+      `RPS ${params.rps_threshold ?? '—'} / ${windows}`,
+      `退 ${params.rps_exit_threshold ?? '—'}`,
+      `止损 ${params.stop_loss_pct ?? '—'}`,
+      `持仓 ${params.portfolio_cap ?? '—'}`,
+      params.use_cup_handle ? '宽松杯柄' : '无杯柄',
+      relativeStrength.enabled ? `RS ${relativeStrength.lookback_days || '—'}d` : 'RS关',
+      marketFilter.enabled ? `${marketFilter.symbol || 'SPY'}过滤` : '市场关',
+    ];
+    if (fundamentals.max_pe !== undefined && fundamentals.max_pe !== null) parts.push(`PE≤${fundamentals.max_pe}`);
+    if (fundamentals.max_pb !== undefined && fundamentals.max_pb !== null) parts.push(`PB≤${fundamentals.max_pb}`);
+    if (fundamentals.require_positive_operating_cash_flow) parts.push('OCF+');
+    return parts.join(' · ');
+  }
+
+  function gaMetricSummary(individual) {
+    const aggregate = ((individual.metrics || {}).aggregate || {});
+    return [
+      `均分 ${aggregate.average_window_score || '—'}`,
+      `最差 ${aggregate.minimum_window_score || '—'}`,
+      `回撤 ${formatRatioPct(aggregate.max_drawdown)}`,
+      `交易 ${aggregate.average_completed_trades || '—'}`,
+      `离散 ${aggregate.score_dispersion || '—'}`,
+    ].join(' · ');
+  }
+
+  function gaFinancialPreset(name) {
+    const base = {
+      enabled: true,
+      min_years: 3,
+      min_growth_count: 2,
+      min_yoy_growth_pct: '0',
+      require_positive_net_income: true,
+      reporting_lag_days: 120,
+      max_pe: '60',
+      max_pb: '15',
+      require_positive_operating_cash_flow: true,
+      require_positive_free_cash_flow: false,
+      min_operating_cash_flow_growth_count: 1,
+      min_operating_cash_flow_yoy_growth_pct: '0',
+    };
+    if (name === 'quality_light') {
+      return {
+        ...base,
+        max_pe: null,
+        max_pb: null,
+        min_growth_count: 1,
+        effective_min_growth_count: 1,
+        require_positive_operating_cash_flow: false,
+        min_operating_cash_flow_growth_count: null,
+      };
+    }
+    if (name === 'value_quality') return { ...base, max_pe: '45', max_pb: '12' };
+    return base;
+  }
+
+  function gaLooseCupParams() {
+    return {
+      lookback_days: 750,
+      min_cup_depth_pct: '5',
+      max_cup_depth_pct: '55',
+      min_cup_duration: 35,
+      max_cup_duration: 330,
+      min_handle_pullback_pct: '1',
+      max_handle_pullback_pct: '25',
+      min_handle_duration: 3,
+      max_handle_duration: 60,
+      require_prior_uptrend: false,
+      require_breakout_volume: false,
+    };
+  }
+
+  function gaGeneSpace() {
+    return {
+      rps_threshold: [70, 75, 80, 85],
+      selected_rps_windows: [[120, 250], [50, 120, 250]],
+      min_rps_windows_passing: [1, 2],
+      rps_exit_threshold: [null, 60, 65, 70, 75],
+      stop_loss_pct: ['-0.06', '-0.08', '-0.10'],
+      holding_days: [null, 130],
+      use_cup_handle: [false, true],
+      cup_handle_params: [gaLooseCupParams()],
+      portfolio_cap: [15, 20],
+      position_weight_pct: ['0.05'],
+      fundamental_growth_params: [
+        gaFinancialPreset('quality_light'),
+        gaFinancialPreset('growth_ocf'),
+        gaFinancialPreset('value_quality'),
+      ],
+      market_filter_params: [
+        { enabled: false },
+        { enabled: true, symbol: 'SPY', require_price_above_sma: true, price_sma_days: 200, require_fast_sma_above_slow_sma: false, fast_sma_days: 50, slow_sma_days: 200 },
+        { enabled: true, symbol: 'SPY', require_price_above_sma: true, price_sma_days: 200, require_fast_sma_above_slow_sma: true, fast_sma_days: 50, slow_sma_days: 200 },
+      ],
+      relative_strength_params: [
+        { enabled: false },
+        { enabled: true, symbol: 'SPY', lookback_days: 120, min_excess_return_pct: '0' },
+        { enabled: true, symbol: 'SPY', lookback_days: 250, min_excess_return_pct: '0' },
+      ],
+    };
+  }
+
+  function gaInitialPopulation() {
+    return [
+      { rps_threshold: 70, selected_rps_windows: [120, 250], min_rps_windows_passing: 1, rps_exit_threshold: 65, stop_loss_pct: '-0.08', holding_days: null, use_cup_handle: false, portfolio_cap: 20, position_weight_pct: '0.05', fundamental_growth_params: gaFinancialPreset('quality_light') },
+      { rps_threshold: 80, selected_rps_windows: [50, 120, 250], min_rps_windows_passing: 2, rps_exit_threshold: 75, stop_loss_pct: '-0.08', holding_days: null, use_cup_handle: false, portfolio_cap: 20, position_weight_pct: '0.05', fundamental_growth_params: gaFinancialPreset('growth_ocf') },
+      { rps_threshold: 75, selected_rps_windows: [50, 120, 250], min_rps_windows_passing: 1, rps_exit_threshold: 70, stop_loss_pct: '-0.10', holding_days: null, use_cup_handle: true, cup_handle_params: gaLooseCupParams(), portfolio_cap: 15, position_weight_pct: '0.05', fundamental_growth_params: gaFinancialPreset('quality_light'), relative_strength_params: { enabled: true, symbol: 'SPY', lookback_days: 250, min_excess_return_pct: '0' } },
+    ];
+  }
+
+  function gaEvaluationWindows() {
+    const latest = document.getElementById('gaTrainEndDate').value || '2026-04-30';
+    return [
+      { name: 'wf_2021_2022_to_2023', train_start_date: '2021-01-01', train_end_date: '2022-12-31', validation_start_date: '2023-01-01', validation_end_date: '2023-12-31' },
+      { name: 'wf_2022_2023_to_2024', train_start_date: '2022-01-01', train_end_date: '2023-12-31', validation_start_date: '2024-01-01', validation_end_date: '2024-12-31' },
+      { name: 'wf_2023_2024_to_2025', train_start_date: '2023-01-01', train_end_date: '2024-12-31', validation_start_date: '2025-01-01', validation_end_date: '2025-12-31' },
+      { name: 'wf_2024_2025_to_latest', train_start_date: '2024-01-01', train_end_date: '2025-12-31', validation_start_date: '2026-01-01', validation_end_date: latest },
+    ];
+  }
+
+  function renderGaRun(run) {
+    state.currentGaRun = run;
+    state.gaRunId = run ? run.id : null;
+    updateGaPhase(run ? run.status : null);
+    const progress = gaProgress(run);
+    document.getElementById('gaProgress').style.width = progress.pct + '%';
+    const timing = computeGaTiming(run);
+    document.getElementById('gaRunId').textContent = run ? `#${run.id}` : '—';
+    document.getElementById('gaRunWindow').textContent = run ? `${run.train_start_date} → ${run.train_end_date}` : '—';
+    document.getElementById('gaIndividualsProgress').textContent = run ? `${fmt(progress.done)} / ${fmt(progress.total)}` : '—';
+    document.getElementById('gaGenerationProgress').textContent = run ? `代 ${fmt(run.completed_generations)} / ${fmt(run.total_generations)}` : '—';
+    document.getElementById('gaBestIndividual').textContent = run?.best_individual_id ? `#${run.best_individual_id}` : '—';
+    document.getElementById('gaFailedIndividuals').textContent = run ? fmt(run.failed_individuals) : '—';
+    document.getElementById('gaTiming').textContent = timing.elapsedSec === null
+      ? '—'
+      : `已运行 ${formatDuration(timing.elapsedSec)}${timing.etaSec !== null ? ' · 剩余 ' + formatDuration(timing.etaSec) : ''}`;
+    const best = state.gaIndividuals.find((item) => item.id === run?.best_individual_id);
+    document.getElementById('gaBestFitness').textContent = best?.fitness || '—';
+    const error = run?.error_message ? ` · ${run.error_message}` : '';
+    document.getElementById('gaStatus').textContent = run
+      ? `${gaStatusLabel(run.status)} · ${run.objective} · 进度 ${fmt(progress.done)}/${fmt(progress.total)} (${progress.pct}%) · 失败 ${fmt(run.failed_individuals)}${error}`
+      : '尚未运行';
+    const running = run && (run.status === 'running' || run.status === 'cancel_requested');
+    document.getElementById('runGaSearch').disabled = Boolean(running);
+    document.getElementById('runGaSearch').textContent = running ? 'GA 运行中…' : '启动 GA';
+    document.getElementById('resumeGaSearch').disabled = !(run && run.status !== 'completed');
+    document.getElementById('cancelGaSearch').disabled = !(run && run.status === 'running');
+  }
+
+  function renderGaRuns(runs) {
+    state.gaRuns = runs;
+    const body = document.getElementById('gaRunsBody');
+    body.innerHTML = '';
+    document.getElementById('gaRunsEmpty').style.display = runs.length ? 'none' : 'block';
+    for (const run of runs) {
+      const p = gaProgress(run);
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>#${run.id}<div class="metric-muted">${run.started_at || '—'}</div></td>
+        <td>${gaStatusLabel(run.status)}</td>
+        <td>${fmt(p.done)} / ${fmt(p.total)} (${p.pct}%)<div class="metric-muted">代 ${fmt(run.completed_generations)} / ${fmt(run.total_generations)}</div></td>
+        <td>${run.objective}<div class="metric-muted">种群 ${run.population_size} · 代数 ${run.max_generations}</div></td>
+        <td>${run.train_start_date} → ${run.train_end_date}<div class="metric-muted">holdout ${run.holdout_start_date || '—'} → ${run.holdout_end_date || '—'}</div></td>
+      `;
+      body.appendChild(tr);
+    }
+  }
+
+  function renderGaIndividuals(individuals) {
+    state.gaIndividuals = individuals;
+    const sorted = [...individuals].sort((a, b) => Number(b.fitness || -999) - Number(a.fitness || -999)).slice(0, 10);
+    const body = document.getElementById('gaIndividualsBody');
+    body.innerHTML = '';
+    document.getElementById('gaIndividualsEmpty').style.display = sorted.length ? 'none' : 'block';
+    for (const individual of sorted) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>#${individual.id}<div class="metric-muted">G${individual.generation} / #${individual.individual_index} / ${individual.status}</div></td>
+        <td>${individual.fitness || '—'}</td>
+        <td>${gaParamSummary(individual.parameters || {})}</td>
+        <td>${gaMetricSummary(individual)}</td>
+        <td><button class="inline-action" data-ga-individual-detail="${individual.id}" title="打开该 GA 个体在各个滚动窗口中的训练/验证交易明细。">详情</button></td>
+      `;
+      body.appendChild(tr);
+    }
+    body.querySelectorAll('[data-ga-individual-detail]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        window.open(`/dashboard/ga-individuals/${button.dataset.gaIndividualDetail}`, '_blank');
+      });
+    });
+    if (state.currentGaRun) renderGaRun(state.currentGaRun);
+  }
+
+  function renderGaEvents(events) {
+    state.gaEvents = events;
+    const summaries = events.filter((event) => event.event_type === 'generation_summary').slice(-8).reverse();
+    const body = document.getElementById('gaEventsBody');
+    body.innerHTML = '';
+    document.getElementById('gaEventsEmpty').style.display = summaries.length ? 'none' : 'block';
+    for (const event of summaries) {
+      const data = event.event || {};
+      const perf = data.performance || {};
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>G${event.generation}</td>
+        <td>${data.best_fitness || '—'}<div class="metric-muted">个体 #${data.best_individual_id || '—'}</div></td>
+        <td>${data.average_fitness || '—'}<div class="metric-muted">失败率 ${formatRatioPct(data.failure_rate)}</div></td>
+        <td>${perf.generation_seconds ? formatDuration(Number(perf.generation_seconds)) : '—'}<div class="metric-muted">缓存 ${perf.window_cache_hits || 0}/${perf.window_cache_misses || 0}</div></td>
+      `;
+      body.appendChild(tr);
+    }
+  }
+
+  async function loadGaRunDetails(runId) {
+    const [individualsData, eventsData] = await Promise.all([
+      api('GET', `/backtests/ga/runs/${runId}/individuals?limit=60&offset=0`),
+      api('GET', `/backtests/ga/runs/${runId}/events?limit=200&offset=0`),
+    ]);
+    renderGaIndividuals(individualsData.individuals || []);
+    renderGaEvents(eventsData.events || []);
+  }
+
+  async function loadLatestGaRun() {
+    try {
+      const runsData = await api('GET', `/backtests/ga/runs?market=${state.market}&limit=10`);
+      const runs = runsData.ga_runs || [];
+      renderGaRuns(runs);
+      const run = runs[0] || null;
+      renderGaRun(run);
+      if (run) {
+        await loadGaRunDetails(run.id);
+        if (run.status === 'running' || run.status === 'cancel_requested') {
+          window.clearTimeout(state.gaPollTimer);
+          state.gaPollTimer = window.setTimeout(loadLatestGaRun, 10000);
+        }
+      }
+    } catch (err) {
+      showToast('加载 GA 失败: ' + err.message);
+    }
+  }
+
+  async function runGaSearch() {
+    if (state.market !== 'us') {
+      showToast('GA 当前只用于美股策略搜索');
+      return;
+    }
+    const trainStart = document.getElementById('gaTrainStartDate').value;
+    const trainEnd = document.getElementById('gaTrainEndDate').value;
+    if (!trainStart || !trainEnd) {
+      showToast('请先填写 GA 训练区间');
+      return;
+    }
+    document.getElementById('gaStatus').textContent = '正在创建 GA 任务…';
+    try {
+      const populationSize = readInt('gaPopulationSize', 12);
+      const maxGenerations = readInt('gaMaxGenerations', 18);
+      const payload = {
+        market: state.market,
+        train_start_date: trainStart,
+        train_end_date: trainEnd,
+        holdout_start_date: document.getElementById('gaHoldoutStartDate').value || null,
+        holdout_end_date: document.getElementById('gaHoldoutEndDate').value || null,
+        objective: document.getElementById('gaObjective').value,
+        population_size: populationSize,
+        max_generations: maxGenerations,
+        random_seed: readInt('gaRandomSeed', 20260512),
+        gene_space: gaGeneSpace(),
+        initial_population: gaInitialPopulation(),
+        fitness_config: {
+          evaluation_windows: gaEvaluationWindows(),
+          require_complete_benchmark: true,
+          require_all_windows: true,
+          reuse_parameter_window_evaluations: true,
+          prefer_broad_candidate_cache: true,
+          max_broad_candidate_cache_dates: 260,
+          elite_count: Math.min(3, populationSize),
+          mutation_rate: '0.25',
+          stagnation_patience: 8,
+        },
+        execute_immediately: true,
+      };
+      const data = await api('POST', '/backtests/ga/runs', payload);
+      renderGaRun(data.ga_run);
+      await loadLatestGaRun();
+      showToast(`GA #${data.ga_run.id} 已启动`);
+    } catch (err) {
+      showToast('GA 启动失败: ' + err.message);
+      document.getElementById('gaStatus').textContent = '启动失败：' + err.message;
+    }
+  }
+
+  async function cancelGaSearch() {
+    if (!state.gaRunId) return;
+    try {
+      const data = await api('POST', `/backtests/ga/runs/${state.gaRunId}/cancel`);
+      renderGaRun(data.ga_run);
+      showToast('已请求取消 GA');
+    } catch (err) {
+      showToast('取消 GA 失败: ' + err.message);
+    }
+  }
+
+  async function resumeGaSearch() {
+    if (!state.gaRunId) return;
+    try {
+      document.getElementById('gaStatus').textContent = `正在恢复 GA #${state.gaRunId}…`;
+      const data = await api('POST', `/backtests/ga/runs/${state.gaRunId}/resume`);
+      renderGaRun(data.ga_run);
+      await loadGaRunDetails(data.ga_run.id);
+      showToast(`GA #${data.ga_run.id} 已恢复`);
+      if (!state.gaPollTimer) {
+        state.gaPollTimer = window.setTimeout(loadLatestGaRun, 10000);
+      }
+    } catch (err) {
+      showToast('恢复 GA 失败: ' + err.message);
+      document.getElementById('gaStatus').textContent = '恢复失败：' + err.message;
     }
   }
 
@@ -2901,6 +3535,7 @@
       const data = await api('POST', '/backtests/optimization/runs', payload);
       const run = data.optimization_run;
       renderOptimizationRun(run);
+      await loadOptimizationRuns();
       pollOptimizationRun(run.id);
     } catch (err) {
       showToast('启动优化失败: ' + err.message);
@@ -2922,6 +3557,31 @@
     } catch (err) {
       showToast('取消优化失败: ' + err.message);
     }
+  }
+
+  async function resumeOptimizationRun(runId = state.optimizationRunId) {
+    if (!runId) return;
+    const btn = document.getElementById('resumeOptimizationRun');
+    btn.disabled = true;
+    try {
+      document.getElementById('optimizationStatus').textContent = `正在继续优化任务 #${runId}…`;
+      const data = await api('POST', `/backtests/optimization/runs/${runId}/resume`);
+      const run = data.optimization_run;
+      renderOptimizationRun(run);
+      await loadOptimizationResults(run.id, { offset: 0 });
+      await loadOptimizationRuns();
+      pollOptimizationRun(run.id);
+      showToast(`优化任务 #${run.id} 已继续`);
+    } catch (err) {
+      showToast('继续优化失败: ' + err.message);
+      btn.disabled = !canResumeOptimizationRun(state.currentOptimizationRun);
+      if (state.currentOptimizationRun) renderOptimizationRun(state.currentOptimizationRun);
+    }
+  }
+
+  async function rerunOptimizationRun(runId) {
+    if (!applyOptimizationRunToForm(runId)) return;
+    await runOptimization();
   }
 
   async function saveOptimizationPreset(resultId) {
@@ -2961,6 +3621,183 @@
     const el = document.getElementById(id);
     if (!el || value === undefined || value === null) return;
     el.checked = Boolean(value);
+  }
+
+  function optimizationRunById(runId) {
+    return state.optimizationRuns.find((item) => item.id === runId) ||
+      (state.currentOptimizationRun && state.currentOptimizationRun.id === runId ? state.currentOptimizationRun : null);
+  }
+
+  function axisValues(parameterSpace, key) {
+    if (!parameterSpace || parameterSpace[key] === undefined) return [];
+    return Array.isArray(parameterSpace[key]) ? parameterSpace[key] : [parameterSpace[key]];
+  }
+
+  function uniqueAxisValues(values) {
+    const seen = new Set();
+    const rows = [];
+    for (const value of values) {
+      if (value === undefined) continue;
+      const key = stableStringify(value);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push(value);
+    }
+    return rows;
+  }
+
+  function axisInputValue(values, { emptyForSingleNull = true, arraySeparator = '+', groupSeparator = ', ' } = {}) {
+    const rows = uniqueAxisValues(values);
+    if (!rows.length) return '';
+    if (emptyForSingleNull && rows.length === 1 && rows[0] === null) return '';
+    return rows.map((value) => {
+      if (value === null || value === undefined) return 'null';
+      if (Array.isArray(value)) return value.join(arraySeparator);
+      return String(value);
+    }).join(groupSeparator);
+  }
+
+  function setAxisInputValue(id, parameterSpace, key, options = {}) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const text = axisInputValue(axisValues(parameterSpace, key), options);
+    if (text !== '') el.value = text;
+    if (text === '' && options.allowEmpty === true) el.value = '';
+  }
+
+  function firstAxisValue(parameterSpace, key, fallback = null) {
+    const values = axisValues(parameterSpace, key);
+    return values.length ? values[0] : fallback;
+  }
+
+  function objectAxisValues(parameterSpace, axisName, key) {
+    return axisValues(parameterSpace, axisName)
+      .filter((value) => value && typeof value === 'object' && !Array.isArray(value))
+      .map((value) => value[key]);
+  }
+
+  function setObjectAxisInputValue(id, parameterSpace, axisName, key, options = {}) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const text = axisInputValue(objectAxisValues(parameterSpace, axisName, key), options);
+    if (text !== '') el.value = text;
+    if (text === '' && options.allowEmpty === true) el.value = '';
+  }
+
+  function marketFilterModeFromParams(params) {
+    if (!params || params.enabled === false) return 'none';
+    const symbol = String(params.symbol || 'SPY').toLowerCase();
+    if (params.require_fast_sma_above_slow_sma) {
+      return `${symbol}_${params.fast_sma_days || 50}_${params.slow_sma_days || 200}ma`;
+    }
+    return `${symbol}_${params.price_sma_days || 200}ma`;
+  }
+
+  function relativeStrengthModeFromParams(params) {
+    if (!params || params.enabled === false) return 'none';
+    const symbol = String(params.symbol || 'SPY').toLowerCase();
+    return `${symbol}_${params.lookback_days || 120}d`;
+  }
+
+  function applyOptimizationRunToForm(runId) {
+    const run = optimizationRunById(runId);
+    if (!run) {
+      showToast('未找到优化任务');
+      return false;
+    }
+    const parameterSpace = run.parameter_space || {};
+    document.getElementById('optimizationTrainStartDate').value = run.train_start_date || '';
+    document.getElementById('optimizationTrainEndDate').value = run.train_end_date || '';
+    document.getElementById('optimizationValidationStartDate').value = run.validation_start_date || '';
+    document.getElementById('optimizationValidationEndDate').value = run.validation_end_date || '';
+    setInputValue('optimizationObjective', run.objective);
+    setInputValue('optimizationSearchMode', run.search_mode || 'grid');
+    setNullableInputValue('optimizationRandomSeed', run.random_seed);
+    document.getElementById('optimizationMaxSets').value = run.total_parameter_sets || '';
+    document.getElementById('optimizationMaxWorkers').value =
+      run.max_workers && run.max_workers !== 'auto' ? run.max_workers : '';
+
+    const useRps = firstAxisValue(parameterSpace, 'use_rps', true) !== false;
+    const useCupHandle = firstAxisValue(parameterSpace, 'use_cup_handle', true) !== false;
+    setCheckboxValue('optimizationUseRps', useRps);
+    setCheckboxValue('optimizationUseCupHandle', useCupHandle);
+    setCheckboxValue('optimizationUseFundamental', true);
+    setAxisInputValue('optimizationRpsThresholds', parameterSpace, 'rps_threshold');
+    document.getElementById('optimizationWindowSets').value =
+      axisInputValue(axisValues(parameterSpace, 'selected_rps_windows'), {
+        arraySeparator: '+',
+        groupSeparator: '; ',
+      }) || document.getElementById('optimizationWindowSets').value;
+    setInputValue('rpsMinPassing', firstAxisValue(parameterSpace, 'min_rps_windows_passing', readInt('rpsMinPassing', 2)));
+
+    const cupAxis = 'cup_handle_params';
+    setObjectAxisInputValue('optimizationCupMinDurations', parameterSpace, cupAxis, 'min_cup_duration');
+    setObjectAxisInputValue('optimizationCupMaxDurations', parameterSpace, cupAxis, 'max_cup_duration');
+    setObjectAxisInputValue('optimizationHandleMinDurations', parameterSpace, cupAxis, 'min_handle_duration');
+    setObjectAxisInputValue('optimizationHandleMaxDurations', parameterSpace, cupAxis, 'max_handle_duration');
+    setObjectAxisInputValue('optimizationCupMinTotals', parameterSpace, cupAxis, 'min_total_duration');
+    setObjectAxisInputValue('optimizationCupMaxTotals', parameterSpace, cupAxis, 'max_total_duration');
+    setObjectAxisInputValue('optimizationCupMinDepths', parameterSpace, cupAxis, 'min_cup_depth_pct');
+    setObjectAxisInputValue('optimizationCupMaxDepths', parameterSpace, cupAxis, 'max_cup_depth_pct');
+    setObjectAxisInputValue('optimizationHandleMinPullbacks', parameterSpace, cupAxis, 'min_handle_pullback_pct');
+    setObjectAxisInputValue('optimizationHandleMaxPullbacks', parameterSpace, cupAxis, 'max_handle_pullback_pct');
+    setObjectAxisInputValue('optimizationRightLipMaxDeltas', parameterSpace, cupAxis, 'max_right_lip_delta_pct');
+    setObjectAxisInputValue('optimizationRequirePriorUptrendModes', parameterSpace, cupAxis, 'require_prior_uptrend');
+    setObjectAxisInputValue('optimizationPriorUptrendLookbacks', parameterSpace, cupAxis, 'prior_uptrend_lookback_days');
+    setObjectAxisInputValue('optimizationPriorUptrendMins', parameterSpace, cupAxis, 'min_prior_uptrend_pct');
+    setObjectAxisInputValue('optimizationHandleLowPositions', parameterSpace, cupAxis, 'min_handle_low_position_pct');
+    setObjectAxisInputValue('optimizationHandleDepthToCupDepths', parameterSpace, cupAxis, 'max_handle_depth_to_cup_depth_pct');
+    setObjectAxisInputValue('optimizationHandleHighAboveLips', parameterSpace, cupAxis, 'max_handle_high_above_lip_pct');
+    setObjectAxisInputValue('optimizationBottomDwellDays', parameterSpace, cupAxis, 'min_bottom_dwell_days');
+    setObjectAxisInputValue('optimizationBottomZones', parameterSpace, cupAxis, 'bottom_zone_pct');
+    setObjectAxisInputValue('optimizationBottomSpans', parameterSpace, cupAxis, 'min_bottom_span_pct');
+    setObjectAxisInputValue('optimizationCupSideDurations', parameterSpace, cupAxis, 'min_cup_side_duration_pct');
+    setObjectAxisInputValue('optimizationRequireBreakoutVolumeModes', parameterSpace, cupAxis, 'require_breakout_volume');
+    setObjectAxisInputValue('optimizationBreakoutVolumeAvgDays', parameterSpace, cupAxis, 'breakout_volume_avg_days');
+    setObjectAxisInputValue('optimizationBreakoutVolumeMultipliers', parameterSpace, cupAxis, 'min_breakout_volume_multiplier');
+    setObjectAxisInputValue('optimizationBreakoutLookbacks', parameterSpace, cupAxis, 'breakout_lookback_days');
+    setObjectAxisInputValue('optimizationCupLookbacks', parameterSpace, cupAxis, 'lookback_days');
+
+    const fundamentalAxis = 'fundamental_growth_params';
+    setObjectAxisInputValue('optimizationFundamentalYears', parameterSpace, fundamentalAxis, 'min_years');
+    setObjectAxisInputValue('optimizationFundamentalGrowthCounts', parameterSpace, fundamentalAxis, 'min_growth_count');
+    setObjectAxisInputValue('optimizationFundamentalMinYoyPcts', parameterSpace, fundamentalAxis, 'min_yoy_growth_pct');
+    setObjectAxisInputValue('optimizationFundamentalPositiveModes', parameterSpace, fundamentalAxis, 'require_positive_net_income');
+    setObjectAxisInputValue('optimizationFundamentalLagDays', parameterSpace, fundamentalAxis, 'reporting_lag_days');
+    setObjectAxisInputValue('optimizationFundamentalMaxPe', parameterSpace, fundamentalAxis, 'max_pe', { allowEmpty: true });
+    setObjectAxisInputValue('optimizationFundamentalMaxPb', parameterSpace, fundamentalAxis, 'max_pb', { allowEmpty: true });
+    setObjectAxisInputValue('optimizationFundamentalPositiveOcfModes', parameterSpace, fundamentalAxis, 'require_positive_operating_cash_flow');
+    setObjectAxisInputValue('optimizationFundamentalPositiveFcfModes', parameterSpace, fundamentalAxis, 'require_positive_free_cash_flow');
+    setObjectAxisInputValue('optimizationFundamentalOcfGrowthCounts', parameterSpace, fundamentalAxis, 'min_operating_cash_flow_growth_count', { allowEmpty: true });
+    setObjectAxisInputValue('optimizationFundamentalOcfMinYoyPcts', parameterSpace, fundamentalAxis, 'min_operating_cash_flow_yoy_growth_pct');
+
+    setAxisInputValue('optimizationHoldingDays', parameterSpace, 'holding_days', { allowEmpty: true });
+    setAxisInputValue('optimizationStopLosses', parameterSpace, 'stop_loss_pct');
+    setAxisInputValue('optimizationRpsExits', parameterSpace, 'rps_exit_threshold', { allowEmpty: true });
+    setInputValue('optimizationPortfolioCap', firstAxisValue(parameterSpace, 'portfolio_cap'));
+    setInputValue('optimizationPositionWeight', firstAxisValue(parameterSpace, 'position_weight_pct'));
+    setInputValue('optimizationInitialCapital', firstAxisValue(parameterSpace, 'initial_capital'));
+    setNullableInputValue('optimizationPositionSizeAmount', firstAxisValue(parameterSpace, 'position_size_amount'));
+    setAxisInputValue('optimizationEntryDelays', parameterSpace, 'entry_delay_days');
+    setInputValue('optimizationEntryWindow', firstAxisValue(parameterSpace, 'entry_deferral_window_days'));
+
+    const marketFilters = axisValues(parameterSpace, 'market_filter_params');
+    const marketFilterModes = uniqueAxisValues(marketFilters.map(marketFilterModeFromParams));
+    document.getElementById('optimizationMarketFilterModes').value = marketFilterModes.join(', ');
+    const firstMarketFilter = marketFilters.find((item) => item && item.symbol) || {};
+    document.getElementById('optimizationMarketFilterSymbol').value = firstMarketFilter.symbol || 'SPY';
+    setCheckboxValue('optimizationUseMarketFilter', marketFilterModes.some((mode) => mode !== 'none'));
+
+    const relativeStrengthRows = axisValues(parameterSpace, 'relative_strength_params');
+    const relativeStrengthModes = uniqueAxisValues(relativeStrengthRows.map(relativeStrengthModeFromParams));
+    document.getElementById('optimizationRelativeStrengthModes').value = relativeStrengthModes.join(', ');
+    setCheckboxValue('optimizationUseRelativeStrength', relativeStrengthModes.some((mode) => mode !== 'none'));
+    document.getElementById('optimizationRelativeStrengthMinExcess').value =
+      axisInputValue(relativeStrengthRows.map((params) => params && params.min_excess_return_pct).filter((value) => value !== undefined)) || '0';
+
+    updateOptimizationPreview();
+    showToast(`已套用优化任务 #${run.id} 的参数，可修改后重新创建`);
+    return true;
   }
 
   function applyStrategyParameters(parameters) {
@@ -3241,19 +4078,42 @@
     document.getElementById('backtestTradesBody').innerHTML = '';
     state.optimizationRunId = null;
     state.currentOptimizationRun = null;
+    state.optimizationRuns = [];
     state.optimizationResultsOffset = 0;
     state.optimizationResultsTotal = 0;
     state.selectedOptimizationResult = null;
     state.selectedOptimizationResultIds.clear();
+    state.gaRunId = null;
+    state.currentGaRun = null;
+    state.gaRuns = [];
+    state.gaIndividuals = [];
+    state.gaEvents = [];
     window.clearTimeout(state.optimizationPollTimer);
+    if (state.optimizationTicker) {
+      window.clearInterval(state.optimizationTicker);
+      state.optimizationTicker = null;
+    }
+    window.clearTimeout(state.gaPollTimer);
     updateOptimizationPhase(null);
+    updateGaPhase(null);
+    renderOptimizationRuns([]);
     renderOptimizationResults([]);
     renderOptimizationComparison();
+    renderGaRuns([]);
+    renderGaIndividuals([]);
+    renderGaEvents([]);
     document.getElementById('optimizationProgress').style.width = '0%';
+    document.getElementById('gaProgress').style.width = '0%';
     document.getElementById('optimizationStatus').textContent = '尚未运行';
+    document.getElementById('gaStatus').textContent = '尚未运行';
     document.getElementById('runOptimization').disabled = false;
     document.getElementById('runOptimization').textContent = '创建并运行';
+    document.getElementById('resumeOptimizationRun').disabled = true;
     document.getElementById('cancelOptimization').disabled = true;
+    document.getElementById('runGaSearch').disabled = false;
+    document.getElementById('runGaSearch').textContent = '启动 GA';
+    document.getElementById('resumeGaSearch').disabled = true;
+    document.getElementById('cancelGaSearch').disabled = true;
   }
 
   function setMarket(market) {
@@ -3269,6 +4129,7 @@
     loadOverview();
     loadStrategyPresets({ applyActive: true });
     loadLatestOptimizationRun();
+    loadLatestGaRun();
   }
 
   function openChartWindow(instrumentId, symbol, name) {
@@ -3290,10 +4151,19 @@
   document.getElementById('runFundamentals').addEventListener('click', () => runMaintenance('fundamentals'));
   document.getElementById('runStrategyBacktest').addEventListener('click', runStrategyBacktest);
   document.getElementById('runOptimization').addEventListener('click', runOptimization);
+  document.getElementById('resumeOptimizationRun').addEventListener('click', () => resumeOptimizationRun());
   document.getElementById('cancelOptimization').addEventListener('click', cancelOptimization);
+  document.getElementById('refreshOptimizationRuns').addEventListener('click', loadOptimizationRuns);
   document.getElementById('deleteOptimizationRun').addEventListener('click', deleteOptimizationRun);
+  document.getElementById('runGaSearch').addEventListener('click', runGaSearch);
+  document.getElementById('refreshGaSearch').addEventListener('click', loadLatestGaRun);
+  document.getElementById('resumeGaSearch').addEventListener('click', resumeGaSearch);
+  document.getElementById('cancelGaSearch').addEventListener('click', cancelGaSearch);
   document.getElementById('refreshStrategyPresets').addEventListener('click', loadStrategyPresets);
   document.getElementById('cancelOptimization').disabled = true;
+  document.getElementById('resumeOptimizationRun').disabled = true;
+  document.getElementById('resumeGaSearch').disabled = true;
+  document.getElementById('cancelGaSearch').disabled = true;
   document.querySelectorAll('[data-toggle-tool]').forEach((button) => {
     button.addEventListener('click', () => {
       const card = document.getElementById(button.dataset.toggleTool);
@@ -3421,6 +4291,7 @@
   loadOverview();
   loadStrategyPresets({ applyActive: true });
   loadLatestOptimizationRun();
+  loadLatestGaRun();
 </script>
 </body>
 </html>

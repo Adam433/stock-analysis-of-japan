@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import copy
+import os
 import resource
 import random
+import subprocess
+import sys
+import threading
 import time
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -27,12 +31,13 @@ DEFAULT_GA_ELITE_COUNT = 2
 DEFAULT_GA_MUTATION_RATE = Decimal("0.20")
 DEFAULT_GA_STAGNATION_PATIENCE = 2
 DEFAULT_GA_MAX_BROAD_CANDIDATE_CACHE_DATES = 260
+DEFAULT_GA_DETAIL_TRADES_RETURNED = 300
 
 DEFAULT_GA_GENE_SPACE: dict[str, list[object]] = {
-    "rps_threshold": [70, 80],
+    "rps_threshold": [70, 75, 80, 85],
     "selected_rps_windows": [[120, 250], [50, 120, 250]],
     "min_rps_windows_passing": [1, 2],
-    "rps_exit_threshold": [75, 80, 85],
+    "rps_exit_threshold": [None, 60, 65, 70, 75],
     "stop_loss_pct": ["-0.06", "-0.08", "-0.10"],
     "use_cup_handle": [False],
     "portfolio_cap": [10, 20],
@@ -82,7 +87,7 @@ DEFAULT_GA_INITIAL_POPULATION: list[dict[str, object]] = [
         "rps_threshold": 80,
         "selected_rps_windows": [120, 250],
         "min_rps_windows_passing": 1,
-        "rps_exit_threshold": 80,
+        "rps_exit_threshold": 75,
         "stop_loss_pct": "-0.08",
         "portfolio_cap": 20,
         "position_weight_pct": "0.05",
@@ -94,7 +99,7 @@ DEFAULT_GA_INITIAL_POPULATION: list[dict[str, object]] = [
         "rps_threshold": 80,
         "selected_rps_windows": [50, 120, 250],
         "min_rps_windows_passing": 2,
-        "rps_exit_threshold": 80,
+        "rps_exit_threshold": 75,
         "stop_loss_pct": "-0.08",
         "portfolio_cap": 20,
         "position_weight_pct": "0.05",
@@ -106,7 +111,7 @@ DEFAULT_GA_INITIAL_POPULATION: list[dict[str, object]] = [
         "rps_threshold": 70,
         "selected_rps_windows": [120, 250],
         "min_rps_windows_passing": 1,
-        "rps_exit_threshold": 75,
+        "rps_exit_threshold": 65,
         "stop_loss_pct": "-0.08",
         "portfolio_cap": 20,
         "position_weight_pct": "0.05",
@@ -141,6 +146,9 @@ DEFAULT_GA_FITNESS_CONFIG: dict[str, object] = {
     "max_broad_candidate_cache_dates": DEFAULT_GA_MAX_BROAD_CANDIDATE_CACHE_DATES,
 }
 
+_ACTIVE_GA_RUN_IDS: set[int] = set()
+_ACTIVE_GA_RUN_IDS_LOCK = threading.Lock()
+
 
 def _as_list(value: object) -> list[object]:
     if value is None:
@@ -166,10 +174,38 @@ def _candidate_from_payload(payload: dict[str, object]) -> dict[str, object]:
     return normalize_strategy_parameter_set(clean_payload)
 
 
+def _is_invalid_rps_exit_order_error(exc: ValueError) -> bool:
+    return "rps_exit_threshold must be lower than rps_threshold" in str(exc)
+
+
 def _random_candidate(gene_space: dict[str, list[object]], rng: random.Random) -> dict[str, object]:
-    return _candidate_from_payload(
-        {key: copy.deepcopy(rng.choice(values)) for key, values in gene_space.items()}
-    )
+    max_attempts = max(_finite_gene_space_size(gene_space) * 2, 100)
+    attempts = 0
+    while attempts < max_attempts:
+        attempts += 1
+        try:
+            return _candidate_from_payload(
+                {key: copy.deepcopy(rng.choice(values)) for key, values in gene_space.items()}
+            )
+        except ValueError as exc:
+            if _is_invalid_rps_exit_order_error(exc):
+                continue
+            raise
+    raise ValueError("gene_space cannot produce a valid RPS entry/exit candidate.")
+
+
+def _maybe_mutate(
+    parameters: dict[str, object],
+    *,
+    gene_space: dict[str, list[object]],
+    rng: random.Random,
+) -> tuple[dict[str, object], dict[str, object] | None]:
+    try:
+        return _mutate(parameters, gene_space=gene_space, rng=rng)
+    except ValueError as exc:
+        if _is_invalid_rps_exit_order_error(exc):
+            return parameters, None
+        raise
 
 
 def _finite_gene_space_size(gene_space: dict[str, list[object]]) -> int:
@@ -386,10 +422,52 @@ def _compact_ga_metrics(metrics: object) -> object:
     }
 
 
+def _compact_ga_result_detail(result: object) -> dict[str, object] | None:
+    if not isinstance(result, dict):
+        return None
+    summary_keys = (
+        "start_date",
+        "end_date",
+        "initial_capital",
+        "final_capital",
+        "total_profit",
+        "total_return",
+        "annualized_return",
+        "average_annualized_return",
+        "completed_trades",
+        "selected_trades",
+        "win_rate",
+        "max_drawdown",
+        "position_size_amount",
+        "benchmark_status",
+        "spy_excess_annualized_return",
+        "spy_excess_total_return",
+        "detail_source",
+        "detail_unavailable_reason",
+    )
+    compacted = {
+        key: copy.deepcopy(result[key])
+        for key in summary_keys
+        if key in result
+    }
+    trades = result.get("trades")
+    if isinstance(trades, list):
+        compacted["trades"] = copy.deepcopy(trades[:DEFAULT_GA_DETAIL_TRADES_RETURNED])
+        compacted["trades_returned"] = min(len(trades), DEFAULT_GA_DETAIL_TRADES_RETURNED)
+        compacted["total_trades_available"] = len(trades)
+    else:
+        compacted["trades"] = []
+        compacted["trades_returned"] = 0
+        compacted["total_trades_available"] = 0
+    return compacted
+
+
 def _compact_ga_window_summary(summary: dict[str, object]) -> dict[str, object]:
     compacted = dict(summary)
     compacted["train_metrics"] = _compact_ga_metrics(compacted.get("train_metrics"))
     compacted["validation_metrics"] = _compact_ga_metrics(compacted.get("validation_metrics"))
+    compacted["train_result"] = _compact_ga_result_detail(compacted.get("train_result"))
+    compacted["validation_result"] = _compact_ga_result_detail(compacted.get("validation_result"))
     return compacted
 
 
@@ -398,6 +476,8 @@ def _compact_ga_evaluation(evaluation: dict[str, object]) -> dict[str, object]:
         "parameters": copy.deepcopy(evaluation.get("parameters")),
         "train_metrics": _compact_ga_metrics(evaluation.get("train_metrics")),
         "validation_metrics": _compact_ga_metrics(evaluation.get("validation_metrics")),
+        "train_result": _compact_ga_result_detail(evaluation.get("train_result")),
+        "validation_result": _compact_ga_result_detail(evaluation.get("validation_result")),
         "aggregate_metrics": copy.deepcopy(evaluation.get("aggregate_metrics")),
         "score": evaluation.get("score"),
         "status": evaluation.get("status"),
@@ -514,6 +594,8 @@ def _aggregate_window_evaluations(
                 "failure_reason": evaluation.get("failure_reason"),
                 "train_metrics": _compact_ga_metrics(evaluation.get("train_metrics")),
                 "validation_metrics": _compact_ga_metrics(evaluation.get("validation_metrics")),
+                "train_result": _compact_ga_result_detail(evaluation.get("train_result")),
+                "validation_result": _compact_ga_result_detail(evaluation.get("validation_result")),
             }
         )
 
@@ -598,7 +680,7 @@ def _cross_over(
     rng: random.Random,
 ) -> dict[str, object]:
     child: dict[str, object] = {}
-    for key in set(parent_a) | set(parent_b):
+    for key in sorted(set(parent_a) | set(parent_b)):
         if key == "strategy_schema_version":
             continue
         source = parent_a if rng.random() < 0.5 else parent_b
@@ -670,14 +752,19 @@ def _next_generation(
         attempts += 1
         parent_a = rng.choice(elites)
         parent_b = rng.choice(elites)
-        child = _cross_over(
-            load_json(parent_a.parameters_json, default={}),
-            load_json(parent_b.parameters_json, default={}),
-            rng=rng,
-        )
+        try:
+            child = _cross_over(
+                load_json(parent_a.parameters_json, default={}),
+                load_json(parent_b.parameters_json, default={}),
+                rng=rng,
+            )
+        except ValueError as exc:
+            if _is_invalid_rps_exit_order_error(exc):
+                continue
+            raise
         mutation = None
         if rng.random() < float(mutation_rate):
-            child, mutation = _mutate(child, gene_space=gene_space, rng=rng)
+            child, mutation = _maybe_mutate(child, gene_space=gene_space, rng=rng)
         append(child, parent_a_id=parent_a.id, parent_b_id=parent_b.id, mutation=mutation)
         if len(seen) >= _finite_gene_space_size(gene_space):
             break
@@ -716,6 +803,11 @@ def create_ga_run(
     normalized_gene_space = _normalize_gene_space(gene_space)
     resolved_fitness_config = {**DEFAULT_GA_FITNESS_CONFIG, **(fitness_config or {})}
     resolved_initial_population = initial_population or DEFAULT_GA_INITIAL_POPULATION
+    resolved_random_seed = (
+        random_seed
+        if random_seed is not None
+        else random.SystemRandom().randrange(0, 2_147_483_647)
+    )
     run = GaRun(
         market=market,
         train_start_date=train_start_date,
@@ -728,7 +820,7 @@ def create_ga_run(
         strategy_schema_version=STRATEGY_PARAMETER_SCHEMA_VERSION,
         population_size=population_size,
         max_generations=max_generations,
-        random_seed=random_seed,
+        random_seed=resolved_random_seed,
         gene_space_json=dump_json(normalized_gene_space),
         fitness_config_json=dump_json(resolved_fitness_config),
         initial_population_json=dump_json(resolved_initial_population),
@@ -744,6 +836,10 @@ def create_ga_run(
 
 def get_ga_run(session, run_id: int) -> GaRun | None:
     return session.get(GaRun, run_id)
+
+
+def get_ga_individual(session, individual_id: int) -> GaIndividual | None:
+    return session.get(GaIndividual, individual_id)
 
 
 def list_ga_runs(session, *, market: str = "us", limit: int = 50) -> list[GaRun]:
@@ -1091,6 +1187,119 @@ def _generation_summary_event(
     }
 
 
+def _candidate_parameter_hash(candidate: dict[str, object]) -> str:
+    parameters = candidate.get("parameters")
+    if not isinstance(parameters, dict):
+        raise ValueError("GA candidate parameters must be a dictionary.")
+    return stable_parameter_hash(parameters)
+
+
+def _existing_individuals_by_generation(
+    session,
+    *,
+    run: GaRun,
+) -> dict[int, dict[int, GaIndividual]]:
+    by_generation: dict[int, dict[int, GaIndividual]] = {}
+    individuals = (
+        session.execute(
+            select(GaIndividual)
+            .where(GaIndividual.ga_run_id == run.id)
+            .order_by(
+                GaIndividual.generation.asc(),
+                GaIndividual.individual_index.asc(),
+                GaIndividual.id.asc(),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for individual in individuals:
+        if individual.generation < 0 or individual.generation >= run.max_generations:
+            raise ValueError(
+                f"GA run #{run.id} has persisted individual outside generation range: "
+                f"generation={individual.generation}."
+            )
+        if individual.individual_index < 0 or individual.individual_index >= run.population_size:
+            raise ValueError(
+                f"GA run #{run.id} has persisted individual outside population range: "
+                f"generation={individual.generation}, index={individual.individual_index}."
+            )
+        generation = by_generation.setdefault(individual.generation, {})
+        if individual.individual_index in generation:
+            raise ValueError(
+                f"GA run #{run.id} has duplicate persisted individuals for "
+                f"generation={individual.generation}, index={individual.individual_index}."
+            )
+        generation[individual.individual_index] = individual
+    return by_generation
+
+
+def _generation_summary_generations(session, *, run_id: int) -> set[int]:
+    rows = (
+        session.execute(
+            select(GaEvent.generation)
+            .where(GaEvent.ga_run_id == run_id)
+            .where(GaEvent.event_type == "generation_summary")
+            .where(GaEvent.generation.is_not(None))
+        )
+        .scalars()
+        .all()
+    )
+    return {int(generation) for generation in rows if generation is not None}
+
+
+def _sync_ga_run_progress_from_existing(
+    run: GaRun,
+    existing_by_generation: dict[int, dict[int, GaIndividual]],
+) -> None:
+    individuals = [
+        individual
+        for generation in existing_by_generation.values()
+        for individual in generation.values()
+    ]
+    run.completed_individuals = sum(
+        1 for individual in individuals if individual.status == "completed"
+    )
+    run.failed_individuals = sum(1 for individual in individuals if individual.status != "completed")
+    completed_generations = 0
+    for generation in range(run.max_generations):
+        if len(existing_by_generation.get(generation, {})) < run.population_size:
+            break
+        completed_generations = generation + 1
+    run.completed_generations = completed_generations
+
+
+def _candidate_matches_existing(
+    *,
+    candidate: dict[str, object],
+    existing: GaIndividual,
+) -> tuple[bool, str]:
+    expected_hash = _candidate_parameter_hash(candidate)
+    return existing.parameter_hash == expected_hash, expected_hash
+
+
+def _resume_random_fill_candidate(
+    *,
+    gene_space: dict[str, list[object]],
+    seen_hashes: set[str],
+    rng: random.Random,
+) -> dict[str, object]:
+    max_attempts = max(len(seen_hashes) * 20, _finite_gene_space_size(gene_space) * 2)
+    attempts = 0
+    while attempts < max_attempts:
+        attempts += 1
+        parameters = _random_candidate(gene_space, rng)
+        parameter_hash = stable_parameter_hash(parameters)
+        if parameter_hash not in seen_hashes:
+            return {
+                "parameters": parameters,
+                "parent_a_id": None,
+                "parent_b_id": None,
+                "mutation": {"source": "resume_random_fill"},
+            }
+    raise ValueError("gene_space cannot produce enough unique candidates to resume generation.")
+
+
 def _evaluate_holdout(
     session,
     *,
@@ -1173,6 +1382,11 @@ def execute_ga_run(session, run_id: int) -> GaRun:
     if run.status not in {"running", "cancel_requested"}:
         return run
 
+    existing_by_generation = _existing_individuals_by_generation(session, run=run)
+    existing_count = sum(len(generation) for generation in existing_by_generation.values())
+    if existing_count and run.random_seed is None:
+        raise ValueError("GA run cannot resume safely without a persisted random_seed.")
+
     rng = random.Random(run.random_seed)
     gene_space = _normalize_gene_space(load_json(run.gene_space_json, default={}))
     fitness_config = {**DEFAULT_GA_FITNESS_CONFIG, **load_json(run.fitness_config_json, default={})}
@@ -1209,6 +1423,22 @@ def execute_ga_run(session, run_id: int) -> GaRun:
             rng=rng,
         )
     ]
+    summary_generations = _generation_summary_generations(session, run_id=run.id)
+    if existing_count:
+        _sync_ga_run_progress_from_existing(run, existing_by_generation)
+        _log_ga_event(
+            session,
+            run_id=run.id,
+            generation=None,
+            event_type="run_resumed",
+            event={
+                "restored_individuals": existing_count,
+                "completed_individuals": run.completed_individuals,
+                "failed_individuals": run.failed_individuals,
+                "completed_generations": run.completed_generations,
+            },
+        )
+        session.commit()
 
     best_score: Decimal | None = None
     stale_generations = 0
@@ -1230,13 +1460,69 @@ def execute_ga_run(session, run_id: int) -> GaRun:
         for generation in range(run.max_generations):
             generation_started_at = time.perf_counter()
             generation_cache_baseline = _cache_stats_baseline(cache_stats)
+            session.refresh(run)
             if run.status == "cancel_requested":
                 run.status = "cancelled"
                 run.completed_at = datetime.now(UTC)
                 session.commit()
                 return run
             generation_individuals: list[GaIndividual] = []
+            existing_generation = existing_by_generation.setdefault(generation, {})
+            seen_generation_hashes = {
+                individual.parameter_hash for individual in existing_generation.values()
+            }
             for index, candidate in enumerate(population):
+                existing_individual = existing_generation.get(index)
+                if existing_individual is not None:
+                    matches_existing, expected_hash = _candidate_matches_existing(
+                        candidate=candidate,
+                        existing=existing_individual,
+                    )
+                    if not matches_existing:
+                        _log_ga_event(
+                            session,
+                            run_id=run.id,
+                            generation=generation,
+                            event_type="resume_candidate_mismatch",
+                            event={
+                                "generation": generation,
+                                "individual_index": index,
+                                "individual_id": existing_individual.id,
+                                "persisted_parameter_hash": existing_individual.parameter_hash,
+                                "reconstructed_parameter_hash": expected_hash,
+                                "resolution": "used_persisted_individual",
+                            },
+                        )
+                    generation_individuals.append(existing_individual)
+                    continue
+
+                session.refresh(run)
+                if run.status == "cancel_requested":
+                    run.status = "cancelled"
+                    run.completed_at = datetime.now(UTC)
+                    session.commit()
+                    return run
+
+                candidate_hash = _candidate_parameter_hash(candidate)
+                if candidate_hash in seen_generation_hashes:
+                    candidate = _resume_random_fill_candidate(
+                        gene_space=gene_space,
+                        seen_hashes=seen_generation_hashes,
+                        rng=rng,
+                    )
+                    candidate_hash = _candidate_parameter_hash(candidate)
+                    _log_ga_event(
+                        session,
+                        run_id=run.id,
+                        generation=generation,
+                        event_type="resume_duplicate_candidate_replaced",
+                        event={
+                            "generation": generation,
+                            "individual_index": index,
+                            "replacement_parameter_hash": candidate_hash,
+                        },
+                    )
+
                 individual_cache_baseline = _cache_stats_baseline(cache_stats)
                 evaluation = _evaluate_candidate(
                     session,
@@ -1271,6 +1557,8 @@ def execute_ga_run(session, run_id: int) -> GaRun:
                     evaluation=evaluation,
                 )
                 generation_individuals.append(individual)
+                existing_generation[index] = individual
+                seen_generation_hashes.add(individual.parameter_hash)
                 if individual.status == "completed":
                     run.completed_individuals += 1
                 else:
@@ -1294,6 +1582,11 @@ def execute_ga_run(session, run_id: int) -> GaRun:
                 )
                 session.commit()
 
+            if len(generation_individuals) < run.population_size:
+                raise ValueError(
+                    f"GA run #{run.id} generation {generation} was not fully reconstructed."
+                )
+
             ranked = _ranked_individuals(generation_individuals)
             generation_best = ranked[0] if ranked else None
             if generation_best is not None and generation_best.fitness is not None:
@@ -1307,40 +1600,42 @@ def execute_ga_run(session, run_id: int) -> GaRun:
                 stale_generations += 1
 
             run.completed_generations = generation + 1
-            _log_ga_event(
-                session,
-                run_id=run.id,
-                generation=generation,
-                event_type="generation_summary",
-                event=_generation_summary_event(
+            if generation not in summary_generations:
+                _log_ga_event(
+                    session,
+                    run_id=run.id,
                     generation=generation,
-                    individuals=generation_individuals,
-                    generation_best=generation_best,
-                    stale_generations=stale_generations,
-                    evaluation_windows=evaluation_windows,
-                    performance={
-                        **_cache_stats_delta(cache_stats, generation_cache_baseline),
-                        "generation_seconds": _format_seconds(
-                            time.perf_counter() - generation_started_at
-                        ),
-                        "cache_sizes": {
-                            "ga_window_evaluations": len(evaluation_cache),
-                            "screen": len(screen_cache),
-                            "screen_candidates": len(screen_candidate_cache),
-                            "fundamentals": len(fundamental_growth_cache),
-                            "cup_events": len(cup_event_cache),
-                            "trades": len(trade_cache),
-                            "trade_dates": len(trade_dates_cache),
-                            "future_rows": len(future_rows_cache),
-                            "future_indicators": len(future_indicator_cache),
-                            "market_filter": len(market_filter_cache),
-                            "relative_strength": len(relative_strength_cache),
-                            "benchmarks": len(benchmark_cache),
+                    event_type="generation_summary",
+                    event=_generation_summary_event(
+                        generation=generation,
+                        individuals=generation_individuals,
+                        generation_best=generation_best,
+                        stale_generations=stale_generations,
+                        evaluation_windows=evaluation_windows,
+                        performance={
+                            **_cache_stats_delta(cache_stats, generation_cache_baseline),
+                            "generation_seconds": _format_seconds(
+                                time.perf_counter() - generation_started_at
+                            ),
+                            "cache_sizes": {
+                                "ga_window_evaluations": len(evaluation_cache),
+                                "screen": len(screen_cache),
+                                "screen_candidates": len(screen_candidate_cache),
+                                "fundamentals": len(fundamental_growth_cache),
+                                "cup_events": len(cup_event_cache),
+                                "trades": len(trade_cache),
+                                "trade_dates": len(trade_dates_cache),
+                                "future_rows": len(future_rows_cache),
+                                "future_indicators": len(future_indicator_cache),
+                                "market_filter": len(market_filter_cache),
+                                "relative_strength": len(relative_strength_cache),
+                                "benchmarks": len(benchmark_cache),
+                            },
+                            "max_rss": _max_rss_snapshot(),
                         },
-                        "max_rss": _max_rss_snapshot(),
-                    },
-                ),
-            )
+                    ),
+                )
+                summary_generations.add(generation)
             session.commit()
             if stale_generations >= stagnation_patience:
                 break
@@ -1390,3 +1685,80 @@ def execute_ga_run(session, run_id: int) -> GaRun:
         session.commit()
         session.refresh(run)
         return run
+
+
+def dispatch_ga_run_execution(run_id: int) -> None:
+    with _ACTIVE_GA_RUN_IDS_LOCK:
+        if run_id in _ACTIVE_GA_RUN_IDS:
+            return
+        _ACTIVE_GA_RUN_IDS.add(run_id)
+
+    def run_worker() -> None:
+        try:
+            log_dir = os.path.join(os.getcwd(), "logs")
+            os.makedirs(log_dir, exist_ok=True)
+            log_path = os.path.join(log_dir, f"ga_run_{run_id}.log")
+            env = os.environ.copy()
+            with open(log_path, "a", buffering=1) as log_file:
+                log_file.write(f"\n--- dispatch ga run #{run_id} ---\n")
+                process = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "stockanalyse_api.jobs.execute_ga_run",
+                        str(run_id),
+                    ],
+                    cwd=os.getcwd(),
+                    env=env,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+                process.wait()
+        finally:
+            with _ACTIVE_GA_RUN_IDS_LOCK:
+                _ACTIVE_GA_RUN_IDS.discard(run_id)
+
+    thread = threading.Thread(
+        target=run_worker,
+        name=f"ga-run-{run_id}",
+        daemon=True,
+    )
+    thread.start()
+
+
+def _is_ga_run_active(run_id: int) -> bool:
+    with _ACTIVE_GA_RUN_IDS_LOCK:
+        return run_id in _ACTIVE_GA_RUN_IDS
+
+
+def resume_ga_run(session, run_id: int) -> GaRun:
+    run = session.get(GaRun, run_id)
+    if run is None:
+        raise LookupError("GA run not found.")
+    if run.status == "completed":
+        raise ValueError("Completed GA runs cannot be resumed.")
+    run.status = "running"
+    run.completed_at = None
+    run.error_message = None
+    session.commit()
+    session.refresh(run)
+    return run
+
+
+def cancel_ga_run(session, run_id: int) -> GaRun:
+    run = session.get(GaRun, run_id)
+    if run is None:
+        raise LookupError("GA run not found.")
+    if run.status == "running":
+        if _is_ga_run_active(run_id):
+            run.status = "cancel_requested"
+        else:
+            run.status = "cancelled"
+            run.completed_at = datetime.now(UTC)
+    elif run.status == "cancel_requested" and not _is_ga_run_active(run_id):
+        run.status = "cancelled"
+        run.completed_at = datetime.now(UTC)
+    session.commit()
+    session.refresh(run)
+    return run

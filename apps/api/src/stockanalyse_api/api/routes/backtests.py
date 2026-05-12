@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from stockanalyse_api.db.session import SessionLocal
 from stockanalyse_api.services.screening import get_screen_run
@@ -37,17 +37,25 @@ from stockanalyse_api.services.optimization_backtest import (
     delete_optimization_result,
     delete_optimization_run,
     dispatch_optimization_run_execution,
+    enrich_evaluation_trade_context,
     get_optimization_run,
     get_latest_optimization_run,
+    list_optimization_runs,
     list_optimization_results,
+    resume_optimization_run,
     serialize_optimization_result,
     serialize_optimization_run,
 )
 from stockanalyse_api.services.genetic_optimizer import (
+    cancel_ga_run,
+    create_ga_run,
+    dispatch_ga_run_execution,
+    get_ga_individual,
     get_ga_run,
     list_ga_events,
     list_ga_individuals,
     list_ga_runs,
+    resume_ga_run,
     serialize_ga_event,
     serialize_ga_individual,
     serialize_ga_run,
@@ -93,6 +101,26 @@ class OptimizationResultRerunRequest(BaseModel):
 
     execute_immediately: bool = True
     max_workers: int | None = 1
+
+
+class GaRunCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    market: str = "us"
+    train_start_date: date
+    train_end_date: date
+    validation_start_date: date | None = None
+    validation_end_date: date | None = None
+    holdout_start_date: date | None = None
+    holdout_end_date: date | None = None
+    objective: str = "spy_alpha"
+    population_size: int = Field(default=12, ge=2, le=100)
+    max_generations: int = Field(default=4, ge=1, le=200)
+    random_seed: int | None = None
+    gene_space: dict[str, object] | None = None
+    fitness_config: dict[str, object] | None = None
+    initial_population: list[dict[str, object]] | None = None
+    execute_immediately: bool = True
 
 
 def _require_portfolio_return_completed_run(session, run_id: int):
@@ -225,6 +253,21 @@ def read_latest_parameter_optimization_run(market: str = "us") -> dict[str, obje
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.get("/optimization/runs")
+def read_parameter_optimization_runs(market: str = "us", limit: int = 50) -> dict[str, object]:
+    try:
+        with SessionLocal() as session:
+            runs = list_optimization_runs(session, market=market, limit=limit)
+            return {
+                "optimization_runs": [
+                    serialize_optimization_run(run, include_parameter_sets=False)
+                    for run in runs
+                ]
+            }
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/optimization/runs/{run_id}")
 def read_parameter_optimization_run(run_id: int) -> dict[str, object]:
     with SessionLocal() as session:
@@ -311,11 +354,43 @@ def read_ga_runs(market: str = "us", limit: int = 50) -> dict[str, object]:
         return {"ga_runs": [serialize_ga_run(run) for run in runs]}
 
 
+@router.post("/ga/runs")
+def create_genetic_optimizer_run(payload: GaRunCreateRequest) -> dict[str, object]:
+    try:
+        with SessionLocal() as session:
+            run = create_ga_run(
+                session,
+                market=payload.market,
+                train_start_date=payload.train_start_date,
+                train_end_date=payload.train_end_date,
+                validation_start_date=payload.validation_start_date,
+                validation_end_date=payload.validation_end_date,
+                holdout_start_date=payload.holdout_start_date,
+                holdout_end_date=payload.holdout_end_date,
+                objective=payload.objective,
+                gene_space=payload.gene_space,
+                fitness_config=payload.fitness_config,
+                initial_population=payload.initial_population,
+                population_size=payload.population_size,
+                max_generations=payload.max_generations,
+                random_seed=payload.random_seed,
+            )
+            run_payload = serialize_ga_run(run)
+        if payload.execute_immediately:
+            dispatch_ga_run_execution(int(run_payload["id"]))
+        return {"ga_run": run_payload}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/ga/runs/latest")
 def read_latest_ga_run(market: str = "us") -> dict[str, object]:
     with SessionLocal() as session:
-        runs = list_ga_runs(session, market=market, limit=1)
-        run = runs[0] if runs else None
+        runs = list_ga_runs(session, market=market, limit=10)
+        run = next(
+            (item for item in runs if item.status in {"running", "cancel_requested"}),
+            runs[0] if runs else None,
+        )
         return {"ga_run": serialize_ga_run(run) if run is not None else None}
 
 
@@ -376,6 +451,47 @@ def read_ga_events(
         }
 
 
+@router.get("/ga/individuals/{individual_id}/detail")
+def read_ga_individual_detail(individual_id: int) -> dict[str, object]:
+    with SessionLocal() as session:
+        individual = get_ga_individual(session, individual_id)
+        if individual is None:
+            raise HTTPException(status_code=404, detail="GA individual not found.")
+        run = get_ga_run(session, individual.ga_run_id)
+        individual_payload = serialize_ga_individual(individual, include_evaluation=True)
+        evaluation = individual_payload.get("evaluation")
+        if isinstance(evaluation, dict):
+            enrich_evaluation_trade_context(session, evaluation)
+        return {
+            "ga_run": serialize_ga_run(run) if run is not None else None,
+            "individual": individual_payload,
+        }
+
+
+@router.post("/ga/runs/{run_id}/cancel")
+def cancel_genetic_optimizer_run(run_id: int) -> dict[str, object]:
+    try:
+        with SessionLocal() as session:
+            run = cancel_ga_run(session, run_id)
+            return {"ga_run": serialize_ga_run(run)}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/ga/runs/{run_id}/resume")
+def resume_genetic_optimizer_run(run_id: int) -> dict[str, object]:
+    try:
+        with SessionLocal() as session:
+            run = resume_ga_run(session, run_id)
+            run_payload = serialize_ga_run(run)
+        dispatch_ga_run_execution(int(run_payload["id"]))
+        return {"ga_run": run_payload}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/optimization/runs/{run_id}/cancel")
 def cancel_parameter_optimization_run(run_id: int) -> dict[str, object]:
     try:
@@ -389,6 +505,20 @@ def cancel_parameter_optimization_run(run_id: int) -> dict[str, object]:
             }
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/optimization/runs/{run_id}/resume")
+def resume_parameter_optimization_run(run_id: int) -> dict[str, object]:
+    try:
+        with SessionLocal() as session:
+            run = resume_optimization_run(session, run_id)
+            run_payload = serialize_optimization_run(run, include_parameter_sets=False)
+        dispatch_optimization_run_execution(int(run_payload["id"]))
+        return {"optimization_run": run_payload}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.delete("/optimization/runs/{run_id}")

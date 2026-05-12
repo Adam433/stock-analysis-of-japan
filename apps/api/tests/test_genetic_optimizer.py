@@ -207,8 +207,30 @@ class GeneticOptimizerTests(unittest.TestCase):
                     "equity_curve": [{"date": "2019-01-02", "equity": "1.020000"}],
                     "yearly_returns": {"2021": "0.050000", "2022": "0.060000"},
                 },
-                "train_result": {"large_detail": [1, 2, 3]},
-                "validation_result": {"large_detail": [4, 5, 6]},
+                "train_result": {
+                    "final_capital": "101000.00",
+                    "trades": [
+                        {
+                            "symbol": "AAPL",
+                            "signal_date": "2018-01-02",
+                            "entry_date": "2018-01-03",
+                            "exit_date": "2018-01-10",
+                            "realized_return": "0.010000",
+                        }
+                    ],
+                },
+                "validation_result": {
+                    "final_capital": "102000.00",
+                    "trades": [
+                        {
+                            "symbol": "MSFT",
+                            "signal_date": "2019-01-02",
+                            "entry_date": "2019-01-03",
+                            "exit_date": "2019-01-10",
+                            "realized_return": "0.020000",
+                        }
+                    ],
+                },
                 "score": base_score,
                 "status": "completed",
                 "failure_reason": None,
@@ -270,6 +292,7 @@ class GeneticOptimizerTests(unittest.TestCase):
                 select(GaEvent).where(GaEvent.event_type == "generation_summary")
             ).scalar_one()
             best_metrics = load_json(best.metrics_json) if best is not None else None
+            best_evaluation = load_json(best.evaluation_json) if best is not None else None
             event_payload = load_json(event.event_json)
 
         self.assertEqual(mocked_evaluator.call_count, 6)
@@ -279,6 +302,12 @@ class GeneticOptimizerTests(unittest.TestCase):
         self.assertEqual(best_metrics["aggregate"]["window_count"], 3)
         self.assertEqual(best_metrics["aggregate"]["completed_window_count"], 3)
         self.assertEqual(len(best_metrics["windows"]), 3)
+        self.assertIsNotNone(best_evaluation)
+        assert best_evaluation is not None
+        self.assertEqual(
+            best_evaluation["window_evaluations"][0]["validation_result"]["trades"][0]["symbol"],
+            "MSFT",
+        )
         self.assertNotIn("equity_curve", best_metrics["windows"][0]["train_metrics"])
         self.assertNotIn("equity_curve", best_metrics["windows"][0]["validation_metrics"])
         self.assertEqual(
@@ -348,6 +377,113 @@ class GeneticOptimizerTests(unittest.TestCase):
         self.assertIsNotNone(best_evaluation)
         assert best_evaluation is not None
         self.assertEqual(best_evaluation["holdout_evaluation"]["score"], "-0.100000")
+
+    def test_execute_ga_run_resumes_partial_generation_without_duplicates(self) -> None:
+        calls_before_failure = 0
+
+        def interrupting_evaluator(*args, **kwargs):
+            nonlocal calls_before_failure
+            calls_before_failure += 1
+            if calls_before_failure > 5:
+                raise RuntimeError("synthetic interruption")
+            parameters = kwargs["parameters"]
+            score = Decimal("0.200000") if parameters["rps_threshold"] == 80 else Decimal("0.050000")
+            return {
+                "parameters": parameters,
+                "train_metrics": {"completed_trades": 25, "max_drawdown": "-0.080000"},
+                "validation_metrics": None,
+                "train_result": {},
+                "validation_result": None,
+                "score": score,
+                "status": "completed",
+                "failure_reason": None,
+            }
+
+        def completing_evaluator(*args, **kwargs):
+            parameters = kwargs["parameters"]
+            score = Decimal("0.200000") if parameters["rps_threshold"] == 80 else Decimal("0.050000")
+            return {
+                "parameters": parameters,
+                "train_metrics": {"completed_trades": 25, "max_drawdown": "-0.080000"},
+                "validation_metrics": None,
+                "train_result": {},
+                "validation_result": None,
+                "score": score,
+                "status": "completed",
+                "failure_reason": None,
+            }
+
+        with self.session_factory() as session:
+            run = create_ga_run(
+                session,
+                train_start_date=date(2018, 1, 1),
+                train_end_date=date(2022, 12, 31),
+                gene_space={
+                    "rps_threshold": [70, 80],
+                    "selected_rps_windows": [[120, 250]],
+                    "min_rps_windows_passing": [1],
+                    "stop_loss_pct": ["-0.08", "-0.10"],
+                    "use_cup_handle": [False],
+                },
+                initial_population=[{"rps_threshold": 70}, {"rps_threshold": 80}],
+                fitness_config={
+                    "require_complete_benchmark": False,
+                    "reuse_parameter_window_evaluations": False,
+                    "mutation_rate": "0.50",
+                    "elite_count": 2,
+                    "stagnation_patience": 5,
+                },
+                population_size=4,
+                max_generations=2,
+                random_seed=17,
+            )
+
+            with patch(
+                "stockanalyse_api.services.genetic_optimizer.evaluate_strategy_parameter_set",
+                side_effect=interrupting_evaluator,
+            ):
+                interrupted = execute_ga_run(session, run.id)
+
+            self.assertEqual(interrupted.status, "failed")
+            self.assertEqual(interrupted.completed_generations, 1)
+            interrupted_individuals = (
+                session.execute(select(GaIndividual).where(GaIndividual.ga_run_id == run.id))
+                .scalars()
+                .all()
+            )
+            self.assertEqual(len(interrupted_individuals), 5)
+
+            interrupted.status = "running"
+            interrupted.completed_at = None
+            interrupted.error_message = None
+            session.commit()
+
+            with patch(
+                "stockanalyse_api.services.genetic_optimizer.evaluate_strategy_parameter_set",
+                side_effect=completing_evaluator,
+            ) as mocked_evaluator:
+                completed = execute_ga_run(session, run.id)
+
+            individuals = (
+                session.execute(select(GaIndividual).where(GaIndividual.ga_run_id == run.id))
+                .scalars()
+                .all()
+            )
+            events = session.execute(
+                select(GaEvent).where(GaEvent.ga_run_id == run.id).order_by(GaEvent.id)
+            ).scalars().all()
+
+        self.assertEqual(completed.status, "completed")
+        self.assertEqual(completed.completed_generations, 2)
+        self.assertEqual(completed.completed_individuals, 8)
+        self.assertEqual(mocked_evaluator.call_count, 3)
+        self.assertEqual(len(individuals), 8)
+        self.assertEqual(len({(item.generation, item.individual_index) for item in individuals}), 8)
+        self.assertEqual(
+            [event.event_type for event in events].count("generation_summary"),
+            2,
+        )
+        self.assertIn("run_resumed", [event.event_type for event in events])
 
     def test_execute_ga_run_reuses_parameter_window_evaluation_cache(self) -> None:
         def fake_evaluator(*args, **kwargs):

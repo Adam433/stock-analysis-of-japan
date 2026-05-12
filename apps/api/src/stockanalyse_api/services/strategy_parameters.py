@@ -164,6 +164,9 @@ def normalize_strategy_parameter_set(parameters: dict[str, object]) -> dict[str,
     )
     if not fundamental_params.enabled:
         fundamental_params = DEFAULT_OPTIMIZATION_FUNDAMENTAL_GROWTH_PARAMS
+    rps_threshold = int(parameters.get("rps_threshold", 90)) if use_rps else 0
+    if use_rps and not 0 <= rps_threshold <= 100:
+        raise ValueError("rps_threshold must be between 0 and 100.")
     selected_windows = [int(window) for window in parameters.get("selected_rps_windows", [50, 120, 250])]  # type: ignore[arg-type]
     selected_windows = sorted(set(selected_windows), key=selected_windows.index)
     take_profit_pct = _coerce_optional_decimal(
@@ -181,6 +184,10 @@ def normalize_strategy_parameter_set(parameters: dict[str, object]) -> dict[str,
     if not use_rps:
         rps_exit_threshold = None
         selected_windows = [50, 120, 250]
+    elif rps_exit_threshold is not None and rps_exit_threshold >= rps_threshold:
+        raise ValueError(
+            "rps_exit_threshold must be lower than rps_threshold when RPS exit is enabled."
+        )
     holding_days = _coerce_optional_int(
         parameters.get("holding_days", 130),
         field_name="holding_days",
@@ -230,7 +237,7 @@ def normalize_strategy_parameter_set(parameters: dict[str, object]) -> dict[str,
     return {
         "strategy_schema_version": STRATEGY_PARAMETER_SCHEMA_VERSION,
         "use_rps": use_rps,
-        "rps_threshold": int(parameters.get("rps_threshold", 90)) if use_rps else 0,
+        "rps_threshold": rps_threshold,
         "selected_rps_windows": selected_windows,
         "min_rps_windows_passing": int(parameters.get("min_rps_windows_passing", 1)) if use_rps else 1,
         "use_cup_handle": use_cup_handle,

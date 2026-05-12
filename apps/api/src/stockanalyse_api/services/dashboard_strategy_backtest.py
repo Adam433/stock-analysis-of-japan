@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 from bisect import bisect_right
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from statistics import median
@@ -65,6 +65,15 @@ class CupHandleRpsTrade:
     exit_reason: str
     realized_return: str
     rps_score: str | None
+    rps_score_date: str | None = None
+    rps_detail: str | None = None
+    cup_handle_breakout_date: str | None = None
+    fundamental_growth_summary: str | None = None
+    fundamental_growth_latest_yoy_pct: str | None = None
+    fundamental_operating_cash_flow_latest_yoy_pct: str | None = None
+    exit_rps_score: str | None = None
+    exit_rps_score_date: str | None = None
+    exit_rps_detail: str | None = None
     invested_cash: str | None = None
     exit_cash: str | None = None
     realized_profit: str | None = None
@@ -190,6 +199,107 @@ def _hit_rps_score(hit: dict[str, object], selected_windows: list[int]) -> Decim
     if not values:
         return None
     return max(values)
+
+
+def _format_rps_score(value: Decimal | None) -> str | None:
+    return f"{value:.2f}" if value is not None else None
+
+
+def _hit_rps_values(hit: dict[str, object], selected_windows: list[int]) -> list[tuple[int, Decimal]]:
+    values: list[tuple[int, Decimal]] = []
+    for window in selected_windows:
+        raw_value = hit.get(f"rps_{window}")
+        if raw_value is None:
+            continue
+        values.append((window, Decimal(str(raw_value))))
+    return values
+
+
+def _format_rps_detail(values: list[tuple[int, Decimal]]) -> str | None:
+    if not values:
+        return None
+    return " / ".join(f"RPS{window} {value:.2f}" for window, value in values)
+
+
+def _hit_rps_detail(hit: dict[str, object], selected_windows: list[int]) -> str | None:
+    return _format_rps_detail(_hit_rps_values(hit, selected_windows))
+
+
+def _fundamental_growth_summary(hit: dict[str, object]) -> str | None:
+    status = str(hit.get("fundamental_growth_status") or "")
+    if status == "not_required":
+        return "未启用"
+    if not status:
+        return None
+    details: list[str] = []
+    years = hit.get("fundamental_growth_years")
+    growth_count = hit.get("fundamental_growth_count")
+    latest_year = hit.get("fundamental_growth_latest_year")
+    try:
+        comparable_years = max(int(years) - 1, 0) if years is not None else None
+    except (TypeError, ValueError):
+        comparable_years = None
+    latest_yoy = hit.get("fundamental_growth_latest_yoy_pct")
+    headline = (
+        f"最近净利润同比 {latest_yoy}%"
+        if latest_yoy is not None
+        else "最近净利润同比 —"
+    )
+    if growth_count is not None and comparable_years is not None:
+        details.append(f"净利润增长 {growth_count}/{comparable_years} 年")
+    ocf_yoy = hit.get("fundamental_operating_cash_flow_latest_yoy_pct")
+    if ocf_yoy is not None:
+        details.append(f"经营现金流同比 {ocf_yoy}%")
+    if latest_year:
+        details.append(f"最新财年 {latest_year}")
+    if details:
+        return f"{headline}（{'，'.join(details)}）"
+    return headline
+
+
+def _entry_context_fields(
+    *,
+    signal_date: date,
+    hit: dict[str, object],
+    selected_windows: list[int],
+) -> dict[str, str | None]:
+    rps_score = _hit_rps_score(hit, selected_windows)
+    return {
+        "rps_score": _format_rps_score(rps_score),
+        "rps_score_date": signal_date.isoformat(),
+        "rps_detail": _hit_rps_detail(hit, selected_windows),
+        "cup_handle_breakout_date": (
+            str(hit["cup_handle_breakout_date"])
+            if hit.get("cup_handle_breakout_date") is not None
+            else None
+        ),
+        "fundamental_growth_summary": _fundamental_growth_summary(hit),
+        "fundamental_growth_latest_yoy_pct": (
+            str(hit["fundamental_growth_latest_yoy_pct"])
+            if hit.get("fundamental_growth_latest_yoy_pct") is not None
+            else None
+        ),
+        "fundamental_operating_cash_flow_latest_yoy_pct": (
+            str(hit["fundamental_operating_cash_flow_latest_yoy_pct"])
+            if hit.get("fundamental_operating_cash_flow_latest_yoy_pct") is not None
+            else None
+        ),
+    }
+
+
+def _copy_trade_with_entry_context(
+    trade: CupHandleRpsTrade | dict[str, object],
+    *,
+    signal_date: date,
+    hit: dict[str, object],
+    selected_windows: list[int],
+) -> CupHandleRpsTrade | dict[str, object]:
+    if not isinstance(trade, CupHandleRpsTrade):
+        return trade
+    return replace(
+        trade,
+        **_entry_context_fields(signal_date=signal_date, hit=hit, selected_windows=selected_windows),
+    )
 
 
 def _max_consecutive_losses(trade_returns: list[Decimal]) -> int:
@@ -533,6 +643,27 @@ def _indicator_rps_score(row: DerivedIndicatorDaily | None, selected_windows: li
     return max(values)
 
 
+def _indicator_rps_values(
+    row: DerivedIndicatorDaily | None,
+    selected_windows: list[int],
+) -> list[tuple[int, Decimal]]:
+    if row is None:
+        return []
+    values: list[tuple[int, Decimal]] = []
+    for window in selected_windows:
+        raw_value = getattr(row, f"rps_{window}", None)
+        if raw_value is not None:
+            values.append((window, Decimal(str(raw_value))))
+    return values
+
+
+def _indicator_rps_detail(
+    row: DerivedIndicatorDaily | None,
+    selected_windows: list[int],
+) -> str | None:
+    return _format_rps_detail(_indicator_rps_values(row, selected_windows))
+
+
 def _load_future_indicator_map(
     session,
     *,
@@ -787,6 +918,11 @@ def _simulate_trade(
 
     entry_row = rows[entry_index]
     last_mark_price = entry_price
+    entry_context = _entry_context_fields(
+        signal_date=signal_date,
+        hit=hit,
+        selected_windows=selected_windows,
+    )
 
     def mark_to_latest_close(exit_reason: str) -> CupHandleRpsTrade | None:
         for row in reversed(rows[entry_index:]):
@@ -794,7 +930,6 @@ def _simulate_trade(
             if candidate_close is None:
                 continue
             realized_return = _quantize_ratio((candidate_close / entry_price) - Decimal("1"))
-            rps_score = _hit_rps_score(hit, selected_windows)
             return CupHandleRpsTrade(
                 signal_date=signal_date.isoformat(),
                 instrument_id=instrument_id,
@@ -805,7 +940,7 @@ def _simulate_trade(
                 exit_price=f"{candidate_close:.6f}",
                 exit_reason=exit_reason,
                 realized_return=f"{realized_return:.6f}",
-                rps_score=f"{rps_score:.2f}" if rps_score is not None else None,
+                **entry_context,
             )
         return None
 
@@ -839,11 +974,17 @@ def _simulate_trade(
     trigger_reason = "holding_period_elapsed"
     immediate_exit_row: MarketDataDaily | None = None
     immediate_exit_price: Decimal | None = None
+    trigger_rps_score: Decimal | None = None
+    trigger_rps_score_date: date | None = None
+    trigger_rps_detail: str | None = None
     held_trading_days = 0
     for index in range(entry_index, len(rows)):
         row = rows[index]
         last_mark_price = _mark_price(row, last_mark_price)
         held_trading_days += 1
+        indicator_row = indicator_by_date.get(row.trade_date)
+        current_rps_score = _indicator_rps_score(indicator_row, selected_windows)
+        current_rps_detail = _indicator_rps_detail(indicator_row, selected_windows)
         stop_exit_price = _stop_loss_exit_price(
             row,
             entry_price=entry_price,
@@ -854,23 +995,34 @@ def _simulate_trade(
             trigger_reason = "stop_loss"
             immediate_exit_row = row
             immediate_exit_price = stop_exit_price
+            trigger_rps_score = current_rps_score
+            trigger_rps_score_date = row.trade_date if current_rps_score is not None else None
+            trigger_rps_detail = current_rps_detail
             break
         mark_return = _quantize_ratio((last_mark_price / entry_price) - Decimal("1"))
         if take_profit_pct is not None and mark_return >= take_profit_pct:
             trigger_index = index
             trigger_reason = "take_profit"
+            trigger_rps_score = current_rps_score
+            trigger_rps_score_date = row.trade_date if current_rps_score is not None else None
+            trigger_rps_detail = current_rps_detail
             break
-        rps_score = _indicator_rps_score(indicator_by_date.get(row.trade_date), selected_windows)
         if (
             rps_exit_threshold is not None
-            and rps_score is not None
-            and rps_score < Decimal(rps_exit_threshold)
+            and current_rps_score is not None
+            and current_rps_score < Decimal(rps_exit_threshold)
         ):
             trigger_index = index
             trigger_reason = "rps_exit"
+            trigger_rps_score = current_rps_score
+            trigger_rps_score_date = row.trade_date
+            trigger_rps_detail = current_rps_detail
             break
         if holding_days is not None and held_trading_days >= holding_days:
             trigger_index = index
+            trigger_rps_score = current_rps_score
+            trigger_rps_score_date = row.trade_date if current_rps_score is not None else None
+            trigger_rps_detail = current_rps_detail
             break
 
     if trigger_index is None:
@@ -915,7 +1067,6 @@ def _simulate_trade(
         }
 
     realized_return = _quantize_ratio((exit_price / entry_price) - Decimal("1"))
-    rps_score = _hit_rps_score(hit, selected_windows)
     return CupHandleRpsTrade(
         signal_date=signal_date.isoformat(),
         instrument_id=instrument_id,
@@ -926,7 +1077,12 @@ def _simulate_trade(
         exit_price=f"{exit_price:.6f}",
         exit_reason=trigger_reason,
         realized_return=f"{realized_return:.6f}",
-        rps_score=f"{rps_score:.2f}" if rps_score is not None else None,
+        exit_rps_score=_format_rps_score(trigger_rps_score),
+        exit_rps_score_date=(
+            trigger_rps_score_date.isoformat() if trigger_rps_score_date is not None else None
+        ),
+        exit_rps_detail=trigger_rps_detail,
+        **entry_context,
     )
 
 
@@ -1009,7 +1165,12 @@ def _simulate_trade_with_cache(
     )
     cached = trade_cache.get(cache_key)
     if cached is not None:
-        return cached
+        return _copy_trade_with_entry_context(
+            cached,
+            signal_date=signal_date,
+            hit=hit,
+            selected_windows=selected_windows,
+        )
     trade_or_exclusion = _simulate_trade(
         session,
         signal_date=signal_date,

@@ -206,6 +206,8 @@ class ScreenHit:
     fundamental_growth_years: int | None
     fundamental_growth_count: int | None
     fundamental_growth_latest_year: str | None
+    fundamental_growth_latest_yoy_pct: str | None
+    fundamental_operating_cash_flow_latest_yoy_pct: str | None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -1275,6 +1277,14 @@ def screen_universe(
                 fundamental_growth_years=fundamental_meta["available_years"],
                 fundamental_growth_count=fundamental_meta["growth_count"],
                 fundamental_growth_latest_year=fundamental_meta["latest_fiscal_year"],
+                fundamental_growth_latest_yoy_pct=_format_decimal(
+                    fundamental_meta.get("latest_net_income_yoy_pct"),
+                    "0.01",
+                ),
+                fundamental_operating_cash_flow_latest_yoy_pct=_format_decimal(
+                    fundamental_meta.get("latest_operating_cash_flow_yoy_pct"),
+                    "0.01",
+                ),
             )
         )
         if hit_limit is not None and len(hits) >= hit_limit:
@@ -1676,6 +1686,16 @@ def _evaluate_fundamental_growth_from_rows(
     )
 
 
+def _latest_yoy_pct(values: list[Decimal | None]) -> Decimal | None:
+    if len(values) < 2:
+        return None
+    previous = values[-2]
+    current = values[-1]
+    if previous is None or current is None or previous <= 0:
+        return None
+    return ((current / previous) - Decimal("1")) * Decimal("100")
+
+
 def _evaluate_fundamental_growth_from_available_rows(
     rows: list[_FundamentalAnnualSnapshot],
     *,
@@ -1838,6 +1858,10 @@ def _evaluate_fundamental_growth_from_available_rows(
         "available_years": len(rows),
         "growth_count": growth_count,
         "latest_fiscal_year": rows[-1].fiscal_year_label,
+        "latest_net_income_yoy_pct": _latest_yoy_pct(net_income_values),
+        "latest_operating_cash_flow_yoy_pct": _latest_yoy_pct(
+            [row.operating_cash_flow for row in rows]
+        ),
     }
 
 
@@ -1967,6 +1991,74 @@ def _evaluate_fundamental_growth(
         market_price=market_price,
         params=params,
     )
+
+
+def _format_meta_pct(value: object) -> str | None:
+    if value is None:
+        return None
+    return _format_decimal(Decimal(str(value)), "0.01")
+
+
+def _fundamental_growth_summary_from_meta(meta: dict[str, object]) -> str | None:
+    status = str(meta.get("status") or "")
+    if status == "not_required":
+        return "未启用"
+    latest_yoy = _format_meta_pct(meta.get("latest_net_income_yoy_pct"))
+    ocf_yoy = _format_meta_pct(meta.get("latest_operating_cash_flow_yoy_pct"))
+    details: list[str] = []
+    years = meta.get("available_years")
+    growth_count = meta.get("growth_count")
+    try:
+        comparable_years = max(int(years) - 1, 0) if years is not None else None
+    except (TypeError, ValueError):
+        comparable_years = None
+    if latest_yoy is not None:
+        headline = f"最近净利润同比 {latest_yoy}%"
+    else:
+        headline = "最近净利润同比 —"
+    if growth_count is not None and comparable_years is not None:
+        details.append(f"净利润增长 {growth_count}/{comparable_years} 年")
+    if ocf_yoy is not None:
+        details.append(f"经营现金流同比 {ocf_yoy}%")
+    latest_year = meta.get("latest_fiscal_year")
+    if latest_year:
+        details.append(f"最新财年 {latest_year}")
+    if details:
+        return f"{headline}（{'，'.join(details)}）"
+    return headline
+
+
+def fundamental_growth_context_for_signal(
+    session,
+    *,
+    instrument_id: int,
+    signal_date: date,
+    params: FundamentalGrowthParams,
+) -> dict[str, str | None]:
+    market_price: Decimal | None = None
+    if params.max_pe is not None or params.max_pb is not None:
+        market_price = _load_market_close_by_instrument(
+            session,
+            instrument_ids=[instrument_id],
+            trade_date=signal_date,
+            cache={},
+        ).get(instrument_id)
+    meta = _evaluate_fundamental_growth(
+        session,
+        instrument_id=instrument_id,
+        signal_date=signal_date,
+        params=params,
+        market_price=market_price,
+    )
+    return {
+        "fundamental_growth_summary": _fundamental_growth_summary_from_meta(meta),
+        "fundamental_growth_latest_yoy_pct": _format_meta_pct(
+            meta.get("latest_net_income_yoy_pct")
+        ),
+        "fundamental_operating_cash_flow_latest_yoy_pct": _format_meta_pct(
+            meta.get("latest_operating_cash_flow_yoy_pct")
+        ),
+    }
 
 
 def _detect_cup_handle_pattern(

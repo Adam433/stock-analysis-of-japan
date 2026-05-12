@@ -43,7 +43,10 @@ from stockanalyse_api.services.optimization_backtest import (
     dump_json,
     evaluate_strategy_parameter_set,
     execute_optimization_run,
+    load_json,
+    list_optimization_runs,
     list_optimization_results,
+    resume_optimization_run,
     serialize_optimization_result,
     serialize_optimization_run,
     stable_parameter_hash,
@@ -165,6 +168,28 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(
             normalized["strategy_schema_version"],
             STRATEGY_PARAMETER_SCHEMA_VERSION,
+        )
+
+    def test_rps_exit_threshold_must_be_below_entry_threshold(self) -> None:
+        with self.assertRaisesRegex(ValueError, "rps_exit_threshold must be lower"):
+            normalize_strategy_parameter_set(
+                {
+                    "rps_threshold": 70,
+                    "rps_exit_threshold": 80,
+                }
+            )
+
+    def test_build_parameter_sets_skips_invalid_rps_exit_pairs(self) -> None:
+        parameter_sets = build_parameter_sets(
+            {
+                "rps_threshold": [70, 80],
+                "rps_exit_threshold": [70, 75],
+            }
+        )
+
+        self.assertEqual(
+            {(item["rps_threshold"], item["rps_exit_threshold"]) for item in parameter_sets},
+            {(80, 70), (80, 75)},
         )
 
     def test_public_strategy_evaluator_normalizes_parameters(self) -> None:
@@ -509,6 +534,95 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(results[0].rank, 1)
         self.assertEqual(serialize_optimization_result(results[0])["parameters"]["rps_threshold"], 90)
         self.assertEqual(completed.best_result_id, results[0].id)
+
+    def test_list_optimization_runs_returns_latest_first(self) -> None:
+        with self.session_factory() as session:
+            first = create_optimization_run(
+                session,
+                market="us",
+                train_start_date=date(2024, 1, 1),
+                train_end_date=date(2024, 12, 31),
+                parameter_space={"rps_threshold": [85]},
+                require_data_ready=False,
+            )
+            second = create_optimization_run(
+                session,
+                market="us",
+                train_start_date=date(2025, 1, 1),
+                train_end_date=date(2025, 12, 31),
+                parameter_space={"rps_threshold": [90]},
+                require_data_ready=False,
+            )
+            runs = list_optimization_runs(session, market="us", limit=2)
+
+        self.assertEqual([run.id for run in runs], [second.id, first.id])
+
+    def test_resume_optimization_run_skips_existing_results(self) -> None:
+        calls: list[int] = []
+
+        def fake_backtest(*args, **kwargs):
+            calls.append(kwargs["rps_threshold"])
+            return _BacktestResult(
+                completed_trades=60,
+                average_trade_return="0.080000",
+                win_rate="0.580000",
+                worst_trade_return="-0.070000",
+            )
+
+        with self.session_factory() as session:
+            run = create_optimization_run(
+                session,
+                market="us",
+                train_start_date=date(2025, 1, 1),
+                train_end_date=date(2025, 12, 31),
+                parameter_space={"rps_threshold": [85, 90]},
+                require_data_ready=False,
+            )
+            parameter_sets = load_json(run.parameter_sets_json, default=[])
+            first_parameters = parameter_sets[0]
+            session.add(
+                OptimizationResult(
+                    optimization_run_id=run.id,
+                    parameter_hash=stable_parameter_hash(first_parameters),
+                    parameters_json=dump_json(first_parameters),
+                    train_metrics_json=dump_json(
+                        {
+                            "completed_trades": 60,
+                            "average_trade_return": "0.050000",
+                            "win_rate": "0.520000",
+                            "worst_trade_return": "-0.080000",
+                            "sample_penalty": "0.000000",
+                        }
+                    ),
+                    validation_metrics_json=None,
+                    score=Decimal("0.050000"),
+                    status="completed",
+                    completed_at=datetime.now(UTC),
+                )
+            )
+            run.status = "cancelled"
+            run.completed_parameter_sets = 1
+            run.completed_at = datetime.now(UTC)
+            run.error_message = "Stopped before migration."
+            session.commit()
+
+            resumed = resume_optimization_run(session, run.id)
+            with patch(
+                "stockanalyse_api.services.optimization_backtest.run_cup_handle_rps_backtest",
+                side_effect=fake_backtest,
+            ):
+                completed = execute_optimization_run(session, resumed.id)
+            results = list_optimization_results(session, run_id=run.id)
+
+        self.assertEqual(calls, [90])
+        self.assertEqual(completed.status, "completed")
+        self.assertEqual(completed.completed_parameter_sets, 2)
+        self.assertEqual(completed.failed_parameter_sets, 0)
+        self.assertEqual(len(results), 2)
+        self.assertEqual(
+            sorted(result.parameter_hash for result in results),
+            sorted({stable_parameter_hash(parameters) for parameters in parameter_sets}),
+        )
 
     def test_serialize_optimization_result_can_return_summary_metrics(self) -> None:
         with self.session_factory() as session:
@@ -2133,6 +2247,11 @@ class OptimizationBacktestTests(unittest.TestCase):
         assert not isinstance(trade, dict)
         self.assertEqual(trade.exit_reason, "rps_exit")
         self.assertEqual(trade.exit_date, "2025-01-06")
+        self.assertEqual(trade.rps_score, "95.00")
+        self.assertEqual(trade.rps_score_date, "2025-01-01")
+        self.assertEqual(trade.rps_detail, "RPS50 95.00")
+        self.assertEqual(trade.exit_rps_score, "79.00")
+        self.assertEqual(trade.exit_rps_score_date, "2025-01-03")
 
     def test_cancel_requested_run_stops_before_execution(self) -> None:
         with self.session_factory() as session:
@@ -2213,6 +2332,14 @@ class OptimizationBacktestTests(unittest.TestCase):
                             "exit_reason": "rps_exit",
                             "realized_return": "-0.080000",
                             "rps_score": "88.00",
+                            "rps_score_date": kwargs["start_date"].isoformat(),
+                            "rps_detail": "RPS50 88.00",
+                            "cup_handle_breakout_date": None,
+                            "fundamental_growth_summary": (
+                                "最近净利润同比 12.50%（净利润增长 2/2 年，最新财年 2025）"
+                            ),
+                            "exit_rps_score": "79.00",
+                            "exit_rps_score_date": "2026-03-09",
                         }
                     ],
                 }
@@ -2226,11 +2353,19 @@ class OptimizationBacktestTests(unittest.TestCase):
                 train_end_date=date(2026, 3, 13),
                 validation_start_date=date(2026, 3, 16),
                 validation_end_date=date(2026, 3, 31),
-                parameter_space={"rps_threshold": [80], "use_cup_handle": [False]},
+                parameter_space={
+                    "rps_threshold": [80],
+                    "use_cup_handle": [False],
+                    "rps_exit_threshold": [75],
+                },
                 require_data_ready=False,
             )
             parameters = build_parameter_sets(
-                {"rps_threshold": [80], "use_cup_handle": [False]}
+                {
+                    "rps_threshold": [80],
+                    "use_cup_handle": [False],
+                    "rps_exit_threshold": [75],
+                }
             )[0]
             result = OptimizationResult(
                 optimization_run_id=run.id,
@@ -2266,9 +2401,12 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(validation_trade["symbol"], "AAPL")
         self.assertEqual(
             validation_trade["entry_reason"],
-            "RPS 达到 80；未启用杯柄过滤；财务增长通过",
+            "2026-03-16 RPS 88.00（RPS50 88.00）；未启用杯柄过滤；财务增长 最近净利润同比 12.50%（净利润增长 2/2 年，最新财年 2025）",
         )
-        self.assertEqual(validation_trade["exit_reason_label"], "RPS 跌破退出阈值")
+        self.assertEqual(
+            validation_trade["exit_reason_label"],
+            "RPS 跌破退出阈值：2026-03-09 RPS 79.00 < 75",
+        )
         self.assertEqual(validation_trade["entry_price"], "100.000000")
         self.assertEqual(validation_trade["exit_price"], "92.000000")
 
@@ -2389,30 +2527,7 @@ class OptimizationBacktestTests(unittest.TestCase):
         self.assertEqual(detail["train"]["trades"][0]["symbol"], "AAPL")
         self.assertEqual(detail["train"]["trades"][0]["exit_reason_label"], "固定止损触发")
 
-    def test_optimization_result_detail_ignores_legacy_cache_for_current_metrics(self) -> None:
-        def fake_backtest(*args, **kwargs):
-            return SimpleNamespace(
-                to_dict=lambda: {
-                    "start_date": kwargs["start_date"].isoformat(),
-                    "end_date": kwargs["end_date"].isoformat(),
-                    "completed_trades": 1,
-                    "trades": [
-                        {
-                            "signal_date": kwargs["start_date"].isoformat(),
-                            "instrument_id": 1,
-                            "symbol": "AAPL",
-                            "entry_date": "2026-03-03",
-                            "entry_price": "100.000000",
-                            "exit_date": "2026-03-10",
-                            "exit_price": "108.000000",
-                            "exit_reason": "holding_period_elapsed",
-                            "realized_return": "0.080000",
-                            "rps_score": "88.00",
-                        }
-                    ],
-                }
-            )
-
+    def test_optimization_result_detail_reuses_current_cache_without_display_context(self) -> None:
         with self.session_factory() as session:
             run = create_optimization_run(
                 session,
@@ -2449,6 +2564,7 @@ class OptimizationBacktestTests(unittest.TestCase):
                     max_trades_returned=1000,
                     train_result_json=dump_json(
                         {
+                            "backtest_semantics_version": BACKTEST_SEMANTICS_VERSION,
                             "completed_trades": 1,
                             "trades": [
                                 {
@@ -2466,13 +2582,13 @@ class OptimizationBacktestTests(unittest.TestCase):
             session.commit()
 
             with patch(
-                "stockanalyse_api.services.optimization_backtest.run_cup_handle_rps_backtest",
-                side_effect=fake_backtest,
+                "stockanalyse_api.services.optimization_backtest.run_cup_handle_rps_backtest"
             ) as mocked_backtest:
                 detail = build_optimization_result_detail(session, result_id=result_id)
 
-        mocked_backtest.assert_called_once()
-        self.assertEqual(detail["train"]["trades"][0]["symbol"], "AAPL")
+        mocked_backtest.assert_not_called()
+        self.assertEqual(detail["train"]["trades"][0]["symbol"], "MSFT")
+        self.assertEqual(detail["train"]["trades"][0]["rps_score_date"], "2026-03-02")
 
     def test_optimization_result_detail_does_not_rerun_legacy_metrics_without_cache(self) -> None:
         with self.session_factory() as session:

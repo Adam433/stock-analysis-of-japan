@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GA 个体交易明细 · stockAnalyse</title>
+<style>
+  :root {
+    --bg: #111315; --panel: #191c20; --panel-subtle: #14171a;
+    --panel-border: #30363d; --text: #eef2f6; --muted: #9aa4b2;
+    --accent: #2dd4bf; --bad: #f43f5e; --good: #22c55e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Microsoft YaHei", sans-serif; font-size: 14px;
+  }
+  header {
+    padding: 16px 24px; border-bottom: 1px solid var(--panel-border);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    background: var(--panel);
+  }
+  h1 { margin: 0; font-size: 18px; }
+  main { padding: 16px 24px 28px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 8px; padding: 14px 16px; margin-bottom: 12px;
+  }
+  .muted { color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .stat { background: var(--panel-subtle); border-radius: 8px; padding: 10px; min-width: 0; }
+  .stat .label { color: var(--muted); font-size: 12px; }
+  .stat .value { font-weight: 700; margin-top: 4px; overflow-wrap: anywhere; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  select {
+    background: var(--panel-subtle); color: var(--text); border: 1px solid var(--panel-border);
+    border-radius: 8px; padding: 8px 10px; min-width: 260px;
+  }
+  button {
+    border: 1px solid var(--panel-border); border-radius: 8px; padding: 8px 12px;
+    background: transparent; color: var(--text); cursor: pointer; font-weight: 650;
+  }
+  button.active { background: var(--accent); color: #06201d; border-color: transparent; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--panel-border); }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  td { vertical-align: top; }
+  .reason { min-width: 170px; }
+  .gain { color: var(--good); }
+  .loss { color: var(--bad); }
+  .empty { color: var(--muted); padding: 20px 0; text-align: center; }
+  @media (max-width: 760px) {
+    header { align-items: flex-start; flex-direction: column; }
+    main { padding: 12px; }
+    .grid { grid-template-columns: 1fr 1fr; }
+    select { min-width: 100%; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>GA 个体交易明细</h1>
+    <div class="muted" id="subtitle">加载中...</div>
+  </div>
+  <button type="button" onclick="window.location.href='/dashboard'">返回 Dashboard</button>
+</header>
+<main>
+  <div class="card">
+    <div class="grid" id="summaryGrid"></div>
+  </div>
+  <div class="card">
+    <div class="controls">
+      <select id="windowSelect"></select>
+      <button type="button" class="active" data-period="validation">验证期</button>
+      <button type="button" data-period="train">训练期</button>
+    </div>
+    <div class="grid" id="windowGrid" style="margin-bottom: 10px;"></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>股票代码</th>
+            <th>信号日</th>
+            <th>买入时间</th>
+            <th>买入价</th>
+            <th>买入原因</th>
+            <th>卖出时间</th>
+            <th>卖出价</th>
+            <th>卖出原因</th>
+            <th>收益</th>
+            <th>资金</th>
+          </tr>
+        </thead>
+        <tbody id="tradeBody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="emptyState" style="display:none;">没有可显示的交易明细</div>
+  </div>
+</main>
+<script>
+  const individualId = __INDIVIDUAL_ID__;
+  let detail = null;
+  let activePeriod = 'validation';
+  let activeWindowIndex = 0;
+
+  function escapeHtml(value) {
+    return String(value ?? '—').replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[char]));
+  }
+
+  function pct(value) {
+    if (value === null || value === undefined || value === '—') return '—';
+    const number = Number(value);
+    if (!Number.isFinite(number)) return escapeHtml(value);
+    return `${(number * 100).toFixed(2)}%`;
+  }
+
+  function money(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    const number = Number(value);
+    if (!Number.isFinite(number)) return escapeHtml(value);
+    return number.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+
+  function formatHoldingDays(value) {
+    return value === null || value === undefined || value === '' ? '不限定' : value;
+  }
+
+  function exitLabel(reason) {
+    return {
+      stop_loss: '固定止损触发',
+      rps_exit: 'RPS 跌破退出阈值',
+      take_profit: '固定止盈触发',
+      holding_period_elapsed: '持有期结束',
+      data_end_mark: '数据末尾按收盘价估值',
+      window_end_mark: '窗口结束按收盘价估值',
+    }[reason] || reason || '—';
+  }
+
+  async function api(path) {
+    const res = await fetch(path);
+    if (!res.ok) {
+      let detailText = res.statusText;
+      try { detailText = (await res.json()).detail || detailText; } catch (_) {}
+      throw new Error(detailText);
+    }
+    return res.json();
+  }
+
+  function stat(label, value) {
+    return `<div class="stat"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div></div>`;
+  }
+
+  function individual() {
+    return detail?.individual || {};
+  }
+
+  function evaluation() {
+    return individual().evaluation || {};
+  }
+
+  function windows() {
+    const ev = evaluation();
+    if (Array.isArray(ev.window_evaluations) && ev.window_evaluations.length) {
+      return ev.window_evaluations;
+    }
+    return [{
+      name: 'primary',
+      status: ev.status,
+      score: ev.score,
+      train_metrics: ev.train_metrics,
+      validation_metrics: ev.validation_metrics,
+      train_result: ev.train_result,
+      validation_result: ev.validation_result,
+    }];
+  }
+
+  function params() {
+    return individual().parameters || evaluation().parameters || {};
+  }
+
+  function entryReason(trade = {}) {
+    const p = params();
+    const parts = [];
+    if (p.use_rps === false) {
+      parts.push('未启用 RPS 过滤');
+    } else if (trade.rps_score) {
+      const date = trade.rps_score_date || trade.signal_date || '—';
+      parts.push(`${date} RPS ${trade.rps_score}`);
+    } else {
+      parts.push(`RPS 达到 ${p.rps_threshold ?? '—'}`);
+    }
+    parts.push(p.use_cup_handle
+      ? `杯柄突破日 ${trade.cup_handle_breakout_date || '—'}`
+      : '未启用杯柄过滤');
+    if ((p.fundamental_growth_params || {}).enabled !== false) {
+      parts.push(`财务增长 ${trade.fundamental_growth_summary || '最近净利润同比 —'}`);
+    }
+    return parts.join('；');
+  }
+
+  function exitReason(trade) {
+    if (trade.exit_reason_label) return trade.exit_reason_label;
+    let label = exitLabel(trade.exit_reason);
+    if (trade.exit_reason === 'rps_exit' && trade.exit_rps_score) {
+      const threshold = (params().rps_exit_threshold ?? trade.rps_exit_threshold);
+      const thresholdPart = threshold === null || threshold === undefined || threshold === ''
+        ? ''
+        : ` < ${threshold}`;
+      const date = trade.exit_rps_score_date ? `${trade.exit_rps_score_date} ` : '';
+      label = `${label}：${date}RPS ${trade.exit_rps_score}${thresholdPart}`;
+    }
+    return label;
+  }
+
+  function activeWindow() {
+    return windows()[activeWindowIndex] || windows()[0] || {};
+  }
+
+  function activeSection() {
+    const window = activeWindow();
+    return activePeriod === 'validation' ? window.validation_result : window.train_result;
+  }
+
+  function activeMetrics() {
+    const window = activeWindow();
+    return activePeriod === 'validation' ? window.validation_metrics : window.train_metrics;
+  }
+
+  function renderSummary() {
+    const run = detail.ga_run || {};
+    const item = individual();
+    const p = params();
+    const aggregate = ((item.metrics || {}).aggregate || {});
+    document.getElementById('subtitle').textContent =
+      `个体 #${item.id} · GA #${run.id ?? '—'} · G${item.generation ?? '—'} / #${item.individual_index ?? '—'} · ${item.status || '—'}`;
+    document.getElementById('summaryGrid').innerHTML = [
+      stat('Fitness', item.fitness ?? '—'),
+      stat('参数', `RPS ${p.rps_threshold ?? '—'} · ${(p.selected_rps_windows || []).join('+') || '—'}`),
+      stat('卖点', `止损 ${p.stop_loss_pct ?? '—'} · RPS退 ${p.rps_exit_threshold ?? '—'} · 持有 ${formatHoldingDays(p.holding_days)}`),
+      stat('窗口评分', `均分 ${aggregate.average_window_score ?? '—'} · 最差 ${aggregate.minimum_window_score ?? '—'}`),
+      stat('交易', `${aggregate.average_completed_trades ?? '—'} 笔 · 最少 ${aggregate.minimum_completed_trades ?? '—'}`),
+      stat('回撤', pct(aggregate.max_drawdown)),
+      stat('种群', `代 ${run.completed_generations ?? '—'} / ${run.total_generations ?? '—'} · ${run.status || '—'}`),
+      stat('父代', `A ${item.parent_a_id ?? '—'} · B ${item.parent_b_id ?? '—'}`),
+    ].join('');
+  }
+
+  function renderWindowControls() {
+    const select = document.getElementById('windowSelect');
+    select.innerHTML = windows().map((window, index) =>
+      `<option value="${index}">${escapeHtml(window.name || `window_${index + 1}`)} · ${escapeHtml(window.status || '—')} · score ${escapeHtml(window.score)}</option>`
+    ).join('');
+    select.value = String(activeWindowIndex);
+  }
+
+  function renderWindowSummary() {
+    const metrics = activeMetrics() || {};
+    const section = activeSection() || {};
+    document.getElementById('windowGrid').innerHTML = [
+      stat('区间收益', `总 ${pct(metrics.total_return)} · 年化 ${pct(metrics.annualized_return || metrics.average_annualized_return)}`),
+      stat('交易', `${metrics.completed_trades ?? section.total_trades_available ?? '—'} 笔 · 胜率 ${pct(metrics.win_rate)}`),
+      stat('资金', `终值 ${money(metrics.final_capital || section.final_capital)} · 盈亏 ${money(metrics.total_profit || section.total_profit)}`),
+      stat('明细', `${section.trades_returned ?? 0} / ${section.total_trades_available ?? 0} 笔`),
+    ].join('');
+  }
+
+  function renderTrades() {
+    renderWindowSummary();
+    const section = activeSection();
+    const trades = section && Array.isArray(section.trades) ? section.trades : [];
+    const body = document.getElementById('tradeBody');
+    const empty = document.getElementById('emptyState');
+    empty.style.display = trades.length ? 'none' : 'block';
+    empty.textContent = section
+      ? '没有可显示的交易明细'
+      : '该 GA 个体没有保存交易明细；旧数据需要重跑后才会有完整明细。';
+    body.innerHTML = trades.map((trade) => {
+      const ret = Number(trade.realized_return);
+      const returnClass = Number.isFinite(ret) && ret >= 0 ? 'gain' : 'loss';
+      return `
+        <tr>
+          <td>${escapeHtml(trade.symbol)}</td>
+          <td>${escapeHtml(trade.signal_date)}</td>
+          <td>${escapeHtml(trade.entry_date)}</td>
+          <td>${escapeHtml(trade.entry_price)}</td>
+          <td class="reason">${escapeHtml(trade.entry_reason || entryReason(trade))}</td>
+          <td>${escapeHtml(trade.exit_date)}</td>
+          <td>${escapeHtml(trade.exit_price)}</td>
+          <td class="reason">${escapeHtml(exitReason(trade))}</td>
+          <td class="${returnClass}">${pct(trade.realized_return)}</td>
+          <td>${money(trade.realized_profit)}<div class="muted">${money(trade.invested_cash)} → ${money(trade.exit_cash)}</div></td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  document.getElementById('windowSelect').addEventListener('change', (event) => {
+    activeWindowIndex = Number(event.target.value || 0);
+    renderTrades();
+  });
+
+  document.querySelectorAll('[data-period]').forEach((button) => {
+    button.addEventListener('click', () => {
+      activePeriod = button.dataset.period;
+      document.querySelectorAll('[data-period]').forEach((item) =>
+        item.classList.toggle('active', item === button)
+      );
+      renderTrades();
+    });
+  });
+
+  api(`/backtests/ga/individuals/${individualId}/detail`)
+    .then((payload) => {
+      detail = payload;
+      renderSummary();
+      renderWindowControls();
+      renderTrades();
+    })
+    .catch((err) => {
+      document.getElementById('subtitle').textContent = `加载失败：${err.message}`;
+      document.getElementById('emptyState').style.display = 'block';
+    });
+</script>
+</body>
+</html>

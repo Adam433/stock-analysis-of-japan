@@ -24,6 +24,7 @@ from stockanalyse_api.domain.instruments.models import Instrument
 from stockanalyse_api.domain.market_data.models import MarketDataDaily
 from stockanalyse_api.services.dashboard import (
     _market_exchanges,
+    fundamental_growth_context_for_signal,
     get_overview,
     normalize_market,
 )
@@ -285,6 +286,10 @@ def _normalize_parameter_set(parameters: dict[str, object]) -> dict[str, object]
     return normalize_strategy_parameter_set(parameters)
 
 
+def _is_invalid_rps_exit_order_error(exc: ValueError) -> bool:
+    return "rps_exit_threshold must be lower than rps_threshold" in str(exc)
+
+
 def build_parameter_sets(
     parameter_space: dict[str, object] | None,
     *,
@@ -308,7 +313,12 @@ def build_parameter_sets(
     seen_hashes: set[str] = set()
 
     def append_combination(combination: tuple[object, ...]) -> None:
-        normalized = _normalize_raw_parameter_values(axis_names, combination)
+        try:
+            normalized = _normalize_raw_parameter_values(axis_names, combination)
+        except ValueError as exc:
+            if _is_invalid_rps_exit_order_error(exc):
+                return
+            raise
         parameter_hash = stable_parameter_hash(normalized)
         if parameter_hash in seen_hashes:
             return
@@ -322,12 +332,16 @@ def build_parameter_sets(
                 raise ValueError(
                     f"Parameter space expands to more than {max_parameter_sets} combinations."
                 )
+        if not parameter_sets:
+            raise ValueError("Parameter space produced no valid combinations.")
         return parameter_sets
 
     population_size = math.prod(len(values) for values in axis_values)
     if population_size <= max_parameter_sets:
         for combination in product(*axis_values):
             append_combination(combination)
+        if not parameter_sets:
+            raise ValueError("Parameter space produced no valid combinations.")
         rng = random.Random(random_seed)
         rng.shuffle(parameter_sets)
         return parameter_sets
@@ -339,7 +353,7 @@ def build_parameter_sets(
         attempts += 1
         append_combination(tuple(rng.choice(values) for values in axis_values))
     if not parameter_sets:
-        raise ValueError("Parameter space produced no combinations.")
+        raise ValueError("Parameter space produced no valid combinations.")
     return parameter_sets
 
 
@@ -630,6 +644,76 @@ def get_latest_optimization_run(session, *, market: str = "us") -> OptimizationR
         .order_by(OptimizationRun.started_at.desc(), OptimizationRun.id.desc())
         .limit(1)
     ).scalar_one_or_none()
+
+
+def list_optimization_runs(
+    session,
+    *,
+    market: str = "us",
+    limit: int = 50,
+) -> list[OptimizationRun]:
+    resolved_market = normalize_market(market)
+    bounded_limit = min(max(int(limit), 1), 200)
+    return list(
+        session.execute(
+            select(OptimizationRun)
+            .where(OptimizationRun.market == resolved_market)
+            .order_by(OptimizationRun.started_at.desc(), OptimizationRun.id.desc())
+            .limit(bounded_limit)
+        ).scalars()
+    )
+
+
+def _persisted_optimization_result_counts(session, run_id: int) -> tuple[int, int]:
+    rows = session.execute(
+        select(OptimizationResult.status, OptimizationResult.parameter_hash).where(
+            OptimizationResult.optimization_run_id == run_id
+        )
+    ).all()
+    completed_hashes: set[str] = set()
+    failed_hashes: set[str] = set()
+    for status, parameter_hash in rows:
+        if not parameter_hash:
+            continue
+        if status == "completed":
+            completed_hashes.add(str(parameter_hash))
+        elif status == "failed":
+            failed_hashes.add(str(parameter_hash))
+    return len(completed_hashes), len(failed_hashes - completed_hashes)
+
+
+def _sync_optimization_run_progress(session, run: OptimizationRun) -> tuple[int, int]:
+    completed, failed = _persisted_optimization_result_counts(session, run.id)
+    run.completed_parameter_sets = completed
+    run.failed_parameter_sets = failed
+    session.flush()
+    return completed, failed
+
+
+def resume_optimization_run(session, run_id: int) -> OptimizationRun:
+    run = session.get(OptimizationRun, run_id)
+    if run is None:
+        raise LookupError("Optimization run not found.")
+    if run.status in {"running", "cancel_requested"}:
+        raise ValueError("Optimization run is already running.")
+
+    completed, failed = _sync_optimization_run_progress(session, run)
+    total = int(run.total_parameter_sets or 0)
+    if total > 0 and completed + failed >= total:
+        _rank_results(session, run)
+        run.status = "completed" if completed else "failed"
+        if run.completed_at is None:
+            run.completed_at = datetime.now(UTC)
+        session.commit()
+        session.refresh(run)
+        raise ValueError("Optimization run has no remaining parameter sets.")
+
+    run.status = "running"
+    run.completed_at = None
+    run.error_message = None
+    session.commit()
+    session.refresh(run)
+    return run
 
 
 def list_optimization_results(
@@ -1921,22 +2005,55 @@ def _persist_evaluation_result(
         run.failed_parameter_sets += 1
 
 
-def _entry_reason(parameters: dict[str, object]) -> str:
-    parts = [
-        (
-            f"RPS 达到 {parameters.get('rps_threshold', '—')}"
-            if parameters.get("use_rps", True)
-            else "未启用 RPS 过滤"
-        ),
-        "杯柄突破" if parameters.get("use_cup_handle", True) else "未启用杯柄过滤",
-    ]
+def _trade_fundamental_growth_summary(trade: dict[str, object]) -> str | None:
+    summary = trade.get("fundamental_growth_summary")
+    if isinstance(summary, str) and summary.strip() and summary.strip() != "通过":
+        return summary
+    latest_yoy = trade.get("fundamental_growth_latest_yoy_pct")
+    if latest_yoy not in {None, ""}:
+        details: list[str] = []
+        ocf_yoy = trade.get("fundamental_operating_cash_flow_latest_yoy_pct")
+        if ocf_yoy not in {None, ""}:
+            details.append(f"经营现金流同比 {ocf_yoy}%")
+        suffix = f"（{'，'.join(details)}）" if details else ""
+        return f"最近净利润同比 {latest_yoy}%{suffix}"
+    return None
+
+
+def _entry_reason(parameters: dict[str, object], trade: dict[str, object]) -> str:
+    if parameters.get("use_rps", True):
+        rps_date = trade.get("rps_score_date") or trade.get("signal_date")
+        rps_score = trade.get("rps_score")
+        rps_detail = trade.get("rps_detail")
+        if rps_score is None:
+            rps_part = f"RPS 达到 {parameters.get('rps_threshold', '—')}"
+        else:
+            rps_part = f"{rps_date} RPS {rps_score}"
+            if rps_detail:
+                rps_part = f"{rps_part}（{rps_detail}）"
+    else:
+        rps_part = "未启用 RPS 过滤"
+
+    if parameters.get("use_cup_handle", True):
+        breakout_date = trade.get("cup_handle_breakout_date")
+        cup_part = f"杯柄突破日 {breakout_date or '—'}"
+    else:
+        cup_part = "未启用杯柄过滤"
+
+    parts = [rps_part, cup_part]
     fundamentals = parameters.get("fundamental_growth_params")
     if isinstance(fundamentals, dict) and fundamentals.get("enabled"):
-        parts.append("财务增长通过")
+        summary = _trade_fundamental_growth_summary(trade)
+        parts.append(f"财务增长 {summary or '最近净利润同比 —'}")
     return "；".join(parts)
 
 
-def _exit_reason_label(reason: object) -> str:
+def _exit_reason_label(
+    reason: object,
+    *,
+    trade: dict[str, object] | None = None,
+    parameters: dict[str, object] | None = None,
+) -> str:
     labels = {
         "stop_loss": "固定止损触发",
         "rps_exit": "RPS 跌破退出阈值",
@@ -1945,7 +2062,17 @@ def _exit_reason_label(reason: object) -> str:
         "data_end_mark": "数据末尾按收盘价估值",
         "window_end_mark": "窗口结束按收盘价估值",
     }
-    return labels.get(str(reason), str(reason or "未知"))
+    base = labels.get(str(reason), str(reason or "未知"))
+    if str(reason) != "rps_exit" or trade is None:
+        return base
+    rps_score = trade.get("exit_rps_score")
+    rps_date = trade.get("exit_rps_score_date")
+    threshold = parameters.get("rps_exit_threshold") if parameters else None
+    if rps_score is None:
+        return base
+    threshold_part = f" < {threshold}" if threshold not in {None, ""} else ""
+    date_part = f"{rps_date} " if rps_date else ""
+    return f"{base}：{date_part}RPS {rps_score}{threshold_part}"
 
 
 def _annotate_trades(
@@ -1954,17 +2081,126 @@ def _annotate_trades(
     period: str,
     parameters: dict[str, object],
 ) -> list[dict[str, object]]:
-    entry_reason = _entry_reason(parameters)
     return [
         {
             **trade,
             "period": period,
-            "entry_reason": entry_reason,
-            "exit_reason_label": _exit_reason_label(trade.get("exit_reason")),
+            "entry_reason": _entry_reason(parameters, trade),
+            "exit_reason_label": _exit_reason_label(
+                trade.get("exit_reason"),
+                trade=trade,
+                parameters=parameters,
+            ),
             "rps_exit_threshold": parameters.get("rps_exit_threshold"),
         }
         for trade in trades
     ]
+
+
+def _enrich_trade_context(
+    session,
+    trades: object,
+    *,
+    parameters: dict[str, object],
+    cache: dict[tuple[int, str], dict[str, str | None]] | None = None,
+) -> list[dict[str, object]]:
+    if not isinstance(trades, list):
+        return []
+    fundamentals = parameters.get("fundamental_growth_params")
+    if not isinstance(fundamentals, dict) or not fundamentals.get("enabled"):
+        return [dict(trade) for trade in trades if isinstance(trade, dict)]
+    fundamental_params = _fundamental_params_from_payload(fundamentals)
+    enriched: list[dict[str, object]] = []
+    context_cache = cache if cache is not None else {}
+    for trade in trades:
+        if not isinstance(trade, dict):
+            continue
+        row = dict(trade)
+        row.setdefault("rps_score_date", row.get("signal_date"))
+        if row.get("fundamental_growth_summary") in {None, "", "通过"}:
+            instrument_id = row.get("instrument_id")
+            signal_date_raw = row.get("signal_date")
+            try:
+                key = (int(instrument_id), str(signal_date_raw))
+                signal_date = date.fromisoformat(str(signal_date_raw))
+            except (TypeError, ValueError):
+                key = None  # type: ignore[assignment]
+                signal_date = None
+            if key is not None and signal_date is not None:
+                context = context_cache.get(key)
+                if context is None:
+                    context = fundamental_growth_context_for_signal(
+                        session,
+                        instrument_id=key[0],
+                        signal_date=signal_date,
+                        params=fundamental_params,
+                    )
+                    context_cache[key] = context
+                for field_name, value in context.items():
+                    if value is not None:
+                        row[field_name] = value
+        enriched.append(row)
+    return enriched
+
+
+def _enrich_result_trade_context(
+    session,
+    result: object,
+    *,
+    parameters: dict[str, object],
+    cache: dict[tuple[int, str], dict[str, str | None]] | None = None,
+) -> None:
+    if not isinstance(result, dict):
+        return
+    result["trades"] = _enrich_trade_context(
+        session,
+        result.get("trades", []),
+        parameters=parameters,
+        cache=cache,
+    )
+
+
+def enrich_evaluation_trade_context(
+    session,
+    evaluation: object,
+    *,
+    parameters: dict[str, object] | None = None,
+) -> None:
+    if not isinstance(evaluation, dict):
+        return
+    resolved_parameters = parameters or evaluation.get("parameters")
+    if not isinstance(resolved_parameters, dict):
+        return
+    cache: dict[tuple[int, str], dict[str, str | None]] = {}
+    _enrich_result_trade_context(
+        session,
+        evaluation.get("train_result"),
+        parameters=resolved_parameters,
+        cache=cache,
+    )
+    _enrich_result_trade_context(
+        session,
+        evaluation.get("validation_result"),
+        parameters=resolved_parameters,
+        cache=cache,
+    )
+    windows = evaluation.get("window_evaluations")
+    if isinstance(windows, list):
+        for window in windows:
+            if not isinstance(window, dict):
+                continue
+            _enrich_result_trade_context(
+                session,
+                window.get("train_result"),
+                parameters=resolved_parameters,
+                cache=cache,
+            )
+            _enrich_result_trade_context(
+                session,
+                window.get("validation_result"),
+                parameters=resolved_parameters,
+                cache=cache,
+            )
 
 
 def _result_from_metrics(
@@ -2029,9 +2265,8 @@ def _detail_cache_matches_metrics(
         return validation_result is None
     if validation_result is None:
         return False
-    return _result_semantics_version(validation_result) == _metrics_semantics_version(
-        validation_metrics
-    )
+    expected_validation_version = _metrics_semantics_version(validation_metrics)
+    return _result_semantics_version(validation_result) == expected_validation_version
 
 
 def _load_detail_cache(
@@ -2233,14 +2468,25 @@ def build_optimization_result_detail(
             )
             session.commit()
 
+    enrichment_cache: dict[tuple[int, str], dict[str, str | None]] = {}
     train_trades = _annotate_trades(
-        train_result.get("trades", []),  # type: ignore[arg-type]
+        _enrich_trade_context(
+            session,
+            train_result.get("trades", []),
+            parameters=parameters,
+            cache=enrichment_cache,
+        ),
         period="train",
         parameters=parameters,
     )
     validation_trades = (
         _annotate_trades(
-            validation_result.get("trades", []),  # type: ignore[union-attr,arg-type]
+            _enrich_trade_context(
+                session,
+                validation_result.get("trades", []),  # type: ignore[union-attr]
+                parameters=parameters,
+                cache=enrichment_cache,
+            ),
             period="validation",
             parameters=parameters,
         )
@@ -2374,6 +2620,22 @@ def execute_optimization_run(session, run_id: int) -> OptimizationRun:
     if not isinstance(parameter_sets, list):
         parameter_sets = []
     parameter_sets = [parameters for parameters in parameter_sets if isinstance(parameters, dict)]
+    _sync_optimization_run_progress(session, run)
+    persisted_hashes = {
+        str(parameter_hash)
+        for parameter_hash in session.execute(
+            select(OptimizationResult.parameter_hash).where(
+                OptimizationResult.optimization_run_id == run.id
+            )
+        ).scalars()
+        if parameter_hash
+    }
+    if persisted_hashes:
+        parameter_sets = [
+            parameters
+            for parameters in parameter_sets
+            if stable_parameter_hash(parameters) not in persisted_hashes
+        ]
     _, metadata = _split_parameter_space_metadata(load_json(run.parameter_space_json, default={}))
     configured_max_workers = _configured_max_workers_from_metadata(metadata)
     max_tasks_per_child = _configured_max_tasks_per_child_from_metadata(metadata)
