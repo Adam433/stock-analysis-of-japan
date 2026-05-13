@@ -167,6 +167,8 @@ export default async function BacktestsPage({
         <span>回测</span>
         <span>/</span>
         <Link href="/experiments">实验</Link>
+        <span>/</span>
+        <Link href="/x-signal-tracker">X 信号追踪</Link>
       </nav>
       <WorkflowTrustBanner workflowLabel="回测工作流" health={health} error={healthError} />
       {legacyRunCount ? (

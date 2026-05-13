@@ -18,6 +18,7 @@ from stockanalyse_api.api.routes import stocks_router
 from stockanalyse_api.api.routes import strategy_config_router
 from stockanalyse_api.api.routes import strategy_presets_router
 from stockanalyse_api.api.routes import watchlist_router
+from stockanalyse_api.api.routes import x_signals_router
 from stockanalyse_api.services.operations.auto_refresh import AutoRefreshRuntime
 
 _DEFAULT_CORS_ORIGINS = [
@@ -73,6 +74,7 @@ def create_app(*, auto_refresh_runtime: AutoRefreshRuntime | None = None) -> Fas
     app.include_router(screening_router)
     app.include_router(stocks_router)
     app.include_router(watchlist_router)
+    app.include_router(x_signals_router)
     app.include_router(backtests_router)
     app.include_router(dashboard_router)
     return app

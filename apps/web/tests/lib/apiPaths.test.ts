@@ -10,6 +10,8 @@ describe("apiPaths", () => {
     expect(paths.screenRunsLatest).toBe("http://localhost:8000/screen/runs/latest");
     expect(paths.screenTradeDates).toBe("http://localhost:8000/screen/trade-dates");
     expect(paths.watchlist).toBe("http://localhost:8000/watchlist");
+    expect(paths.xSignalDashboard).toBe("http://localhost:8000/x-signals/dashboard");
+    expect(paths.xSignalAuthors).toBe("http://localhost:8000/x-signals/authors");
     expect(paths.backtestDefaults).toBe("http://localhost:8000/backtests/defaults");
     expect(paths.backtestRuns).toBe("http://localhost:8000/backtests/runs");
     expect(paths.backtestRunsLatest).toBe("http://localhost:8000/backtests/runs/latest");
@@ -20,6 +22,9 @@ describe("apiPaths", () => {
     const paths = apiPaths("http://localhost:8000");
 
     expect(paths.watchlistEntry(61)).toBe("http://localhost:8000/watchlist/61");
+    expect(paths.xSignalFetchRequests(3)).toBe("http://localhost:8000/x-signals/authors/3/fetch-requests");
+    expect(paths.xSignalImportPosts(3)).toBe("http://localhost:8000/x-signals/authors/3/posts/import");
+    expect(paths.xSignalAnalyzeAuthor(3)).toBe("http://localhost:8000/x-signals/authors/3/analyze");
     expect(paths.backtestRunExecute(9)).toBe("http://localhost:8000/backtests/runs/9/execute");
     expect(paths.portfolioReturnBacktestResult(9)).toBe("http://localhost:8000/backtests/portfolio-return/runs/9/result");
     expect(paths.portfolioReturnBacktestCompare([9, 11])).toBe(

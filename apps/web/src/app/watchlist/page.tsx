@@ -48,6 +48,8 @@ export default async function WatchlistPage() {
         <span>观察列表</span>
         <span>/</span>
         <Link href="/backtests">回测</Link>
+        <span>/</span>
+        <Link href="/x-signal-tracker">X 信号追踪</Link>
       </nav>
       <WorkflowTrustBanner workflowLabel="观察列表工作流" health={health} error={healthError} />
       <WatchlistReviewPanel apiBaseUrl={apiBaseUrl} initialEntries={entries} initialError={error} />

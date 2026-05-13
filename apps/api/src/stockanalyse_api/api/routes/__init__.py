@@ -7,6 +7,7 @@ from stockanalyse_api.api.routes.stocks import router as stocks_router
 from stockanalyse_api.api.routes.strategy_config import router as strategy_config_router
 from stockanalyse_api.api.routes.strategy_presets import router as strategy_presets_router
 from stockanalyse_api.api.routes.watchlist import router as watchlist_router
+from stockanalyse_api.api.routes.x_signals import router as x_signals_router
 
 __all__ = [
     "backtests_router",
@@ -17,4 +18,5 @@ __all__ = [
     "screening_router",
     "stocks_router",
     "watchlist_router",
+    "x_signals_router",
 ]

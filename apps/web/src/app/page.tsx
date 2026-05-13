@@ -81,6 +81,8 @@ export default async function HomePage() {
         <Link href="/backtests">回测</Link>
         <span>/</span>
         <Link href="/experiments">实验</Link>
+        <span>/</span>
+        <Link href="/x-signal-tracker">X 信号追踪</Link>
       </nav>
       <section className="hero-panel">
         <div className="hero-copy">

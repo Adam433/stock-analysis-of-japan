@@ -14,6 +14,7 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from stockanalyse_api.domain.backtests.models import GaEvent, GaIndividual, GaRun
+from stockanalyse_api.services.dashboard_strategy_backtest import BacktestCancelledError
 from stockanalyse_api.services.optimization_backtest import evaluate_strategy_parameter_set
 from stockanalyse_api.services.strategy_parameters import (
     DEFAULT_OPTIMIZATION_FUNDAMENTAL_GROWTH_PARAMS,
@@ -1050,10 +1051,13 @@ def _evaluate_candidate(
     market_filter_cache: dict[tuple[object, ...], set[date]],
     relative_strength_cache: dict[tuple[object, ...], dict[int, dict[str, object]]],
     benchmark_cache: dict[tuple[object, ...], dict[str, object]],
+    should_cancel=None,
 ) -> dict[str, object]:
     candidate_started_at = time.perf_counter()
     evaluations: list[dict[str, object]] = []
     for window in evaluation_windows:
+        if should_cancel is not None and should_cancel():
+            raise BacktestCancelledError()
         cache_key = _window_cache_key(
             run=run,
             parameters=parameters,
@@ -1090,6 +1094,7 @@ def _evaluate_candidate(
             benchmark_cache=benchmark_cache,
             prefer_broad_candidate_cache=prefer_broad_candidate_cache,
             max_broad_candidate_cache_dates=max_broad_candidate_cache_dates,
+            should_cancel=should_cancel,
         )
         _add_seconds_stat(cache_stats, "window_evaluation_seconds", time.perf_counter() - window_started_at)
         compact_evaluation = _compact_ga_evaluation(evaluation)
@@ -1319,9 +1324,12 @@ def _evaluate_holdout(
     market_filter_cache: dict[tuple[object, ...], set[date]],
     relative_strength_cache: dict[tuple[object, ...], dict[int, dict[str, object]]],
     benchmark_cache: dict[tuple[object, ...], dict[str, object]],
+    should_cancel=None,
 ) -> None:
     if run.holdout_start_date is None or run.holdout_end_date is None or best_individual is None:
         return
+    if should_cancel is not None and should_cancel():
+        raise BacktestCancelledError()
     parameters = load_json(best_individual.parameters_json, default={})
     if not isinstance(parameters, dict):
         return
@@ -1348,6 +1356,7 @@ def _evaluate_holdout(
         benchmark_cache=benchmark_cache,
         prefer_broad_candidate_cache=prefer_broad_candidate_cache,
         max_broad_candidate_cache_dates=max_broad_candidate_cache_dates,
+        should_cancel=should_cancel,
     )
     compact_holdout_evaluation = _compact_ga_evaluation(holdout_evaluation)
     existing_evaluation = load_json(best_individual.evaluation_json, default={})
@@ -1455,17 +1464,44 @@ def execute_ga_run(session, run_id: int) -> GaRun:
     benchmark_cache: dict[tuple[object, ...], dict[str, object]] = {}
     evaluation_cache: dict[tuple[object, ...], dict[str, object]] = {}
     cache_stats = _new_ga_cache_stats()
+    cancel_state = {"checked_at": 0.0, "cached": run.status == "cancel_requested"}
+
+    def should_cancel() -> bool:
+        now = time.monotonic()
+        if now - cancel_state["checked_at"] < 0.5:
+            return bool(cancel_state["cached"])
+        cancel_state["checked_at"] = now
+        try:
+            session.refresh(run)
+        except Exception:
+            return bool(cancel_state["cached"])
+        cancel_state["cached"] = run.status in {"cancel_requested", "cancelled"}
+        return bool(cancel_state["cached"])
+
+    def finalize_cancel() -> GaRun:
+        run.status = "cancelled"
+        run.completed_at = datetime.now(UTC)
+        _log_ga_event(
+            session,
+            run_id=run.id,
+            generation=None,
+            event_type="run_cancelled",
+            event={
+                "completed_individuals": run.completed_individuals,
+                "failed_individuals": run.failed_individuals,
+                "completed_generations": run.completed_generations,
+            },
+        )
+        session.commit()
+        session.refresh(run)
+        return run
 
     try:
         for generation in range(run.max_generations):
             generation_started_at = time.perf_counter()
             generation_cache_baseline = _cache_stats_baseline(cache_stats)
-            session.refresh(run)
-            if run.status == "cancel_requested":
-                run.status = "cancelled"
-                run.completed_at = datetime.now(UTC)
-                session.commit()
-                return run
+            if should_cancel():
+                return finalize_cancel()
             generation_individuals: list[GaIndividual] = []
             existing_generation = existing_by_generation.setdefault(generation, {})
             seen_generation_hashes = {
@@ -1496,12 +1532,8 @@ def execute_ga_run(session, run_id: int) -> GaRun:
                     generation_individuals.append(existing_individual)
                     continue
 
-                session.refresh(run)
-                if run.status == "cancel_requested":
-                    run.status = "cancelled"
-                    run.completed_at = datetime.now(UTC)
-                    session.commit()
-                    return run
+                if should_cancel():
+                    return finalize_cancel()
 
                 candidate_hash = _candidate_parameter_hash(candidate)
                 if candidate_hash in seen_generation_hashes:
@@ -1547,6 +1579,7 @@ def execute_ga_run(session, run_id: int) -> GaRun:
                     market_filter_cache=market_filter_cache,
                     relative_strength_cache=relative_strength_cache,
                     benchmark_cache=benchmark_cache,
+                    should_cancel=should_cancel,
                 )
                 individual = _persist_individual(
                     session,
@@ -1672,12 +1705,17 @@ def execute_ga_run(session, run_id: int) -> GaRun:
             market_filter_cache=market_filter_cache,
             relative_strength_cache=relative_strength_cache,
             benchmark_cache=benchmark_cache,
+            should_cancel=should_cancel,
         )
         run.status = "completed"
         run.completed_at = datetime.now(UTC)
         session.commit()
         session.refresh(run)
         return run
+    except BacktestCancelledError:
+        session.rollback()
+        session.refresh(run)
+        return finalize_cancel()
     except Exception as exc:
         run.status = "failed"
         run.error_message = f"{type(exc).__name__}: {exc}"
@@ -1751,11 +1789,7 @@ def cancel_ga_run(session, run_id: int) -> GaRun:
     if run is None:
         raise LookupError("GA run not found.")
     if run.status == "running":
-        if _is_ga_run_active(run_id):
-            run.status = "cancel_requested"
-        else:
-            run.status = "cancelled"
-            run.completed_at = datetime.now(UTC)
+        run.status = "cancel_requested"
     elif run.status == "cancel_requested" and not _is_ga_run_active(run_id):
         run.status = "cancelled"
         run.completed_at = datetime.now(UTC)

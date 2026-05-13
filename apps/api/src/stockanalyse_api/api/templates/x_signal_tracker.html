@@ -1,0 +1,869 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>X 跟投跟踪看板 · stockAnalyse</title>
+<style>
+  :root {
+    --bg: #101214;
+    --panel: #171b20;
+    --panel-2: #20262d;
+    --line: #323a44;
+    --text: #edf2f7;
+    --muted: #9aa6b2;
+    --good: #22c55e;
+    --bad: #ef4444;
+    --warn: #f59e0b;
+    --info: #38bdf8;
+    --chip: #2b333d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+  }
+  header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--line);
+    background: #15191e;
+  }
+  h1, h2, h3, p { margin: 0; }
+  h1 { font-size: 20px; font-weight: 700; }
+  h2 { font-size: 15px; font-weight: 700; margin-bottom: 10px; }
+  h3 { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+  main { padding: 18px 24px 28px; }
+  button, input, select {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel-2);
+    color: var(--text);
+    font: inherit;
+  }
+  button {
+    cursor: pointer;
+    min-height: 34px;
+    padding: 0 12px;
+    font-weight: 650;
+  }
+  button.primary { background: #0f766e; border-color: #0d9488; }
+  button:disabled { cursor: not-allowed; opacity: .55; }
+  input, select { height: 34px; padding: 0 10px; }
+  a { color: var(--info); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .sub { color: var(--muted); font-size: 12px; line-height: 1.45; margin-top: 5px; }
+  .topline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .status { color: var(--muted); font-size: 12px; padding-top: 3px; }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .stat {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 12px;
+  }
+  .label { color: var(--muted); font-size: 12px; }
+  .value { font-size: 22px; font-weight: 750; margin-top: 4px; }
+  .grid {
+    display: grid;
+    grid-template-columns: minmax(260px, 340px) 1fr;
+    gap: 14px;
+    align-items: start;
+  }
+  section {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 14px;
+  }
+  .form-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 8px; }
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .toolbar input { min-width: 210px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+  th, td {
+    border-bottom: 1px solid var(--line);
+    padding: 9px 8px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 650;
+    background: #14181d;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  td { overflow-wrap: anywhere; }
+  tbody tr:hover { background: #1b2128; }
+  .symbol-group-row td {
+    background: #0f1419;
+    color: #dce5ee;
+    font-weight: 700;
+    border-top: 1px solid #46515e;
+  }
+  .symbol-group-row:hover { background: #0f1419; }
+  .group-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .scroll { max-height: 72vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 22px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: var(--chip);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 650;
+    white-space: nowrap;
+  }
+  .chip.good { color: #bbf7d0; background: #113a24; }
+  .chip.bad { color: #fecaca; background: #421919; }
+  .chip.warn { color: #fde68a; background: #412d0c; }
+  .chip.info { color: #bae6fd; background: #123447; }
+  .num.good { color: var(--good); }
+  .num.bad { color: var(--bad); }
+  .muted { color: var(--muted); }
+  .author-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .author-row:last-child { border-bottom: 0; }
+  button.link {
+    min-height: 28px;
+    padding: 0 8px;
+    color: var(--info);
+    background: transparent;
+    border-color: var(--line);
+    font-size: 12px;
+  }
+  .detail-row td {
+    padding: 0;
+    background: #11161b;
+  }
+  .details-panel {
+    padding: 12px;
+    border-top: 1px solid var(--line);
+  }
+  .details-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .mention-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 10px;
+  }
+  .mention-item {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px;
+    background: #151a20;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .mention-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 7px;
+  }
+  .mention-excerpt {
+    max-height: 280px;
+    overflow: auto;
+    white-space: pre-wrap;
+    color: #d6dde6;
+  }
+  .proxy-note {
+    margin-bottom: 7px;
+    color: #fde68a;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .mention-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .mention-actions select { height: 28px; font-size: 12px; }
+  .empty {
+    padding: 22px;
+    text-align: center;
+    color: var(--muted);
+    border: 1px dashed var(--line);
+    border-radius: 8px;
+  }
+  .error {
+    border-color: #7f1d1d;
+    background: #2a1414;
+    color: #fecaca;
+  }
+  @media (max-width: 980px) {
+    header { flex-direction: column; }
+    .stats, .grid { grid-template-columns: 1fr; }
+    .scroll { max-height: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <div class="topline">
+      <h1>X 跟投跟踪看板</h1>
+      <span class="chip info">本地数据库</span>
+    </div>
+    <p class="sub">展示 X 用户发言、明确提到的股票、方向分组、起点收盘价、最新收盘价和方向收益。</p>
+  </div>
+  <div class="topline">
+    <button id="refreshBtn" class="primary" type="button">刷新</button>
+    <span id="status" class="status">未加载</span>
+  </div>
+</header>
+
+<main>
+  <div class="stats">
+    <div class="stat"><div class="label">跟踪用户</div><div class="value" id="authorCount">-</div></div>
+    <div class="stat"><div class="label">已入库发言</div><div class="value" id="postCount">-</div></div>
+    <div class="stat"><div class="label">股票记录</div><div class="value" id="mentionCount">-</div></div>
+    <div class="stat"><div class="label">方向分组</div><div class="value" id="symbolCount">-</div></div>
+  </div>
+
+  <div class="grid">
+    <section>
+      <h2>跟踪用户</h2>
+      <div class="form-row">
+        <input id="handleInput" placeholder="@tig88411109" autocomplete="off" />
+        <button id="addAuthorBtn" type="button">添加</button>
+      </div>
+      <p class="sub">页面只负责维护用户列表和展示数据库结果；抓取与 LLM 二次判断由 Codex 后台流程执行，完成后刷新即可。</p>
+      <div id="authorList" style="margin-top: 12px;"></div>
+    </section>
+
+    <section>
+      <h2>标的聚合</h2>
+      <div class="toolbar">
+        <input id="searchInput" placeholder="搜索股票、公司、用户、摘录" />
+        <select id="authorFilter"><option value="">全部用户</option></select>
+        <select id="sentimentFilter">
+          <option value="">全部方向</option>
+          <option value="bullish">看多</option>
+          <option value="bearish">看空</option>
+          <option value="unknown_llm">无法判断</option>
+          <option value="unknown_pending">未知</option>
+        </select>
+        <select id="sortSelect">
+          <option value="latest">按标的最近提及</option>
+          <option value="symbol">按股票代码</option>
+          <option value="returnDesc">组内方向收益最高</option>
+          <option value="returnAsc">组内方向收益最低</option>
+          <option value="count">组内提及最多</option>
+        </select>
+      </div>
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 15%;">标的</th>
+              <th style="width: 12%;">用户</th>
+              <th style="width: 12%;">方向</th>
+              <th style="width: 13%;">提及</th>
+              <th style="width: 16%;">时间</th>
+              <th style="width: 15%;">价格</th>
+              <th style="width: 10%;">方向收益</th>
+              <th style="width: 7%;">操作</th>
+            </tr>
+          </thead>
+          <tbody id="symbolRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+const state = {
+  dashboard: null,
+  groups: [],
+  expandedGroups: new Set(),
+};
+
+const $ = (id) => document.getElementById(id);
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function fmtInt(value) {
+  return Number(value || 0).toLocaleString("zh-CN");
+}
+
+function fmtPrice(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "-";
+  return num.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
+}
+
+function fmtPct(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  const num = Number(value) * 100;
+  if (!Number.isFinite(num)) return "-";
+  const sign = num > 0 ? "+" : "";
+  return `${sign}${num.toFixed(2)}%`;
+}
+
+function returnClass(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num === 0) return "";
+  return num > 0 ? "good" : "bad";
+}
+
+function numericOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function sentimentText(value) {
+  return {
+    bullish: "看多",
+    bearish: "看空",
+    neutral: "中性",
+    unknown: "无法判断",
+  }[value] || value || "无法判断";
+}
+
+function sentimentClass(value) {
+  if (value === "bullish") return "good";
+  if (value === "bearish") return "bad";
+  if (value === "neutral") return "warn";
+  return "";
+}
+
+function isLlmJudgedMention(mention) {
+  if (mention.sentiment_source === "llm" || mention.llm_sentiment) return true;
+  return Boolean(mention.analysis_source)
+    && !["extraction-v1", "heuristic-v1"].includes(mention.analysis_source);
+}
+
+function mentionJudgmentState(mention) {
+  if (mention.manual_sentiment || mention.sentiment_source === "manual") return "manual";
+  if (isLlmJudgedMention(mention)) return "llm";
+  return "pending";
+}
+
+function sentimentTextForMention(mention) {
+  if ((mention.sentiment || "unknown") === "unknown" && mentionJudgmentState(mention) === "pending") {
+    return "未知";
+  }
+  return sentimentText(mention.sentiment);
+}
+
+function sentimentTextForGroup(group) {
+  if ((group.primary_sentiment || "unknown") === "unknown" && group.judgment_state === "pending") {
+    return "未知";
+  }
+  return sentimentText(group.primary_sentiment);
+}
+
+function sentimentSourceTextForMention(mention) {
+  const state = mentionJudgmentState(mention);
+  if (state === "manual") return "手工";
+  if (state === "llm") return "LLM";
+  return "待 LLM";
+}
+
+function sentimentSourceTextForGroup(group) {
+  if (group.judgment_state === "manual") return "手工修改";
+  if (group.judgment_state === "llm") return "LLM 判断";
+  return "等待 LLM";
+}
+
+async function api(path, options = {}) {
+  const res = await fetch(path, {
+    headers: {"Content-Type": "application/json"},
+    ...options,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+  return data;
+}
+
+function setStatus(text, isError = false) {
+  const el = $("status");
+  el.textContent = text;
+  el.className = isError ? "status error" : "status";
+}
+
+function buildGroups(mentions) {
+  const map = new Map();
+  for (const mention of mentions || []) {
+    const direction = mention.sentiment || "unknown";
+    const judgmentState = mentionJudgmentState(mention);
+    const key = `${mention.author_id}:${mention.symbol}:${direction}:${judgmentState}`;
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        author_id: mention.author_id,
+        author_handle: mention.author_handle,
+        symbol: mention.symbol,
+        direction,
+        exchange: mention.exchange,
+        company_name: mention.company_name,
+        mention_kind: mention.mention_kind,
+        sector_label: mention.sector_label,
+        is_sector_proxy: false,
+        has_direct_stock: false,
+        sector_labels: new Set(),
+        latest_price_date: mention.latest_price_date,
+        latest_close: mention.latest_close,
+        mentions: [],
+        total_count: 0,
+        sentiment_counts: {},
+        judgment_state: judgmentState,
+        has_llm_judgment: false,
+        has_manual_sentiment: false,
+      });
+    }
+    const group = map.get(key);
+    group.mentions.push(mention);
+    group.total_count += Number(mention.mention_count || 1);
+    group.is_sector_proxy = group.is_sector_proxy || Boolean(mention.is_sector_proxy);
+    group.has_direct_stock = group.has_direct_stock || mention.mention_kind === "stock";
+    group.has_llm_judgment = group.has_llm_judgment || isLlmJudgedMention(mention);
+    group.has_manual_sentiment = group.has_manual_sentiment || Boolean(mention.manual_sentiment);
+    if (mention.is_sector_proxy && mention.sector_label) group.sector_labels.add(mention.sector_label);
+    group.sentiment_counts[mention.sentiment] = (group.sentiment_counts[mention.sentiment] || 0) + 1;
+    if (!group.company_name && mention.company_name) group.company_name = mention.company_name;
+    if (!group.latest_close && mention.latest_close) group.latest_close = mention.latest_close;
+    if (!group.latest_price_date && mention.latest_price_date) group.latest_price_date = mention.latest_price_date;
+  }
+
+  return Array.from(map.values()).map((group) => {
+    const ascending = [...group.mentions].sort((a, b) => (
+      String(a.mention_date).localeCompare(String(b.mention_date))
+    ));
+    group.mentions = [...ascending].reverse();
+    group.first_mention = ascending[0] || {};
+    group.entry_mention = ascending.find((item) => numericOrNull(item.mention_close) !== null)
+      || group.first_mention;
+    group.latest_mention = group.mentions[0] || {};
+    group.first_date = group.first_mention.mention_date || null;
+    group.entry_date = group.entry_mention.mention_date || null;
+    group.last_date = group.latest_mention.mention_date || null;
+    group.sector_labels = Array.from(group.sector_labels || []);
+    group.days = group.mentions.length;
+    group.primary_sentiment = group.direction;
+    const entryClose = numericOrNull(group.entry_mention.mention_close);
+    const latestClose = numericOrNull(group.latest_close);
+    group.raw_return = entryClose && latestClose !== null
+      ? (latestClose - entryClose) / entryClose
+      : null;
+    group.signal_return = group.direction === "bearish" && group.raw_return !== null
+      ? -group.raw_return
+      : group.raw_return;
+    return group;
+  });
+}
+
+function renderAuthors(authors) {
+  $("authorCount").textContent = fmtInt(authors.length);
+  const options = authors.map((author) => (
+    `<option value="${author.id}">${escapeHtml(author.handle)}</option>`
+  )).join("");
+  $("authorFilter").innerHTML = '<option value="">全部用户</option>' + options;
+  $("authorList").innerHTML = authors.length ? authors.map((author) => `
+    <div class="author-row">
+      <div>
+        <strong>${escapeHtml(author.handle)}</strong>
+        <div class="sub">${escapeHtml(author.display_name || author.notes || "未填写备注")}</div>
+      </div>
+      <div style="text-align:right;">
+        <span class="chip">${fmtInt(author.post_count)} 帖</span>
+        <span class="chip">${fmtInt(author.mention_count)} 记录</span>
+      </div>
+    </div>
+  `).join("") : '<div class="empty">还没有跟踪用户</div>';
+}
+
+function mentionDetails(group) {
+  return group.mentions.map((mention) => {
+    const sourceCount = Array.isArray(mention.source_post_ids) ? mention.source_post_ids.length : 0;
+    const sectorLabel = mention.sector_label ? ` · ${mention.sector_label}` : "";
+    const judgmentState = mentionJudgmentState(mention);
+    const restoreText = isLlmJudgedMention(mention) ? "还原LLM" : "清除人工";
+    const proxyNote = mention.is_sector_proxy
+      ? `<div class="proxy-note">由板块映射到龙头股${escapeHtml(sectorLabel)}${mention.proxy_reason ? `：${escapeHtml(mention.proxy_reason)}` : ""}</div>`
+      : "";
+    return `
+      <div class="mention-item">
+        <div class="mention-meta">
+          <strong>${escapeHtml(mention.mention_date)}</strong>
+          <span class="chip ${sentimentClass(mention.sentiment)}">${sentimentTextForMention(mention)}</span>
+          <span class="chip info">${sentimentSourceTextForMention(mention)}</span>
+          ${mention.is_sector_proxy ? `<span class="chip warn">板块代理${escapeHtml(sectorLabel)}</span>` : `<span class="chip">直接提及</span>`}
+          <span>当天 ${fmtInt(mention.mention_count)} 次</span>
+          <span>提及价 ${fmtPrice(mention.mention_close)}</span>
+          <span>${escapeHtml(mention.analysis_source || "未标记")}</span>
+          ${sourceCount ? `<span>来源帖 ${fmtInt(sourceCount)} 条</span>` : ""}
+        </div>
+        <div class="mention-actions">
+          <select data-action="sentiment-select" data-mention-id="${mention.id}">
+            <option value="bullish" ${mention.sentiment === "bullish" ? "selected" : ""}>看多</option>
+            <option value="bearish" ${mention.sentiment === "bearish" ? "selected" : ""}>看空</option>
+            <option value="unknown" ${(mention.sentiment || "unknown") === "unknown" ? "selected" : ""}>无法判断</option>
+          </select>
+          <button class="link" type="button" data-action="save-sentiment" data-mention-id="${mention.id}">保存</button>
+          <button class="link" type="button" data-action="restore-sentiment" data-mention-id="${mention.id}" ${judgmentState === "manual" ? "" : "disabled"}>${restoreText}</button>
+        </div>
+        ${proxyNote}
+        <div class="mention-excerpt">${escapeHtml(mention.source_text_excerpt || "")}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+function groupDetailsRow(group) {
+  if (!state.expandedGroups.has(group.key)) return "";
+  return `
+    <tr class="detail-row">
+      <td colspan="8">
+        <div class="details-panel">
+          <div class="details-head">
+            <div>
+              <strong>${escapeHtml(group.symbol)} · ${sentimentTextForGroup(group)}明细</strong>
+              <div class="sub">
+                起点 ${escapeHtml(group.entry_date || group.first_date || "-")}
+                · 最近 ${escapeHtml(group.last_date || "-")}
+                · ${fmtInt(group.total_count)} 次提及
+              </div>
+            </div>
+            <button class="link" type="button" data-action="toggle-details" data-key="${escapeHtml(group.key)}">收起</button>
+          </div>
+          <div class="mention-list">${mentionDetails(group)}</div>
+        </div>
+      </td>
+    </tr>
+  `;
+}
+
+function compareDirection(a, b) {
+  const order = {bullish: 0, bearish: 1, neutral: 2, unknown: 3};
+  return (order[a] ?? 9) - (order[b] ?? 9);
+}
+
+function metricForSort(group, sort) {
+  if (sort === "returnDesc" || sort === "returnAsc") return numericOrNull(group.signal_return);
+  if (sort === "count") return Number(group.total_count || 0);
+  return Date.parse(group.last_date || "") || 0;
+}
+
+function buildSymbolBuckets(groups, sort) {
+  const buckets = new Map();
+  for (const group of groups) {
+    const key = group.symbol || "";
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        symbol: key,
+        company_name: group.company_name || group.exchange || "",
+        groups: [],
+        latest: group.last_date || "",
+        total_count: 0,
+        author_ids: new Set(),
+        directions: new Set(),
+        best_return: null,
+        worst_return: null,
+      });
+    }
+    const bucket = buckets.get(key);
+    bucket.groups.push(group);
+    bucket.total_count += Number(group.total_count || 0);
+    bucket.author_ids.add(group.author_id);
+    bucket.directions.add(`${group.primary_sentiment || "unknown"}:${group.judgment_state || "pending"}`);
+    if (String(group.last_date || "").localeCompare(String(bucket.latest || "")) > 0) {
+      bucket.latest = group.last_date || "";
+    }
+    const value = numericOrNull(group.signal_return);
+    if (value !== null) {
+      bucket.best_return = bucket.best_return === null ? value : Math.max(bucket.best_return, value);
+      bucket.worst_return = bucket.worst_return === null ? value : Math.min(bucket.worst_return, value);
+    }
+  }
+
+  const bucketsList = Array.from(buckets.values());
+  bucketsList.sort((a, b) => {
+    if (sort === "symbol") return String(a.symbol).localeCompare(String(b.symbol));
+    if (sort === "returnDesc") return Number(b.best_return ?? -999) - Number(a.best_return ?? -999);
+    if (sort === "returnAsc") return Number(a.worst_return ?? 999) - Number(b.worst_return ?? 999);
+    if (sort === "count") return b.total_count - a.total_count;
+    return String(b.latest).localeCompare(String(a.latest));
+  });
+
+  for (const bucket of bucketsList) {
+    bucket.groups.sort((a, b) => {
+      const authorCompare = String(a.author_handle || "").localeCompare(String(b.author_handle || ""));
+      if (authorCompare !== 0) return authorCompare;
+      const metricA = metricForSort(a, sort);
+      const metricB = metricForSort(b, sort);
+      if (sort === "returnDesc" || sort === "count") {
+        const diff = Number(metricB ?? -999) - Number(metricA ?? -999);
+        if (diff !== 0) return diff;
+      } else if (sort === "returnAsc") {
+        const diff = Number(metricA ?? 999) - Number(metricB ?? 999);
+        if (diff !== 0) return diff;
+      } else {
+        const dateCompare = String(b.last_date || "").localeCompare(String(a.last_date || ""));
+        if (dateCompare !== 0) return dateCompare;
+      }
+      return compareDirection(a.primary_sentiment, b.primary_sentiment);
+    });
+  }
+  return bucketsList;
+}
+
+function symbolHeaderRow(bucket) {
+  return `
+    <tr class="symbol-group-row">
+      <td colspan="8">
+        <div class="group-meta">
+          <span>${escapeHtml(bucket.symbol)}</span>
+          ${bucket.company_name ? `<span class="muted">${escapeHtml(bucket.company_name)}</span>` : ""}
+          <span class="chip">${fmtInt(bucket.author_ids.size)} 用户</span>
+          <span class="chip">${fmtInt(bucket.directions.size)} 方向</span>
+          <span class="chip">${fmtInt(bucket.total_count)} 次提及</span>
+          <span class="muted">最近 ${escapeHtml(bucket.latest || "-")}</span>
+        </div>
+      </td>
+    </tr>
+  `;
+}
+
+function renderGroupRow(group) {
+  const retClass = returnClass(group.signal_return);
+  const expanded = state.expandedGroups.has(group.key);
+  const sectorLabel = Array.isArray(group.sector_labels) && group.sector_labels.length
+    ? ` · ${group.sector_labels.join(", ")}`
+    : "";
+  const kindChips = group.is_sector_proxy
+    ? `<span class="chip warn">板块代理${escapeHtml(sectorLabel)}</span>${group.has_direct_stock ? '<span class="chip">含直接提及</span>' : ""}`
+    : '<span class="chip">直接提及</span>';
+  return `
+    <tr>
+      <td>
+        <strong>${escapeHtml(group.symbol)}</strong>
+        <div class="sub">${escapeHtml(group.company_name || group.exchange || "")}</div>
+      </td>
+      <td>${escapeHtml(group.author_handle)}</td>
+      <td>
+        <span class="chip ${sentimentClass(group.primary_sentiment)}">${sentimentTextForGroup(group)}</span>
+        <div class="sub">${sentimentSourceTextForGroup(group)}</div>
+      </td>
+      <td>
+        ${fmtInt(group.days)} 天
+        <div class="sub">${fmtInt(group.total_count)} 次提及</div>
+      </td>
+      <td>
+        起点 ${escapeHtml(group.entry_date || group.first_date || "-")}
+        <div class="sub">最近 ${escapeHtml(group.last_date || "-")}</div>
+      </td>
+      <td>
+        ${fmtPrice(group.entry_mention.mention_close)}
+        <div class="sub">最新 ${fmtPrice(group.latest_close)} · ${escapeHtml(group.latest_price_date || "-")}</div>
+      </td>
+      <td>
+        <strong class="num ${retClass}">${fmtPct(group.signal_return)}</strong>
+        <div class="sub">股价 ${fmtPct(group.raw_return)}</div>
+      </td>
+      <td>
+        ${kindChips}
+        <div style="margin-top:6px;">
+          <button class="link" type="button" data-action="toggle-details" data-key="${escapeHtml(group.key)}">
+            ${expanded ? "收起" : "明细"}
+          </button>
+        </div>
+      </td>
+    </tr>
+    ${groupDetailsRow(group)}
+  `;
+}
+
+function renderGroups() {
+  const q = $("searchInput").value.trim().toLowerCase();
+  const author = $("authorFilter").value;
+  const sentiment = $("sentimentFilter").value;
+  const sort = $("sortSelect").value;
+  let groups = [...state.groups];
+
+  if (author) groups = groups.filter((group) => String(group.author_id) === author);
+  if (sentiment === "unknown_pending") {
+    groups = groups.filter((group) => group.primary_sentiment === "unknown" && group.judgment_state === "pending");
+  } else if (sentiment === "unknown_llm") {
+    groups = groups.filter((group) => group.primary_sentiment === "unknown" && group.judgment_state !== "pending");
+  } else if (sentiment) {
+    groups = groups.filter((group) => group.primary_sentiment === sentiment);
+  }
+  if (q) {
+    groups = groups.filter((group) => {
+      const haystack = [
+        group.symbol,
+        group.company_name,
+        group.author_handle,
+        group.sector_label,
+        ...group.mentions.map((item) => item.source_text_excerpt),
+      ].join(" ").toLowerCase();
+      return haystack.includes(q);
+    });
+  }
+
+  const buckets = buildSymbolBuckets(groups, sort);
+  $("symbolCount").textContent = fmtInt(groups.length);
+  $("symbolRows").innerHTML = buckets.length
+    ? buckets.map((bucket) => (
+      symbolHeaderRow(bucket) + bucket.groups.map(renderGroupRow).join("")
+    )).join("")
+    : '<tr><td colspan="8"><div class="empty">没有匹配记录</div></td></tr>';
+}
+
+async function loadDashboard() {
+  $("refreshBtn").disabled = true;
+  setStatus("加载中...");
+  try {
+    const data = await api("/x-signals/dashboard?limit=1000");
+    state.dashboard = data.dashboard;
+    state.groups = buildGroups(data.dashboard.mentions || []);
+    $("postCount").textContent = fmtInt(data.dashboard.total_posts);
+    $("mentionCount").textContent = fmtInt(data.dashboard.total_mentions);
+    renderAuthors(data.dashboard.authors || []);
+    renderGroups();
+    setStatus(`已刷新 ${new Date().toLocaleString("zh-CN")}`);
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    $("refreshBtn").disabled = false;
+  }
+}
+
+async function addAuthor() {
+  const handle = $("handleInput").value.trim();
+  if (!handle) return;
+  $("addAuthorBtn").disabled = true;
+  try {
+    await api("/x-signals/authors", {
+      method: "POST",
+      body: JSON.stringify({handle}),
+    });
+    $("handleInput").value = "";
+    await loadDashboard();
+  } catch (error) {
+    setStatus(error.message, true);
+  } finally {
+    $("addAuthorBtn").disabled = false;
+  }
+}
+
+async function setMentionSentiment(mentionId, sentiment) {
+  await api(`/x-signals/mentions/${mentionId}/sentiment`, {
+    method: "PATCH",
+    body: JSON.stringify({sentiment}),
+  });
+  await loadDashboard();
+}
+
+async function restoreMentionSentiment(mentionId) {
+  await api(`/x-signals/mentions/${mentionId}/sentiment/restore`, {method: "POST"});
+  await loadDashboard();
+}
+
+$("refreshBtn").addEventListener("click", loadDashboard);
+$("addAuthorBtn").addEventListener("click", addAuthor);
+$("searchInput").addEventListener("input", renderGroups);
+$("authorFilter").addEventListener("change", renderGroups);
+$("sentimentFilter").addEventListener("change", renderGroups);
+$("sortSelect").addEventListener("change", renderGroups);
+$("symbolRows").addEventListener("click", (event) => {
+  const saveButton = event.target.closest('button[data-action="save-sentiment"]');
+  if (saveButton) {
+    const mentionId = saveButton.dataset.mentionId;
+    const actions = saveButton.closest(".mention-actions");
+    const select = actions?.querySelector('select[data-action="sentiment-select"]');
+    if (!mentionId || !select) return;
+    saveButton.disabled = true;
+    select.disabled = true;
+    setStatus("保存判断结果...");
+    setMentionSentiment(mentionId, select.value).then(() => {
+      setStatus("判断结果已保存");
+    }).catch((error) => {
+      setStatus(error.message, true);
+      saveButton.disabled = false;
+      select.disabled = false;
+    });
+    return;
+  }
+  const restoreButton = event.target.closest('button[data-action="restore-sentiment"]');
+  if (restoreButton) {
+    const mentionId = restoreButton.dataset.mentionId;
+    if (!mentionId) return;
+    restoreButton.disabled = true;
+    setStatus("还原判断结果...");
+    restoreMentionSentiment(mentionId).catch((error) => {
+      setStatus(error.message, true);
+      restoreButton.disabled = false;
+    });
+    return;
+  }
+  const button = event.target.closest('button[data-action="toggle-details"]');
+  if (!button) return;
+  const key = button.dataset.key;
+  if (!key) return;
+  if (state.expandedGroups.has(key)) state.expandedGroups.delete(key);
+  else state.expandedGroups.add(key);
+  renderGroups();
+});
+loadDashboard();
+</script>
+</body>
+</html>

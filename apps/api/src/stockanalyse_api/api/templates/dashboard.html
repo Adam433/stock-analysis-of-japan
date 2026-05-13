@@ -3307,7 +3307,8 @@
     document.getElementById('runGaSearch').disabled = Boolean(running);
     document.getElementById('runGaSearch').textContent = running ? 'GA 运行中…' : '启动 GA';
     document.getElementById('resumeGaSearch').disabled = !(run && run.status !== 'completed');
-    document.getElementById('cancelGaSearch').disabled = !(run && run.status === 'running');
+    document.getElementById('cancelGaSearch').disabled = !(run && (run.status === 'running' || run.status === 'cancel_requested'));
+    document.getElementById('cancelGaSearch').textContent = run?.status === 'cancel_requested' ? '确认取消' : '取消 GA';
   }
 
   function renderGaRuns(runs) {
@@ -3458,7 +3459,7 @@
     try {
       const data = await api('POST', `/backtests/ga/runs/${state.gaRunId}/cancel`);
       renderGaRun(data.ga_run);
-      showToast('已请求取消 GA');
+      showToast(data.ga_run.status === 'cancelled' ? 'GA 已取消' : '已请求取消 GA');
     } catch (err) {
       showToast('取消 GA 失败: ' + err.message);
     }
@@ -4114,6 +4115,7 @@
     document.getElementById('runGaSearch').textContent = '启动 GA';
     document.getElementById('resumeGaSearch').disabled = true;
     document.getElementById('cancelGaSearch').disabled = true;
+    document.getElementById('cancelGaSearch').textContent = '取消 GA';
   }
 
   function setMarket(market) {

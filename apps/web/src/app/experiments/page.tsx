@@ -183,6 +183,8 @@ export default async function ExperimentsPage() {
         <Link href="/backtests">回测</Link>
         <span>/</span>
         <span>实验</span>
+        <span>/</span>
+        <Link href="/x-signal-tracker">X 信号追踪</Link>
       </nav>
 
       <section className="screen-panel">

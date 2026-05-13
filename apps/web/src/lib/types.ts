@@ -168,6 +168,65 @@ export type WatchlistEntry = {
   added_at: string;
 };
 
+export type XSignalAuthor = {
+  id: number;
+  handle: string;
+  display_name: string | null;
+  notes: string | null;
+  tracking_status: string;
+  post_count: number;
+  mention_count: number;
+  last_fetch_requested_at: string | null;
+  last_analyzed_at: string | null;
+};
+
+export type XSignalFetchRequest = {
+  id: number;
+  author_id: number;
+  lookback_value: number;
+  lookback_unit: string;
+  requested_from: string;
+  requested_to: string;
+  source_url: string;
+  status: string;
+  created_at: string;
+};
+
+export type XSignalMention = {
+  id: number;
+  author_id: number;
+  author_handle: string;
+  post_id: number | null;
+  symbol: string;
+  exchange: string | null;
+  company_name: string | null;
+  mention_kind: string;
+  sector_label: string | null;
+  sentiment: string;
+  confidence: string | null;
+  mention_date: string;
+  mention_count: number;
+  mentioned_at: string;
+  is_sector_proxy: boolean;
+  proxy_reason: string | null;
+  source_text_excerpt: string | null;
+  source_post_ids: number[];
+  analysis_source: string;
+  mention_price_date: string | null;
+  mention_close: string | null;
+  latest_price_date: string | null;
+  latest_close: string | null;
+  cumulative_return: string | null;
+};
+
+export type XSignalDashboard = {
+  authors: XSignalAuthor[];
+  mentions: XSignalMention[];
+  total_posts: number;
+  total_mentions: number;
+  latest_fetch_request: XSignalFetchRequest | null;
+};
+
 export type Candlestick = {
   trade_date: string;
   open: string | null;

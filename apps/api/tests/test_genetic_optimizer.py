@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import time
 from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
@@ -18,7 +19,9 @@ import stockanalyse_api.domain.screens.models  # noqa: F401
 import stockanalyse_api.domain.watchlists.models  # noqa: F401
 from stockanalyse_api.db.base import Base
 from stockanalyse_api.domain.backtests.models import GaEvent, GaIndividual
+from stockanalyse_api.services.dashboard_strategy_backtest import BacktestCancelledError
 from stockanalyse_api.services.genetic_optimizer import (
+    cancel_ga_run,
     create_ga_run,
     execute_ga_run,
     list_ga_events,
@@ -484,6 +487,65 @@ class GeneticOptimizerTests(unittest.TestCase):
             2,
         )
         self.assertIn("run_resumed", [event.event_type for event in events])
+
+    def test_execute_ga_run_cancels_during_candidate_evaluation(self) -> None:
+        def canceling_evaluator(*args, **kwargs):
+            run.status = "cancel_requested"
+            session.commit()
+            time.sleep(0.6)
+            should_cancel = kwargs["should_cancel"]
+            self.assertTrue(should_cancel())
+            raise BacktestCancelledError()
+
+        with self.session_factory() as session:
+            run = create_ga_run(
+                session,
+                train_start_date=date(2018, 1, 1),
+                train_end_date=date(2022, 12, 31),
+                gene_space={
+                    "rps_threshold": [70, 80],
+                    "selected_rps_windows": [[120, 250]],
+                    "use_cup_handle": [False],
+                },
+                initial_population=[{"rps_threshold": 70}, {"rps_threshold": 80}],
+                fitness_config={
+                    "require_complete_benchmark": False,
+                    "reuse_parameter_window_evaluations": False,
+                },
+                population_size=2,
+                max_generations=2,
+                random_seed=17,
+            )
+
+            with patch(
+                "stockanalyse_api.services.genetic_optimizer.evaluate_strategy_parameter_set",
+                side_effect=canceling_evaluator,
+            ):
+                cancelled = execute_ga_run(session, run.id)
+            individuals = list_ga_individuals(session, run_id=run.id)
+            events = [event.event_type for event in list_ga_events(session, run_id=run.id)]
+
+        self.assertEqual(cancelled.status, "cancelled")
+        self.assertEqual(cancelled.completed_individuals, 0)
+        self.assertEqual(individuals, [])
+        self.assertIn("run_cancelled", events)
+
+    def test_cancel_ga_run_keeps_running_run_in_cancel_requested_first(self) -> None:
+        with self.session_factory() as session:
+            run = create_ga_run(
+                session,
+                train_start_date=date(2018, 1, 1),
+                train_end_date=date(2022, 12, 31),
+                population_size=2,
+                max_generations=1,
+                random_seed=17,
+            )
+
+            first_cancel = cancel_ga_run(session, run.id).status
+            second_cancel = cancel_ga_run(session, run.id).status
+
+        self.assertEqual(first_cancel, "cancel_requested")
+        self.assertEqual(second_cancel, "cancelled")
 
     def test_execute_ga_run_reuses_parameter_window_evaluation_cache(self) -> None:
         def fake_evaluator(*args, **kwargs):

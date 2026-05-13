@@ -158,6 +158,8 @@ export default async function ScreenConfigurationPage(props: {
         <Link href="/watchlist">观察列表</Link>
         <span>/</span>
         <Link href="/backtests">回测</Link>
+        <span>/</span>
+        <Link href="/x-signal-tracker">X 信号追踪</Link>
       </nav>
       <WorkflowTrustBanner workflowLabel="筛选工作流" health={health} error={healthError} />
       <StrategyConfigPanel
