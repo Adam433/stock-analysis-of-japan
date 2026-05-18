@@ -49,6 +49,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cutoff", default="2024-09-12")
     parser.add_argument("--until", default="2026-05-13")
     parser.add_argument("--sleep", type=float, default=0.01)
+    parser.add_argument(
+        "--skip-analysis",
+        action="store_true",
+        help="Only import captured posts; do not run the legacy extraction analysis.",
+    )
     return parser.parse_args()
 
 
@@ -309,7 +314,7 @@ def main() -> None:
     with SessionLocal() as session:
         author = session.execute(select(XSignalAuthor).where(XSignalAuthor.handle == handle)).scalar_one()
         import_result = import_x_signal_posts(session, author.id, import_posts)
-        analysis_result = analyze_x_signal_author_posts(session, author.id)
+        analysis_result = None if args.skip_analysis else analyze_x_signal_author_posts(session, author.id)
         total_posts = session.execute(
             select(func.count(XSignalPost.id)).where(XSignalPost.author_id == author.id)
         ).scalar_one()
@@ -327,7 +332,7 @@ def main() -> None:
                 "import_created": import_result.created_count,
                 "import_updated": import_result.updated_count,
                 "total_posts": int(total_posts),
-                "analysis_mentions": analysis_result.mention_count,
+                "analysis_mentions": analysis_result.mention_count if analysis_result else None,
                 "total_mentions": int(total_mentions),
                 "oldest": oldest.isoformat() if oldest else None,
                 "newest": newest.isoformat() if newest else None,

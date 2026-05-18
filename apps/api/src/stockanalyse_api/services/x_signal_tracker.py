@@ -26,6 +26,13 @@ LEGACY_ANALYSIS_SOURCES = ("heuristic-v1",)
 PREFERRED_US_EXCHANGES = ("NASDAQ", "NYSE", "AMEX", "ARCA", "US")
 INSTRUMENT_SYMBOL_ALIASES = {
     "GOOG": ("GOOGL",),
+    "GOOGL": ("GOOG",),
+    "ETOR": ("ETORO",),
+    "ETORO": ("ETOR",),
+}
+TRACKER_SYMBOL_ALIASES = {
+    "GOOGL": "GOOG",
+    "ETORO": "ETOR",
 }
 TOKEN_STOPWORDS = {
     "A",
@@ -133,7 +140,9 @@ class XSignalAuthorSummary:
     notes: str | None
     tracking_status: str
     post_count: int
+    analyzed_post_count: int
     mention_count: int
+    latest_posted_at: str | None
     last_fetch_requested_at: str | None
     last_analyzed_at: str | None
 
@@ -271,8 +280,10 @@ def _is_llm_analysis_source(analysis_source: str | None) -> bool:
     return bool(analysis_source) and analysis_source not in (ANALYSIS_SOURCE, *LEGACY_ANALYSIS_SOURCES)
 
 
-def _iso_datetime(value: datetime | None) -> str | None:
-    return value.isoformat() if value else None
+def _iso_datetime(value: datetime | str | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat() if isinstance(value, datetime) else value
 
 
 def _decimal_to_string(value: Decimal | None) -> str | None:
@@ -344,7 +355,17 @@ def add_x_signal_author(
 
 def list_x_signal_authors(session, *, author_id: int | None = None) -> list[XSignalAuthorSummary]:
     post_counts = (
-        select(XSignalPost.author_id, func.count(XSignalPost.id).label("post_count"))
+        select(
+            XSignalPost.author_id,
+            func.count(XSignalPost.id).label("post_count"),
+            func.max(XSignalPost.posted_at).label("latest_posted_at"),
+        )
+        .group_by(XSignalPost.author_id)
+        .subquery()
+    )
+    analyzed_post_counts = (
+        select(XSignalPost.author_id, func.count(XSignalPost.id).label("analyzed_post_count"))
+        .where(XSignalPost.raw_payload_json.like('%"x_signal_llm_analysis"%'))
         .group_by(XSignalPost.author_id)
         .subquery()
     )
@@ -357,9 +378,12 @@ def list_x_signal_authors(session, *, author_id: int | None = None) -> list[XSig
         select(
             XSignalAuthor,
             func.coalesce(post_counts.c.post_count, 0),
+            func.coalesce(analyzed_post_counts.c.analyzed_post_count, 0),
             func.coalesce(mention_counts.c.mention_count, 0),
+            post_counts.c.latest_posted_at,
         )
         .outerjoin(post_counts, post_counts.c.author_id == XSignalAuthor.id)
+        .outerjoin(analyzed_post_counts, analyzed_post_counts.c.author_id == XSignalAuthor.id)
         .outerjoin(mention_counts, mention_counts.c.author_id == XSignalAuthor.id)
         .order_by(XSignalAuthor.handle.asc())
     )
@@ -375,11 +399,13 @@ def list_x_signal_authors(session, *, author_id: int | None = None) -> list[XSig
             notes=author.notes,
             tracking_status=author.tracking_status,
             post_count=int(post_count),
+            analyzed_post_count=int(analyzed_post_count),
             mention_count=int(mention_count),
+            latest_posted_at=_iso_datetime(latest_posted_at),
             last_fetch_requested_at=_iso_datetime(author.last_fetch_requested_at),
             last_analyzed_at=_iso_datetime(author.last_analyzed_at),
         )
-        for author, post_count, mention_count in rows
+        for author, post_count, analyzed_post_count, mention_count, latest_posted_at in rows
     ]
 
 
@@ -493,7 +519,12 @@ def import_x_signal_posts(
 
 
 def _find_instrument(session, symbol: str) -> Instrument | None:
-    candidate_symbols = (symbol.upper(), *INSTRUMENT_SYMBOL_ALIASES.get(symbol.upper(), ()))
+    normalized_symbol = _normalize_tracker_symbol(symbol)
+    candidate_symbols = (
+        normalized_symbol,
+        *INSTRUMENT_SYMBOL_ALIASES.get(normalized_symbol, ()),
+        *INSTRUMENT_SYMBOL_ALIASES.get(symbol.upper(), ()),
+    )
     for candidate_symbol in candidate_symbols:
         matches = session.execute(
             select(Instrument).where(func.upper(Instrument.symbol) == candidate_symbol)
@@ -505,6 +536,11 @@ def _find_instrument(session, symbol: str) -> Instrument | None:
         if matches:
             return matches[0]
     return None
+
+
+def _normalize_tracker_symbol(symbol: str) -> str:
+    normalized = symbol.strip().upper().lstrip("$")
+    return TRACKER_SYMBOL_ALIASES.get(normalized, normalized)
 
 
 def _extract_symbols(session, content: str) -> list[tuple[str, Instrument | None]]:
@@ -838,7 +874,7 @@ def apply_x_signal_llm_analysis_results(
                 item_count=len(analysis.items),
             )
             for item in analysis.items:
-                symbol = item.symbol.strip().upper().lstrip("$")
+                symbol = _normalize_tracker_symbol(item.symbol)
                 if not symbol:
                     continue
                 mention_kind = _normalize_mention_kind(item.mention_kind, item.is_sector_proxy)

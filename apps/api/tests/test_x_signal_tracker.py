@@ -102,6 +102,9 @@ class XSignalTrackerTests(unittest.TestCase):
         self.assertEqual(import_result.created_count, 1)
         self.assertEqual(dashboard.total_posts, 1)
         self.assertEqual(dashboard.latest_fetch_request.status, "imported")
+        self.assertEqual(dashboard.authors[0].post_count, 1)
+        self.assertEqual(dashboard.authors[0].analyzed_post_count, 0)
+        self.assertTrue((dashboard.authors[0].latest_posted_at or "").startswith("2026-01-02T15:00:00"))
 
     def test_analysis_records_stock_sentiment_and_price_return(self) -> None:
         self._seed_us_stock()
@@ -213,6 +216,46 @@ class XSignalTrackerTests(unittest.TestCase):
         self.assertEqual(mention.symbol, "GOOG")
         self.assertEqual(mention.exchange, "NASDAQ")
         self.assertEqual(mention.company_name, "GOOGL Corp")
+        self.assertEqual(mention.mention_close, "100.000000")
+        self.assertEqual(mention.latest_close, "125.000000")
+
+    def test_llm_analysis_normalizes_nonstandard_symbols_to_tracker_tickers(self) -> None:
+        self._seed_us_stock("ETOR")
+
+        with self.session_factory() as session:
+            author = add_x_signal_author(session, "ipo_reader")
+            import_x_signal_posts(
+                session,
+                author.id,
+                [
+                    ImportedXPost(
+                        posted_at=datetime(2026, 1, 2, 15, 0, tzinfo=UTC),
+                        content="$ETORO is a great add here.",
+                    )
+                ],
+            )
+            apply_x_signal_llm_analysis_results(
+                session,
+                [
+                    XSignalLLMPostAnalysis(
+                        post_id=1,
+                        items=[
+                            XSignalLLMAnalysisItem(
+                                symbol="ETORO",
+                                sentiment="bullish",
+                                confidence=Decimal("0.9000"),
+                                reason="原文明确说 eToro 是 great add。",
+                            )
+                        ],
+                    )
+                ],
+                analysis_source="5.4mini-High",
+            )
+            mention = get_x_signal_dashboard(session).mentions[0]
+
+        self.assertEqual(mention.symbol, "ETOR")
+        self.assertEqual(mention.exchange, "NASDAQ")
+        self.assertEqual(mention.company_name, "ETOR Corp")
         self.assertEqual(mention.mention_close, "100.000000")
         self.assertEqual(mention.latest_close, "125.000000")
 
@@ -401,6 +444,9 @@ class XSignalTrackerTests(unittest.TestCase):
         self.assertEqual(result.analyzed_posts, 1)
         self.assertEqual(result.mention_count, 0)
         self.assertEqual(dashboard.total_mentions, 0)
+        self.assertEqual(dashboard.authors[0].post_count, 1)
+        self.assertEqual(dashboard.authors[0].analyzed_post_count, 1)
+        self.assertTrue((dashboard.authors[0].latest_posted_at or "").startswith("2026-01-02T15:00:00"))
         self.assertIsNotNone(post)
         self.assertIn("5.4mini-High", post.raw_payload_json or "")
 

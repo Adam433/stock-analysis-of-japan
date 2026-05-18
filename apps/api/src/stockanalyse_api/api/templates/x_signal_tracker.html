@@ -356,6 +356,11 @@ function fmtPct(value) {
   return `${sign}${num.toFixed(2)}%`;
 }
 
+function fmtDateTime(value) {
+  if (!value) return "-";
+  return String(value).replace("T", " ").slice(0, 16);
+}
+
 function returnClass(value) {
   const num = Number(value);
   if (!Number.isFinite(num) || num === 0) return "";
@@ -521,9 +526,11 @@ function renderAuthors(authors) {
       <div>
         <strong>${escapeHtml(author.handle)}</strong>
         <div class="sub">${escapeHtml(author.display_name || author.notes || "未填写备注")}</div>
+        <div class="sub">最后发帖 ${escapeHtml(fmtDateTime(author.latest_posted_at))}</div>
       </div>
       <div style="text-align:right;">
         <span class="chip">${fmtInt(author.post_count)} 帖</span>
+        <span class="chip info">${fmtInt(author.analyzed_post_count)} 已分析</span>
         <span class="chip">${fmtInt(author.mention_count)} 记录</span>
       </div>
     </div>
